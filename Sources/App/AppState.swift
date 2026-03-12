@@ -13,12 +13,45 @@ final class AppState {
     private var vmEngine: VMEngine?
     private var syncTask: Task<Void, Never>?
 
+    private let githubClientFactory: () -> any GitHubClientProtocol
+    private let vmEngineFactory: (String, String, CacheConfiguration) -> VMEngine
+
     init() {
         let configStore = ConfigStore()
         self.configStore = configStore
         self.queueViewModel = QueueViewModel()
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
+        self.githubClientFactory = { GitHubClient() }
+        self.vmEngineFactory = { cachePath, basePath, cacheConfig in
+            VMEngine(
+                cacheDirectoryPath: cachePath,
+                baseImagePath: basePath,
+                cacheConfig: cacheConfig
+            )
+        }
+    }
+
+    init(
+        configStore: ConfigStore,
+        githubClientFactory: @escaping () -> any GitHubClientProtocol = { GitHubClient() },
+        vmEngineFactory: @escaping (String, String, CacheConfiguration) -> VMEngine = {
+            cachePath,
+            basePath,
+            cacheConfig in
+            VMEngine(
+                cacheDirectoryPath: cachePath,
+                baseImagePath: basePath,
+                cacheConfig: cacheConfig
+            )
+        }
+    ) {
+        self.configStore = configStore
+        self.queueViewModel = QueueViewModel()
+        self.vmStatusViewModel = VMStatusViewModel()
+        self.settingsViewModel = SettingsViewModel(configStore: configStore)
+        self.githubClientFactory = githubClientFactory
+        self.vmEngineFactory = vmEngineFactory
     }
 
     // MARK: - Engine Lifecycle
@@ -30,17 +63,17 @@ final class AppState {
             return
         }
 
-        let client = GitHubClient()
+        let client = githubClientFactory()
         let githubEngine = GitHubEngine(
             client: client,
             cacheDirectory: URL(fileURLWithPath: configStore.cacheDirectoryPath)
         )
         self.githubEngine = githubEngine
 
-        let vmEngine = VMEngine(
-            cacheDirectoryPath: configStore.cacheDirectoryPath,
-            baseImagePath: resolvedBaseImagePath(),
-            cacheConfig: configStore.cacheConfig
+        let vmEngine = vmEngineFactory(
+            configStore.cacheDirectoryPath,
+            resolvedBaseImagePath(),
+            configStore.cacheConfig
         )
         self.vmEngine = vmEngine
         vmStatusViewModel.baseImageExists = vmEngine.baseImageExists
@@ -173,7 +206,8 @@ final class AppState {
             return configStore.baseImagePath
         }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport
+        return
+            appSupport
             .appendingPathComponent("Tarmac")
             .appendingPathComponent("BaseImage.img")
             .path

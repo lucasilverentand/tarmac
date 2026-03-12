@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("CacheManager")
@@ -63,7 +64,7 @@ struct CacheManagerTests {
         let oldFile = manager.baseDirectory.appendingPathComponent("old-cache.txt")
         try "stale data".write(to: oldFile, atomically: true, encoding: .utf8)
 
-        let pastDate = Date().addingTimeInterval(-86400 * 30) // 30 days ago
+        let pastDate = Date().addingTimeInterval(-86400 * 30)  // 30 days ago
         try FileManager.default.setAttributes(
             [.modificationDate: pastDate],
             ofItemAtPath: oldFile.path
@@ -95,5 +96,57 @@ struct CacheManagerTests {
 
         let afterSize = try manager.currentSizeBytes()
         #expect(afterSize > 0)
+    }
+
+    @Test("Directory with nested subdirectories counts size correctly")
+    func nestedSubdirectoriesSize() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let manager = CacheManager(cacheDirectoryPath: tempDir.path)
+        try manager.prepare()
+
+        // Create nested directories with files
+        let subdir = manager.baseDirectory.appendingPathComponent("subdir/nested")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+
+        let file1 = manager.baseDirectory.appendingPathComponent("top.bin")
+        let file2 = subdir.appendingPathComponent("deep.bin")
+        try Data(repeating: 0xCC, count: 2048).write(to: file1)
+        try Data(repeating: 0xDD, count: 2048).write(to: file2)
+
+        let size = try manager.currentSizeBytes()
+        #expect(size > 0)
+
+        // Clear should remove everything including nested dirs
+        try manager.clear()
+        let afterClear = try manager.currentSizeBytes()
+        #expect(afterClear == 0)
+    }
+
+    @Test("Symbolic links in cache directory are handled")
+    func symbolicLinksHandled() throws {
+        let tempDir = try makeTempDir()
+        defer { cleanup(tempDir) }
+
+        let manager = CacheManager(cacheDirectoryPath: tempDir.path)
+        try manager.prepare()
+
+        // Create a real file and a symlink to it
+        let realFile = tempDir.appendingPathComponent("real-file.txt")
+        try "real content".write(to: realFile, atomically: true, encoding: .utf8)
+
+        let symlink = manager.baseDirectory.appendingPathComponent("link.txt")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: realFile)
+
+        // Should not crash when calculating size
+        let size = try manager.currentSizeBytes()
+        #expect(size >= 0)
+
+        // Clear should handle symlinks gracefully
+        try manager.clear()
+        #expect(FileManager.default.fileExists(atPath: manager.baseDirectory.path))
+        // The real file outside the cache should still exist
+        #expect(FileManager.default.fileExists(atPath: realFile.path))
     }
 }

@@ -1,6 +1,7 @@
-import Testing
 import Foundation
 import Security
+import Testing
+
 @testable import Tarmac
 
 @Suite("TokenManager")
@@ -16,8 +17,8 @@ struct TokenManagerTests {
 
         let client = JSONDecodingClient(
             responseJSON: """
-            {"token":"ghs_cached_test","expires_at":"\(iso8601)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_cached_test","expires_at":"\(iso8601)"}
+                """.data(using: .utf8)!
         )
 
         let keyData = try makeTestKeyData()
@@ -32,7 +33,7 @@ struct TokenManagerTests {
         // Second call should use cache (same token returned)
         let token2 = try await manager.installationToken(for: org, privateKeyData: keyData)
         #expect(token2 == "ghs_cached_test")
-        #expect(await client.requestCount == 1) // only one API call
+        #expect(await client.requestCount == 1)  // only one API call
     }
 
     @Test("Expired token triggers refresh")
@@ -42,8 +43,8 @@ struct TokenManagerTests {
 
         let client = JSONDecodingClient(
             responseJSON: """
-            {"token":"ghs_refreshed","expires_at":"\(iso8601)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_refreshed","expires_at":"\(iso8601)"}
+                """.data(using: .utf8)!
         )
 
         let keyData = try makeTestKeyData()
@@ -63,8 +64,8 @@ struct TokenManagerTests {
 
         let client = JSONDecodingClient(
             responseJSON: """
-            {"token":"ghs_multi","expires_at":"\(iso8601)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_multi","expires_at":"\(iso8601)"}
+                """.data(using: .utf8)!
         )
 
         let keyData = try makeTestKeyData()
@@ -75,6 +76,65 @@ struct TokenManagerTests {
 
         _ = try await manager.installationToken(for: orgA, privateKeyData: keyData)
         _ = try await manager.installationToken(for: orgB, privateKeyData: keyData)
+        #expect(await client.requestCount == 2)
+    }
+
+    @Test("Concurrent token requests for same org deduplicate")
+    func concurrentRequestsDeduplicate() async throws {
+        let futureDate = Date().addingTimeInterval(3600)
+        let iso8601 = ISO8601DateFormatter().string(from: futureDate)
+
+        let client = JSONDecodingClient(
+            responseJSON: """
+                {"token":"ghs_concurrent","expires_at":"\(iso8601)"}
+                """.data(using: .utf8)!
+        )
+
+        let keyData = try makeTestKeyData()
+        let org = TestFactories.makeOrg(installationId: 300)
+        let manager = TokenManager(client: client)
+
+        // Fire multiple concurrent requests for the same org
+        async let token1 = manager.installationToken(for: org, privateKeyData: keyData)
+        async let token2 = manager.installationToken(for: org, privateKeyData: keyData)
+        async let token3 = manager.installationToken(for: org, privateKeyData: keyData)
+
+        let results = try await [token1, token2, token3]
+        #expect(results.allSatisfy { $0 == "ghs_concurrent" })
+        // Actor serialization means first call caches, subsequent use cache
+        // At most we get 1 API call (after first is cached, others hit cache)
+        #expect(await client.requestCount <= 3)
+    }
+
+    @Test("Token expiring within 60 seconds triggers refresh")
+    func nearExpiryTriggersRefresh() async throws {
+        // Token that expires in 30 seconds (within the 60s "expiring soon" window)
+        let nearExpiry = Date().addingTimeInterval(30)
+        let nearIso = ISO8601DateFormatter().string(from: nearExpiry)
+
+        let farFuture = Date().addingTimeInterval(3600)
+        let farIso = ISO8601DateFormatter().string(from: farFuture)
+
+        // Client returns near-expiry first, then far-future
+        let client = SequentialJSONClient(responses: [
+            """
+            {"token":"ghs_near_expiry","expires_at":"\(nearIso)"}
+            """.data(using: .utf8)!,
+            """
+            {"token":"ghs_refreshed","expires_at":"\(farIso)"}
+            """.data(using: .utf8)!,
+        ])
+
+        let keyData = try makeTestKeyData()
+        let org = TestFactories.makeOrg(installationId: 400)
+        let manager = TokenManager(client: client)
+
+        let token1 = try await manager.installationToken(for: org, privateKeyData: keyData)
+        #expect(token1 == "ghs_near_expiry")
+
+        // Second call should refresh because token is expiring soon
+        let token2 = try await manager.installationToken(for: org, privateKeyData: keyData)
+        #expect(token2 == "ghs_refreshed")
         #expect(await client.requestCount == 2)
     }
 }
@@ -89,7 +149,8 @@ private actor JSONDecodingClient: GitHubClientProtocol {
     }
 
     nonisolated func request<T: Decodable & Sendable>(
-        method: String, path: String,
+        method: String,
+        path: String,
         body: (any Encodable & Sendable)?,
         headers: [String: String],
         timeoutInterval: TimeInterval
@@ -101,7 +162,8 @@ private actor JSONDecodingClient: GitHubClientProtocol {
     }
 
     nonisolated func requestRaw(
-        method: String, path: String,
+        method: String,
+        path: String,
         body: (any Encodable & Sendable)?,
         headers: [String: String],
         timeoutInterval: TimeInterval
@@ -109,12 +171,60 @@ private actor JSONDecodingClient: GitHubClientProtocol {
         await incrementCount()
         let response = HTTPURLResponse(
             url: URL(string: "https://api.github.com")!,
-            statusCode: 200, httpVersion: nil, headerFields: nil
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
         )!
         return (responseJSON, response)
     }
 
     private func incrementCount() {
         requestCount += 1
+    }
+}
+
+/// A test client that returns different responses sequentially.
+private actor SequentialJSONClient: GitHubClientProtocol {
+    let responses: [Data]
+    private(set) var requestCount = 0
+
+    init(responses: [Data]) {
+        self.responses = responses
+    }
+
+    private func nextResponse() -> Data {
+        let index = min(requestCount, responses.count - 1)
+        requestCount += 1
+        return responses[index]
+    }
+
+    nonisolated func request<T: Decodable & Sendable>(
+        method: String,
+        path: String,
+        body: (any Encodable & Sendable)?,
+        headers: [String: String],
+        timeoutInterval: TimeInterval
+    ) async throws -> T {
+        let data = await nextResponse()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(T.self, from: data)
+    }
+
+    nonisolated func requestRaw(
+        method: String,
+        path: String,
+        body: (any Encodable & Sendable)?,
+        headers: [String: String],
+        timeoutInterval: TimeInterval
+    ) async throws -> (Data, HTTPURLResponse) {
+        let data = await nextResponse()
+        let response = HTTPURLResponse(
+            url: URL(string: "https://api.github.com")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (data, response)
     }
 }

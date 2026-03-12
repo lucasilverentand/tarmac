@@ -4,16 +4,15 @@ import Virtualization
 @Observable
 @MainActor
 final class VMEngine: VMManagerProtocol {
-    private let lifecycle = VMLifecycle()
-    private let diskManager = DiskImageManager()
-    private let imageManager = ImageManager()
+    private let lifecycle: any VMLifecycleProtocol
+    private let diskManager: DiskImageManager
+    private let imageManager: ImageManager
     private let sharedDirManager: SharedDirectoryManager
     private let cacheManager: CacheManager
     private let platformStore: PlatformDataStore
     private let baseImageURL: URL
 
     private(set) var currentInstance: VMInstance?
-    private var virtualMachine: VZVirtualMachine?
     private var cacheConfig: CacheConfiguration
 
     var isRunning: Bool { currentInstance?.state == .running }
@@ -30,13 +29,19 @@ final class VMEngine: VMManagerProtocol {
         cacheDirectoryPath: String,
         baseImagePath: String,
         cacheConfig: CacheConfiguration = CacheConfiguration(),
-        platformStore: PlatformDataStore = PlatformDataStore()
+        platformStore: PlatformDataStore = PlatformDataStore(),
+        lifecycle: (any VMLifecycleProtocol)? = nil,
+        diskManager: DiskImageManager = DiskImageManager(),
+        imageManager: ImageManager = ImageManager()
     ) {
         self.sharedDirManager = SharedDirectoryManager(cacheDirectoryPath: cacheDirectoryPath)
         self.cacheManager = CacheManager(cacheDirectoryPath: cacheDirectoryPath)
         self.platformStore = platformStore
         self.baseImageURL = URL(fileURLWithPath: baseImagePath)
         self.cacheConfig = cacheConfig
+        self.lifecycle = lifecycle ?? VMLifecycle()
+        self.diskManager = diskManager
+        self.imageManager = imageManager
     }
 
     // MARK: - Base Image
@@ -80,14 +85,6 @@ final class VMEngine: VMManagerProtocol {
             cacheDirectoryURL = cacheManager.baseDirectory
         }
 
-        let vmConfiguration = try lifecycle.createConfiguration(
-            vmConfig: config,
-            diskPath: clonedDiskPath,
-            platformStore: platformStore,
-            sharedDirectoryURL: sharedDirectory,
-            cacheDirectoryURL: cacheDirectoryURL
-        )
-
         var instance = VMInstance(
             id: instanceId,
             jobId: jobId,
@@ -98,8 +95,13 @@ final class VMEngine: VMManagerProtocol {
 
         currentInstance = instance
 
-        let vm = try await lifecycle.boot(configuration: vmConfiguration)
-        virtualMachine = vm
+        try await lifecycle.bootVM(
+            vmConfig: config,
+            diskPath: clonedDiskPath,
+            platformStore: platformStore,
+            sharedDirectoryURL: sharedDirectory,
+            cacheDirectoryURL: cacheDirectoryURL
+        )
 
         instance.state = .running
         currentInstance = instance
@@ -109,11 +111,10 @@ final class VMEngine: VMManagerProtocol {
     }
 
     func stopVM() async throws {
-        guard let vm = virtualMachine else { return }
+        guard lifecycle.isBooted else { return }
         currentInstance?.state = .stopping
 
-        try await lifecycle.stop(vm: vm)
-        virtualMachine = nil
+        try await lifecycle.stopVM()
         currentInstance?.state = .stopped
 
         Log.vm.info("VM stopped")

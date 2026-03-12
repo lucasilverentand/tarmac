@@ -2,9 +2,33 @@ import Foundation
 import Virtualization
 
 @MainActor
-final class VMLifecycle: NSObject, VZVirtualMachineDelegate, Sendable {
+final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate, Sendable {
     private var vm: VZVirtualMachine?
     private var stateChangeContinuation: CheckedContinuation<Void, Error>?
+
+    var isBooted: Bool { vm?.state == .running }
+
+    func bootVM(
+        vmConfig: VMConfiguration,
+        diskPath: URL,
+        platformStore: PlatformDataStore,
+        sharedDirectoryURL: URL?,
+        cacheDirectoryURL: URL?
+    ) async throws {
+        let configuration = try createConfiguration(
+            vmConfig: vmConfig,
+            diskPath: diskPath,
+            platformStore: platformStore,
+            sharedDirectoryURL: sharedDirectoryURL,
+            cacheDirectoryURL: cacheDirectoryURL
+        )
+        _ = try await boot(configuration: configuration)
+    }
+
+    func stopVM() async throws {
+        guard let vm else { return }
+        try await stop(vm: vm)
+    }
 
     func createConfiguration(
         vmConfig: VMConfiguration,
@@ -14,12 +38,14 @@ final class VMLifecycle: NSObject, VZVirtualMachineDelegate, Sendable {
         cacheDirectoryURL: URL? = nil
     ) throws -> VZVirtualMachineConfiguration {
         guard let hardwareModelData = platformStore.loadHardwareModel(),
-              let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData) else {
+            let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData)
+        else {
             throw VMLifecycleError.missingHardwareModel
         }
 
         guard let machineIdData = platformStore.loadMachineIdentifier(),
-              let machineIdentifier = VZMacMachineIdentifier(dataRepresentation: machineIdData) else {
+            let machineIdentifier = VZMacMachineIdentifier(dataRepresentation: machineIdData)
+        else {
             throw VMLifecycleError.missingMachineIdentifier
         }
 
@@ -73,7 +99,7 @@ final class VMLifecycle: NSObject, VZVirtualMachineDelegate, Sendable {
                 widthInPixels: 1920,
                 heightInPixels: 1080,
                 pixelsPerInch: 144
-            ),
+            )
         ]
         configuration.graphicsDevices = [graphics]
 
