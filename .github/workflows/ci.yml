@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install_args: tuist
+
+      - name: Generate project
+        run: tuist generate --no-open
+
+      - name: Build
+        run: xcodebuild build -scheme Tarmac -destination 'platform=macOS' -skipPackagePluginValidation | xcpretty
+
+      - name: Test
+        run: xcodebuild test -scheme Tarmac -destination 'platform=macOS' -skipPackagePluginValidation | xcpretty
