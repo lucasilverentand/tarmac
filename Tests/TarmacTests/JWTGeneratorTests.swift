@@ -1,6 +1,7 @@
-import Testing
 import Foundation
 import Security
+import Testing
+
 @testable import Tarmac
 
 @Suite("JWTGenerator")
@@ -43,7 +44,8 @@ struct JWTGeneratorTests {
         let headerPart = String(jwt.split(separator: ".")[0])
 
         // Restore base64 padding and standard encoding
-        var base64 = headerPart
+        var base64 =
+            headerPart
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         while base64.count % 4 != 0 { base64.append("=") }
@@ -62,7 +64,8 @@ struct JWTGeneratorTests {
         let jwt = try generator.generateJWT()
         let payloadPart = String(jwt.split(separator: ".")[1])
 
-        var base64 = payloadPart
+        var base64 =
+            payloadPart
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         while base64.count % 4 != 0 { base64.append("=") }

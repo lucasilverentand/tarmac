@@ -21,6 +21,14 @@ struct PreviewGitHubClient: GitHubClientProtocol {
         headers: [String: String],
         timeoutInterval: TimeInterval
     ) async throws -> (Data, HTTPURLResponse) {
-        (Data(), HTTPURLResponse(url: URL(string: "https://api.github.com")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        (
+            Data(),
+            HTTPURLResponse(
+                url: URL(string: "https://api.github.com")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+        )
     }
 }

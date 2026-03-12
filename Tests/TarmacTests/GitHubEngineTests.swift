@@ -1,6 +1,7 @@
-import Testing
 import Foundation
 import Security
+import Testing
+
 @testable import Tarmac
 
 @Suite("GitHubEngine")
@@ -29,8 +30,8 @@ struct GitHubEngineTests {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"token":"ghs_test123","expires_at":"\(futureDate)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_test123","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
         )
 
         let (engine, _, _) = try makeEngine(client: client)
@@ -43,8 +44,8 @@ struct GitHubEngineTests {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"token":"ghs_cached","expires_at":"\(futureDate)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_cached","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
         )
 
         let (engine, client2, _) = try makeEngine(client: client)
@@ -61,8 +62,8 @@ struct GitHubEngineTests {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"token":"ghs_multi","expires_at":"\(futureDate)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_multi","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
         )
 
         let keychain = PreviewKeychainService()
@@ -110,14 +111,14 @@ struct GitHubEngineTests {
         await client.addResponse(
             forPathContaining: "access_tokens",
             json: """
-            {"token":"ghs_jit","expires_at":"\(futureDate)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_jit","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
         )
         await client.addResponse(
             forPathContaining: "generate-jitconfig",
             json: """
-            {"encoded_jit_config":"base64-jit-data"}
-            """.data(using: .utf8)!
+                {"encoded_jit_config":"base64-jit-data"}
+                """.data(using: .utf8)!
         )
 
         let (engine, _, _) = try makeEngine(client: client)
@@ -133,14 +134,14 @@ struct GitHubEngineTests {
         await client.addResponse(
             forPathContaining: "access_tokens",
             json: """
-            {"token":"ghs_labels","expires_at":"\(futureDate)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_labels","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
         )
         await client.addResponse(
             forPathContaining: "generate-jitconfig",
             json: """
-            {"encoded_jit_config":"cfg"}
-            """.data(using: .utf8)!
+                {"encoded_jit_config":"cfg"}
+                """.data(using: .utf8)!
         )
 
         let (engine, client2, _) = try makeEngine(client: client)

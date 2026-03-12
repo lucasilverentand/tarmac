@@ -1,4 +1,5 @@
 import Foundation
+
 @testable import Tarmac
 
 actor RecordingGitHubClient: GitHubClientProtocol {
@@ -42,12 +43,14 @@ actor RecordingGitHubClient: GitHubClientProtocol {
             bodyData = nil
         }
 
-        requests.append(RecordedRequest(
-            method: method,
-            path: path,
-            headers: headers,
-            bodyData: bodyData
-        ))
+        requests.append(
+            RecordedRequest(
+                method: method,
+                path: path,
+                headers: headers,
+                bodyData: bodyData
+            )
+        )
 
         for handler in responseHandlers {
             if let data = handler(path) {

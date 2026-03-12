@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("RunnerProvider")
@@ -8,8 +9,8 @@ struct RunnerProviderTests {
     func generateJITConfigReturns() async throws {
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"encoded_jit_config":"test-config-data"}
-            """.data(using: .utf8)!
+                {"encoded_jit_config":"test-config-data"}
+                """.data(using: .utf8)!
         )
 
         let tempDir = try TestFactories.makeTempDir()
@@ -30,8 +31,8 @@ struct RunnerProviderTests {
     func generateJITConfigPath() async throws {
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"encoded_jit_config":"cfg"}
-            """.data(using: .utf8)!
+                {"encoded_jit_config":"cfg"}
+                """.data(using: .utf8)!
         )
 
         let tempDir = try TestFactories.makeTempDir()
@@ -55,8 +56,8 @@ struct RunnerProviderTests {
     func generateJITConfigLabels() async throws {
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"encoded_jit_config":"cfg"}
-            """.data(using: .utf8)!
+                {"encoded_jit_config":"cfg"}
+                """.data(using: .utf8)!
         )
 
         let tempDir = try TestFactories.makeTempDir()
@@ -102,15 +103,15 @@ struct RunnerProviderTests {
         // trigger that without a real download. So test that an uncached provider
         // hits the API.
         let requests = await client.requestCount
-        #expect(requests == 0) // No API calls yet for JIT config
+        #expect(requests == 0)  // No API calls yet for JIT config
     }
 
     @Test("ensureRunner throws noCompatibleRunner when no macOS ARM64 binary")
     func ensureRunnerThrowsNoCompatible() async throws {
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            [{"os":"linux","architecture":"x64","download_url":"https://example.com/linux.tar.gz","filename":"runner-linux.tar.gz"}]
-            """.data(using: .utf8)!
+                [{"os":"linux","architecture":"x64","download_url":"https://example.com/linux.tar.gz","filename":"runner-linux.tar.gz"}]
+                """.data(using: .utf8)!
         )
 
         let tempDir = try TestFactories.makeTempDir()

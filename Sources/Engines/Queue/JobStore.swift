@@ -23,7 +23,8 @@ actor JobStore {
         self.defaults = defaults
 
         if let data = defaults.data(forKey: historyKey),
-           let history = try? JSONDecoder().decode([RunnerJob].self, from: data) {
+            let history = try? JSONDecoder().decode([RunnerJob].self, from: data)
+        {
             self.jobs = history
         }
     }
@@ -76,7 +77,8 @@ actor JobStore {
 
     private func loadHistory() {
         guard let data = defaults.data(forKey: historyKey),
-              let history = try? JSONDecoder().decode([RunnerJob].self, from: data) else {
+            let history = try? JSONDecoder().decode([RunnerJob].self, from: data)
+        else {
             return
         }
 
@@ -85,7 +87,8 @@ actor JobStore {
     }
 
     private func persistHistory() {
-        let completed = jobs
+        let completed =
+            jobs
             .filter { $0.status == .completed || $0.status == .failed }
             .suffix(maxHistory)
 

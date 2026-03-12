@@ -60,8 +60,10 @@ struct CacheManager: Sendable {
 
         // Sort oldest first
         let sorted = try contents.sorted { a, b in
-            let aDate = try a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast
-            let bDate = try b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast
+            let aDate =
+                try a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast
+            let bDate =
+                try b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast
             return aDate < bDate
         }
 

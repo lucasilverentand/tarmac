@@ -12,7 +12,7 @@ struct JWTGenerator: Sendable {
 
     func generateJWT() throws -> String {
         let now = Date()
-        let expiration = now.addingTimeInterval(600) // 10 minutes max for GitHub
+        let expiration = now.addingTimeInterval(600)  // 10 minutes max for GitHub
 
         let header = try base64URLEncode(json: [
             "alg": "RS256",
@@ -39,12 +39,14 @@ struct JWTGenerator: Sendable {
         let privateKey = try loadPrivateKey()
 
         var error: Unmanaged<CFError>?
-        guard let signedData = SecKeyCreateSignature(
-            privateKey,
-            .rsaSignatureMessagePKCS1v15SHA256,
-            inputData as CFData,
-            &error
-        ) as Data? else {
+        guard
+            let signedData = SecKeyCreateSignature(
+                privateKey,
+                .rsaSignatureMessagePKCS1v15SHA256,
+                inputData as CFData,
+                &error
+            ) as Data?
+        else {
             let cfError = error?.takeRetainedValue()
             throw JWTError.signingFailed(cfError?.localizedDescription ?? "Unknown error")
         }
@@ -55,7 +57,8 @@ struct JWTGenerator: Sendable {
     private func loadPrivateKey() throws -> SecKey {
         // Strip PEM headers and decode
         let pemString = String(data: privateKeyData, encoding: .utf8) ?? ""
-        let base64String = pemString
+        let base64String =
+            pemString
             .replacingOccurrences(of: "-----BEGIN RSA PRIVATE KEY-----", with: "")
             .replacingOccurrences(of: "-----END RSA PRIVATE KEY-----", with: "")
             .replacingOccurrences(of: "-----BEGIN PRIVATE KEY-----", with: "")
@@ -98,7 +101,7 @@ struct JWTGenerator: Sendable {
 
         // Look for the inner SEQUENCE tag (0x30) that starts the PKCS#1 key
         for i in 20..<min(bytes.count, 30) {
-            if bytes[i] == 0x04 { // OCTET STRING tag wrapping the key
+            if bytes[i] == 0x04 {  // OCTET STRING tag wrapping the key
                 let lengthByte = bytes[i + 1]
                 let dataStart: Int
                 if lengthByte & 0x80 == 0 {

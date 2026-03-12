@@ -40,9 +40,11 @@ struct CacheSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text("The actions/cache directories persist across ephemeral VM runs via a VirtioFS shared mount. The guest VM sees the cache at \(CacheConfiguration.guestMountPoint).")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    Text(
+                        "The actions/cache directories persist across ephemeral VM runs via a VirtioFS shared mount. The guest VM sees the cache at \(CacheConfiguration.guestMountPoint)."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
                 }
 
                 Section {

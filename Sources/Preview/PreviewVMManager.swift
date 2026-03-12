@@ -14,9 +14,11 @@ final class PreviewVMManager: VMManagerProtocol {
 
     func bootVM(for jobId: Int64, config: VMConfiguration, sharedDirectory: URL) async throws -> VMInstance {
         let instance = VMInstance(
-            id: UUID(), jobId: jobId,
+            id: UUID(),
+            jobId: jobId,
             diskImagePath: URL(filePath: "/tmp/disk.img"),
-            startedAt: Date(), state: .running
+            startedAt: Date(),
+            state: .running
         )
         currentInstance = instance
         isRunning = true

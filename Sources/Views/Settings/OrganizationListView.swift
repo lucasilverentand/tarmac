@@ -50,9 +50,13 @@ struct OrganizationListView: View {
     private var orgList: some View {
         List {
             ForEach(viewModel.organizations) { org in
-                OrganizationRow(org: org, position: position(of: org), onToggle: { updated in
-                    viewModel.updateOrganization(updated)
-                })
+                OrganizationRow(
+                    org: org,
+                    position: position(of: org),
+                    onToggle: { updated in
+                        viewModel.updateOrganization(updated)
+                    }
+                )
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { editingOrg = org }
                 .contextMenu {
@@ -142,14 +146,17 @@ private struct OrganizationRow: View {
 
             Spacer()
 
-            Toggle("", isOn: Binding(
-                get: { org.isEnabled },
-                set: { enabled in
-                    var updated = org
-                    updated.isEnabled = enabled
-                    onToggle(updated)
-                }
-            ))
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { org.isEnabled },
+                    set: { enabled in
+                        var updated = org
+                        updated.isEnabled = enabled
+                        onToggle(updated)
+                    }
+                )
+            )
             .labelsHidden()
         }
         .padding(.vertical, 4)
@@ -271,11 +278,13 @@ private struct OrganizationFormSheet: View {
                                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                             }
 
-                            Text(filterMode == .include
-                                ? "Only jobs from these repositories will be accepted."
-                                : "Jobs from these repositories will be ignored.")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                            Text(
+                                filterMode == .include
+                                    ? "Only jobs from these repositories will be accepted."
+                                    : "Jobs from these repositories will be ignored."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -365,7 +374,8 @@ private struct OrganizationFormSheet: View {
         let parsedLabels = labels.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         guard let parsedInstallationId = Int(installationId) else { return }
         let parsedScaleSetId = Int(scaleSetId)
-        let parsedRepos = repositoryList
+        let parsedRepos =
+            repositoryList
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }

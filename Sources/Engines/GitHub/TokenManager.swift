@@ -2,8 +2,8 @@ import Foundation
 
 actor TokenManager {
     private let client: any GitHubClientProtocol
-    private var cachedTokens: [Int: TokenInfo] = [:] // installationId -> token
-    private var jwtCache: [String: TokenInfo] = [:] // appId -> JWT
+    private var cachedTokens: [Int: TokenInfo] = [:]  // installationId -> token
+    private var jwtCache: [String: TokenInfo] = [:]  // appId -> JWT
 
     init(client: any GitHubClientProtocol) {
         self.client = client
@@ -53,7 +53,7 @@ actor TokenManager {
 
         jwtCache[appId] = TokenInfo(
             token: jwt,
-            expiresAt: Date().addingTimeInterval(540) // 9 minutes (JWT valid for 10)
+            expiresAt: Date().addingTimeInterval(540)  // 9 minutes (JWT valid for 10)
         )
 
         return jwt

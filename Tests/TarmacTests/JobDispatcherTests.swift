@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("JobDispatcher")
@@ -11,8 +12,11 @@ struct JobDispatcherTests {
 
     private func makeJob(id: Int64, status: JobStatus = .pending) -> RunnerJob {
         RunnerJob(
-            id: id, organizationName: "test-org", status: status,
-            workflowName: "CI", repositoryName: "test-repo",
+            id: id,
+            organizationName: "test-org",
+            status: status,
+            workflowName: "CI",
+            repositoryName: "test-repo",
             queuedAt: Date()
         )
     }
@@ -81,12 +85,16 @@ struct JobDispatcherTests {
 
         // Add job from low-priority org first, then high-priority org
         let lowPriorityJob = RunnerJob(
-            id: 1, organizationName: "low-priority",
-            status: .pending, queuedAt: Date(timeIntervalSince1970: 100)
+            id: 1,
+            organizationName: "low-priority",
+            status: .pending,
+            queuedAt: Date(timeIntervalSince1970: 100)
         )
         let highPriorityJob = RunnerJob(
-            id: 2, organizationName: "high-priority",
-            status: .pending, queuedAt: Date(timeIntervalSince1970: 200)
+            id: 2,
+            organizationName: "high-priority",
+            status: .pending,
+            queuedAt: Date(timeIntervalSince1970: 200)
         )
         await store.addJob(lowPriorityJob)
         await store.addJob(highPriorityJob)
@@ -104,12 +112,16 @@ struct JobDispatcherTests {
         let store = makeStore()
 
         let earlier = RunnerJob(
-            id: 1, organizationName: "org-a",
-            status: .pending, queuedAt: Date(timeIntervalSince1970: 100)
+            id: 1,
+            organizationName: "org-a",
+            status: .pending,
+            queuedAt: Date(timeIntervalSince1970: 100)
         )
         let later = RunnerJob(
-            id: 2, organizationName: "org-a",
-            status: .pending, queuedAt: Date(timeIntervalSince1970: 200)
+            id: 2,
+            organizationName: "org-a",
+            status: .pending,
+            queuedAt: Date(timeIntervalSince1970: 200)
         )
         await store.addJob(later)
         await store.addJob(earlier)
@@ -118,6 +130,6 @@ struct JobDispatcherTests {
         await dispatcher.setOrgPriority(["org-a"])
 
         let next = await dispatcher.nextJob(from: store)
-        #expect(next?.id == 1) // earlier queued time
+        #expect(next?.id == 1)  // earlier queued time
     }
 }

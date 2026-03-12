@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("ScaleSetPoller Integration")
@@ -8,8 +9,8 @@ struct ScaleSetPollerIntegrationTests {
     func createSessionPath() async throws {
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"sessionId":"sess-1","ownerName":"my-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
-            """.data(using: .utf8)!
+                {"sessionId":"sess-1","ownerName":"my-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
         )
 
         let poller = ScaleSetPoller(client: client) { _ in "test-token" }
@@ -51,8 +52,8 @@ struct ScaleSetPollerIntegrationTests {
     @Test("poll wraps single-object response into array")
     func pollWrapsSingleObject() async throws {
         let singleMessageJSON = """
-        {"messageId":1,"messageType":"JobAvailable","body":"{}","statistics":{"totalAvailableJobs":1,"totalAssignedJobs":0,"totalRunningJobs":0,"totalRegisteredRunners":1}}
-        """.data(using: .utf8)!
+            {"messageId":1,"messageType":"JobAvailable","body":"{}","statistics":{"totalAvailableJobs":1,"totalAssignedJobs":0,"totalRunningJobs":0,"totalRegisteredRunners":1}}
+            """.data(using: .utf8)!
 
         let client = RecordingGitHubClient(defaultResponseJSON: singleMessageJSON)
         let poller = ScaleSetPoller(client: client) { _ in "test-token" }

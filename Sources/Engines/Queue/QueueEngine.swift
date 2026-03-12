@@ -134,7 +134,8 @@ actor QueueEngine {
 
     private func handleJobAvailable(_ message: ScaleSetMessage, org: Organization) async {
         guard let data = message.body.data(using: .utf8),
-              let jobMessage = try? JSONDecoder().decode(JobAvailableMessage.self, from: data) else {
+            let jobMessage = try? JSONDecoder().decode(JobAvailableMessage.self, from: data)
+        else {
             Log.queue.warning("Failed to decode JobAvailable body")
             return
         }
@@ -143,7 +144,9 @@ actor QueueEngine {
 
         // Check repository filter
         if !org.acceptsRepository(base.repositoryName) {
-            Log.queue.info("Job \(base.jobId) skipped — repo \(base.repositoryName ?? "unknown") filtered out for org \(org.name)")
+            Log.queue.info(
+                "Job \(base.jobId) skipped — repo \(base.repositoryName ?? "unknown") filtered out for org \(org.name)"
+            )
             return
         }
 
@@ -162,7 +165,8 @@ actor QueueEngine {
 
     private func handleJobCompleted(_ message: ScaleSetMessage) async {
         guard let data = message.body.data(using: .utf8),
-              let completed = try? JSONDecoder().decode(JobCompletedMessage.self, from: data) else {
+            let completed = try? JSONDecoder().decode(JobCompletedMessage.self, from: data)
+        else {
             Log.queue.warning("Failed to decode JobCompleted body")
             return
         }
