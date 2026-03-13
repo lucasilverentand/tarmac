@@ -1,6 +1,7 @@
-import Testing
 import Foundation
 import Security
+import Testing
+
 @testable import Tarmac
 
 @Suite("QueueEngine")
@@ -9,8 +10,8 @@ struct QueueEngineTests {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
-            {"token":"ghs_queue","expires_at":"\(futureDate)"}
-            """.data(using: .utf8)!
+                {"token":"ghs_queue","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
         )
 
         let keychain = PreviewKeychainService()
@@ -39,10 +40,14 @@ struct QueueEngineTests {
         return (engine, jobStore, client)
     }
 
-    private func jobAvailableMessage(jobId: Int64, repo: String = "test-repo", workflow: String = "CI") -> ScaleSetMessage {
+    private func jobAvailableMessage(
+        jobId: Int64,
+        repo: String = "test-repo",
+        workflow: String = "CI"
+    ) -> ScaleSetMessage {
         let body = """
-        {"jobMessageBase":{"jobId":\(jobId),"runnerRequestId":1,"repositoryName":"\(repo)","ownerName":"test-org","workflowRunName":"\(workflow)"}}
-        """
+            {"jobMessageBase":{"jobId":\(jobId),"runnerRequestId":1,"repositoryName":"\(repo)","ownerName":"test-org","workflowRunName":"\(workflow)"}}
+            """
         return ScaleSetMessage(
             messageId: jobId,
             messageType: "JobAvailable",
@@ -53,8 +58,8 @@ struct QueueEngineTests {
 
     private func jobCompletedMessage(jobId: Int64, result: String = "success") -> ScaleSetMessage {
         let body = """
-        {"jobId":\(jobId),"result":"\(result)"}
-        """
+            {"jobId":\(jobId),"result":"\(result)"}
+            """
         return ScaleSetMessage(
             messageId: jobId + 1000,
             messageType: "JobCompleted",
@@ -74,7 +79,7 @@ struct QueueEngineTests {
         let jobs = await store.jobs
         #expect(jobs.count == 1)
         #expect(jobs.first?.id == 42)
-        #expect(jobs.first?.status == .provisioning) // dispatched immediately
+        #expect(jobs.first?.status == .provisioning)  // dispatched immediately
     }
 
     @Test("JobAvailable triggers dispatch and calls onJobReady")
@@ -87,7 +92,7 @@ struct QueueEngineTests {
         await engine.handleMessages([message], org: org)
 
         let job = await store.job(byId: 77)
-        #expect(job?.status == .provisioning) // dispatched = markStarted called
+        #expect(job?.status == .provisioning)  // dispatched = markStarted called
     }
 
     @Test("JobCompleted with success marks .completed")
@@ -212,5 +217,53 @@ struct QueueEngineTests {
 
         let jobs = await store.jobs
         #expect(jobs.isEmpty)
+    }
+
+    @Test("Multiple JobAvailable messages in single batch are all enqueued")
+    func batchJobAvailable() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg()
+
+        let messages = [
+            jobAvailableMessage(jobId: 100),
+            jobAvailableMessage(jobId: 101),
+            jobAvailableMessage(jobId: 102),
+        ]
+
+        await engine.handleMessages(messages, org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.count == 3)
+        // First one dispatched, rest pending
+        let provisioning = jobs.filter { $0.status == .provisioning }
+        let pending = jobs.filter { $0.status == .pending }
+        #expect(provisioning.count == 1)
+        #expect(pending.count == 2)
+    }
+
+    @Test("JobCompleted for unknown job ID is a graceful no-op")
+    func jobCompletedUnknownId() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg()
+
+        // Complete a job that was never enqueued
+        await engine.handleMessages([jobCompletedMessage(jobId: 999)], org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.isEmpty)
+    }
+
+    @Test("Duplicate JobAvailable for same job ID is deduplicated")
+    func duplicateJobAvailable() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg()
+
+        let message = jobAvailableMessage(jobId: 55)
+        await engine.handleMessages([message], org: org)
+        await engine.handleMessages([message], org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.id == 55)
     }
 }

@@ -42,10 +42,12 @@ struct TarmacApp: App {
 
     private func centerAndFloatDashboard() {
         DispatchQueue.main.async {
-            guard let window = NSApp.windows.first(where: {
-                $0.isVisible && $0.identifier?.rawValue.contains("dashboard") == true
-                    || ($0.title == "Dashboard" && $0.level == .normal)
-            }) else { return }
+            guard
+                let window = NSApp.windows.first(where: {
+                    $0.isVisible && $0.identifier?.rawValue.contains("dashboard") == true
+                        || ($0.title == "Dashboard" && $0.level == .normal)
+                })
+            else { return }
             window.center()
             window.level = .floating
         }

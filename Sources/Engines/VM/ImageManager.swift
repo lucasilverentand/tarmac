@@ -64,7 +64,7 @@ final class ImageManager: Sendable {
         do {
             let localURL = try await downloader.download(from: downloadURL)
             stopProgressTimer()
-            syncProgress(from: downloader) // final sync
+            syncProgress(from: downloader)  // final sync
 
             try FileManager.default.moveItem(at: localURL, to: destination)
             IPSWDownloader.clearResumeData()
@@ -102,10 +102,12 @@ final class ImageManager: Sendable {
 
     func cleanupTempIPSWFiles() {
         let tmpDir = FileManager.default.temporaryDirectory
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: tmpDir,
-            includingPropertiesForKeys: nil
-        ) else { return }
+        guard
+            let contents = try? FileManager.default.contentsOfDirectory(
+                at: tmpDir,
+                includingPropertiesForKeys: nil
+            )
+        else { return }
 
         for file in contents where file.lastPathComponent.hasPrefix("ipsw-") && file.pathExtension == "ipsw" {
             try? FileManager.default.removeItem(at: file)
@@ -137,7 +139,8 @@ final class ImageManager: Sendable {
         let snapshot = downloader.progressSnapshot()
         downloadedBytes = snapshot.bytesWritten
         totalDownloadBytes = snapshot.bytesExpected
-        downloadProgress = snapshot.bytesExpected > 0
+        downloadProgress =
+            snapshot.bytesExpected > 0
             ? Double(snapshot.bytesWritten) / Double(snapshot.bytesExpected)
             : 0
 
@@ -161,7 +164,8 @@ final class ImageManager: Sendable {
     ) async throws {
         Log.image.info("Starting macOS install from \(ipsw.lastPathComponent)")
 
-        let hardwareModelData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+        let hardwareModelData = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Data, Error>) in
             VZMacOSRestoreImage.load(from: ipsw) { result in
                 switch result {
                 case .success(let image):
@@ -300,7 +304,7 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
                 Log.image.info("Resume data saved (\(data.count) bytes)")
             }
             // The didCompleteWithError delegate will fire and resume the continuation
-            _ = self // prevent premature dealloc
+            _ = self  // prevent premature dealloc
         })
     }
 

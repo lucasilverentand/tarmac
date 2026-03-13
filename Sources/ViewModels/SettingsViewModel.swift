@@ -59,26 +59,38 @@ final class SettingsViewModel {
 
     var vmConfiguration: VMConfiguration {
         get { configStore.vmConfiguration }
-        set { configStore.vmConfiguration = newValue; configStore.save() }
+        set {
+            configStore.vmConfiguration = newValue
+            configStore.save()
+        }
     }
 
     // MARK: - Cache Configuration
 
     var cacheConfig: CacheConfiguration {
         get { configStore.cacheConfig }
-        set { configStore.cacheConfig = newValue; configStore.save() }
+        set {
+            configStore.cacheConfig = newValue
+            configStore.save()
+        }
     }
 
     // MARK: - General
 
     var launchAtLogin: Bool {
         get { configStore.launchAtLogin }
-        set { configStore.launchAtLogin = newValue; configStore.save() }
+        set {
+            configStore.launchAtLogin = newValue
+            configStore.save()
+        }
     }
 
     var cacheDirectoryPath: String {
         get { configStore.cacheDirectoryPath }
-        set { configStore.cacheDirectoryPath = newValue; configStore.save() }
+        set {
+            configStore.cacheDirectoryPath = newValue
+            configStore.save()
+        }
     }
 
     var resolvedCachePath: String {

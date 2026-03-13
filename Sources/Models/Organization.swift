@@ -38,9 +38,12 @@ extension Organization {
         case .all:
             return true
         case .include:
-            return filteredRepositories.contains(where: { repoName.localizedCaseInsensitiveCompare($0) == .orderedSame })
+            return filteredRepositories.contains(where: { repoName.localizedCaseInsensitiveCompare($0) == .orderedSame }
+            )
         case .exclude:
-            return !filteredRepositories.contains(where: { repoName.localizedCaseInsensitiveCompare($0) == .orderedSame })
+            return !filteredRepositories.contains(where: {
+                repoName.localizedCaseInsensitiveCompare($0) == .orderedSame
+            })
         }
     }
 }

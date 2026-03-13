@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("DiskImageManager")
@@ -27,7 +28,8 @@ struct DiskImageManagerTests {
         defer { TestFactories.cleanup(tempDir) }
 
         let manager = DiskImageManager()
-        let diskPath = tempDir
+        let diskPath =
+            tempDir
             .appendingPathComponent("nested/deep/disk.img")
 
         try manager.createSparseDisk(at: diskPath, sizeGB: 1)

@@ -82,15 +82,18 @@ final class ConfigStore {
 
     private func load() {
         if let data = defaults.data(forKey: "organizations"),
-           let orgs = try? JSONDecoder().decode([Organization].self, from: data) {
+            let orgs = try? JSONDecoder().decode([Organization].self, from: data)
+        {
             organizations = orgs
         }
         if let data = defaults.data(forKey: "vmConfiguration"),
-           let config = try? JSONDecoder().decode(VMConfiguration.self, from: data) {
+            let config = try? JSONDecoder().decode(VMConfiguration.self, from: data)
+        {
             vmConfiguration = config
         }
         if let data = defaults.data(forKey: "cacheConfiguration"),
-           let config = try? JSONDecoder().decode(CacheConfiguration.self, from: data) {
+            let config = try? JSONDecoder().decode(CacheConfiguration.self, from: data)
+        {
             cacheConfig = config
         }
         baseImagePath = defaults.string(forKey: "baseImagePath") ?? ""

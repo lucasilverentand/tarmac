@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("ScaleSetPoller")
@@ -7,18 +8,18 @@ struct ScaleSetPollerTests {
     @Test("Parses ScaleSetMessage from JSON")
     func parseMessage() throws {
         let json = """
-        {
-            "messageId": 42,
-            "messageType": "JobAvailable",
-            "body": "{\\"jobMessageBase\\":{\\"jobId\\":100,\\"runnerRequestId\\":1,\\"repositoryName\\":\\"my-repo\\",\\"ownerName\\":\\"my-org\\",\\"workflowRunName\\":\\"CI\\"}}",
-            "statistics": {
-                "totalAvailableJobs": 1,
-                "totalAssignedJobs": 0,
-                "totalRunningJobs": 0,
-                "totalRegisteredRunners": 1
+            {
+                "messageId": 42,
+                "messageType": "JobAvailable",
+                "body": "{\\"jobMessageBase\\":{\\"jobId\\":100,\\"runnerRequestId\\":1,\\"repositoryName\\":\\"my-repo\\",\\"ownerName\\":\\"my-org\\",\\"workflowRunName\\":\\"CI\\"}}",
+                "statistics": {
+                    "totalAvailableJobs": 1,
+                    "totalAssignedJobs": 0,
+                    "totalRunningJobs": 0,
+                    "totalRegisteredRunners": 1
+                }
             }
-        }
-        """.data(using: .utf8)!
+            """.data(using: .utf8)!
 
         let message = try JSONDecoder().decode(ScaleSetMessage.self, from: json)
         #expect(message.messageId == 42)
@@ -36,8 +37,8 @@ struct ScaleSetPollerTests {
     @Test("Parses JobCompletedMessage from body")
     func parseJobCompleted() throws {
         let json = """
-        {"jobId": 200, "result": "succeeded"}
-        """.data(using: .utf8)!
+            {"jobId": 200, "result": "succeeded"}
+            """.data(using: .utf8)!
 
         let message = try JSONDecoder().decode(JobCompletedMessage.self, from: json)
         #expect(message.jobId == 200)
@@ -55,8 +56,11 @@ struct ScaleSetPollerTests {
 
         let poller = ScaleSetPoller(client: emptyClient) { _ in "test-token" }
         let org = Organization(
-            name: "test-org", appId: "1", installationId: 1,
-            scaleSetId: 42, labels: ["self-hosted"]
+            name: "test-org",
+            appId: "1",
+            installationId: 1,
+            scaleSetId: 42,
+            labels: ["self-hosted"]
         )
 
         let messages = try await poller.poll(org: org, sessionId: "session-1")
@@ -67,7 +71,8 @@ struct ScaleSetPollerTests {
 /// Client that returns 202 No Content for raw requests
 private struct Empty202Client: GitHubClientProtocol {
     func request<T: Decodable & Sendable>(
-        method: String, path: String,
+        method: String,
+        path: String,
         body: (any Encodable & Sendable)?,
         headers: [String: String],
         timeoutInterval: TimeInterval
@@ -76,14 +81,17 @@ private struct Empty202Client: GitHubClientProtocol {
     }
 
     func requestRaw(
-        method: String, path: String,
+        method: String,
+        path: String,
         body: (any Encodable & Sendable)?,
         headers: [String: String],
         timeoutInterval: TimeInterval
     ) async throws -> (Data, HTTPURLResponse) {
         let response = HTTPURLResponse(
             url: URL(string: "https://api.github.com")!,
-            statusCode: 202, httpVersion: nil, headerFields: nil
+            statusCode: 202,
+            httpVersion: nil,
+            headerFields: nil
         )!
         return (Data(), response)
     }

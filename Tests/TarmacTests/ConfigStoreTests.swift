@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("ConfigStore")
@@ -59,7 +60,7 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
-        #expect(!store.cacheDirectoryPath.isEmpty) // default is set
+        #expect(!store.cacheDirectoryPath.isEmpty)  // default is set
 
         defaults.removePersistentDomain(forName: "test-config")
     }

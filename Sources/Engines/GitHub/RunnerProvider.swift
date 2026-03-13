@@ -12,7 +12,8 @@ actor RunnerProvider {
 
     func ensureRunner(token: String, org: String) async throws -> URL {
         if let cached = cachedRunnerPath,
-           FileManager.default.fileExists(atPath: cached.appendingPathComponent("run.sh").path) {
+            FileManager.default.fileExists(atPath: cached.appendingPathComponent("run.sh").path)
+        {
             Log.runner.debug("Using cached runner at \(cached.path)")
             return cached
         }
@@ -72,7 +73,7 @@ actor RunnerProvider {
 
         let request = JITRequest(
             name: name,
-            runner_group_id: 1, // Default group
+            runner_group_id: 1,  // Default group
             labels: labels,
             work_folder: "_work"
         )

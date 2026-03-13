@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("QueueViewModel")
@@ -7,9 +8,13 @@ import Foundation
 struct QueueViewModelTests {
     private func makeJob(id: Int64, status: JobStatus, completedAt: Date? = nil) -> RunnerJob {
         RunnerJob(
-            id: id, organizationName: "test-org", status: status,
-            workflowName: "CI", repositoryName: "test-repo",
-            queuedAt: Date(), completedAt: completedAt
+            id: id,
+            organizationName: "test-org",
+            status: status,
+            workflowName: "CI",
+            repositoryName: "test-repo",
+            queuedAt: Date(),
+            completedAt: completedAt
         )
     }
 
@@ -63,9 +68,9 @@ struct QueueViewModelTests {
 
         let completed = vm.completedJobs
         #expect(completed.count == 3)
-        #expect(completed[0].id == 2) // most recent
+        #expect(completed[0].id == 2)  // most recent
         #expect(completed[1].id == 3)
-        #expect(completed[2].id == 1) // oldest
+        #expect(completed[2].id == 1)  // oldest
     }
 
     @Test("completedTodayCount counts only today's completions")
@@ -75,14 +80,16 @@ struct QueueViewModelTests {
         vm.allJobs = [
             makeJob(id: 1, status: .completed, completedAt: now.addingTimeInterval(-60)),
             makeJob(id: 2, status: .completed, completedAt: now.addingTimeInterval(-3600)),
-            makeJob(id: 3, status: .completed, completedAt: now.addingTimeInterval(-86400 * 2)), // 2 days ago
+            makeJob(id: 3, status: .completed, completedAt: now.addingTimeInterval(-86400 * 2)),  // 2 days ago
             makeJob(id: 4, status: .failed, completedAt: now),
         ]
 
         // Only jobs 1 and 2 are completed (not failed) today
         // Job 3 is from 2 days ago, job 4 is failed
         let startOfDay = Calendar.current.startOfDay(for: now)
-        let todayCompleted = vm.allJobs.filter { $0.status == .completed && ($0.completedAt ?? .distantPast) >= startOfDay }
+        let todayCompleted = vm.allJobs.filter {
+            $0.status == .completed && ($0.completedAt ?? .distantPast) >= startOfDay
+        }
         #expect(vm.completedTodayCount == todayCompleted.count)
     }
 

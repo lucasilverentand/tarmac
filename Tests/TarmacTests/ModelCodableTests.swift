@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("Model Codable")
@@ -15,8 +16,8 @@ struct ModelCodableTests {
             workflowName: "CI Pipeline",
             repositoryName: "my-repo",
             jitConfig: "encoded-config-data",
-            queuedAt: Date(timeIntervalSince1970: 1700000000),
-            startedAt: Date(timeIntervalSince1970: 1700000060),
+            queuedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            startedAt: Date(timeIntervalSince1970: 1_700_000_060),
             completedAt: nil,
             failureReason: nil
         )
@@ -41,7 +42,7 @@ struct ModelCodableTests {
             id: 1,
             organizationName: "org",
             status: .pending,
-            queuedAt: Date(timeIntervalSince1970: 1700000000)
+            queuedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
 
         let data = try JSONEncoder().encode(job)
@@ -88,7 +89,7 @@ struct ModelCodableTests {
         let org = Organization(name: "a", appId: "1", installationId: 1)
         var set = Set<Organization>()
         set.insert(org)
-        set.insert(org) // same instance
+        set.insert(org)  // same instance
         #expect(set.count == 1)
     }
 
@@ -102,25 +103,29 @@ struct ModelCodableTests {
     @Test("Organization acceptsRepository with include mode")
     func orgFilterInclude() {
         let org = Organization(
-            name: "a", appId: "1", installationId: 1,
+            name: "a",
+            appId: "1",
+            installationId: 1,
             filterMode: .include,
             filteredRepositories: ["allowed-repo"]
         )
         #expect(org.acceptsRepository("allowed-repo"))
-        #expect(org.acceptsRepository("Allowed-Repo")) // case-insensitive
+        #expect(org.acceptsRepository("Allowed-Repo"))  // case-insensitive
         #expect(!org.acceptsRepository("other-repo"))
-        #expect(org.acceptsRepository(nil)) // nil repo always accepted
+        #expect(org.acceptsRepository(nil))  // nil repo always accepted
     }
 
     @Test("Organization acceptsRepository with exclude mode")
     func orgFilterExclude() {
         let org = Organization(
-            name: "a", appId: "1", installationId: 1,
+            name: "a",
+            appId: "1",
+            installationId: 1,
             filterMode: .exclude,
             filteredRepositories: ["blocked-repo"]
         )
         #expect(!org.acceptsRepository("blocked-repo"))
-        #expect(!org.acceptsRepository("Blocked-Repo")) // case-insensitive
+        #expect(!org.acceptsRepository("Blocked-Repo"))  // case-insensitive
         #expect(org.acceptsRepository("other-repo"))
         #expect(org.acceptsRepository(nil))
     }
@@ -173,7 +178,7 @@ struct ModelCodableTests {
 
         let expiringSoon = TokenInfo(token: "t", expiresAt: Date().addingTimeInterval(30))
         #expect(!expiringSoon.isExpired)
-        #expect(expiringSoon.isExpiringSoon) // within 60s
+        #expect(expiringSoon.isExpiringSoon)  // within 60s
 
         let fresh = TokenInfo(token: "t", expiresAt: Date().addingTimeInterval(300))
         #expect(!fresh.isExpired)
@@ -185,14 +190,14 @@ struct ModelCodableTests {
     @Test("RunnerDownloadInfo snake_case CodingKeys")
     func runnerDownloadInfoCodingKeys() throws {
         let json = """
-        {
-            "os": "osx",
-            "architecture": "arm64",
-            "download_url": "https://example.com/runner.tar.gz",
-            "filename": "actions-runner-osx-arm64-2.300.0.tar.gz",
-            "sha256_checksum": "abc123"
-        }
-        """.data(using: .utf8)!
+            {
+                "os": "osx",
+                "architecture": "arm64",
+                "download_url": "https://example.com/runner.tar.gz",
+                "filename": "actions-runner-osx-arm64-2.300.0.tar.gz",
+                "sha256_checksum": "abc123"
+            }
+            """.data(using: .utf8)!
 
         let info = try JSONDecoder().decode(RunnerDownloadInfo.self, from: json)
         #expect(info.os == "osx")

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "indentation": {
+    "spaces": 4
+  },
+  "lineLength": 120,
+  "respectsExistingLineBreaks": true,
+  "lineBreakBeforeControlFlowKeywords": false,
+  "lineBreakBeforeEachArgument": true,
+  "lineBreakBeforeEachGenericRequirement": true,
+  "indentConditionalCompilationBlocks": true,
+  "indentSwitchCaseLabels": false,
+  "prioritizeKeepingFunctionOutputTogether": true,
+  "maximumBlankLines": 1,
+  "rules": {
+    "AlwaysUseLowerCamelCase": false
+  }
+}

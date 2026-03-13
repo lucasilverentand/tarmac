@@ -1,5 +1,6 @@
-import Testing
 import Foundation
+import Testing
+
 @testable import Tarmac
 
 @Suite("JobStore")
@@ -12,8 +13,11 @@ struct JobStoreTests {
 
     private func makeJob(id: Int64 = 1, status: JobStatus = .pending) -> RunnerJob {
         RunnerJob(
-            id: id, organizationName: "test-org", status: status,
-            workflowName: "CI", repositoryName: "test-repo",
+            id: id,
+            organizationName: "test-org",
+            status: status,
+            workflowName: "CI",
+            repositoryName: "test-repo",
             queuedAt: Date()
         )
     }
@@ -91,5 +95,46 @@ struct JobStoreTests {
         #expect(jobs.first?.status == .completed)
 
         defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("Corrupted UserDefaults data is handled gracefully")
+    func corruptedDataGracefulRecovery() async {
+        let suiteName = "test-jobstore-\(UUID().uuidString)"
+        nonisolated(unsafe) let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // Write garbage to the history key
+        defaults.set("not valid json".data(using: .utf8), forKey: "completedJobHistory")
+
+        // Store should initialize gracefully with empty jobs
+        let store = JobStore(defaults: defaults)
+        let jobs = await store.jobs
+        #expect(jobs.isEmpty)
+    }
+
+    @Test("Remove non-existent job is a no-op")
+    func removeNonExistentJob() async {
+        let store = makeStore()
+        await store.addJob(makeJob(id: 1))
+
+        // Remove a job that doesn't exist
+        await store.removeJob(id: 999)
+
+        let jobs = await store.jobs
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.id == 1)
+    }
+
+    @Test("Update non-existent job is a no-op")
+    func updateNonExistentJob() async {
+        let store = makeStore()
+        await store.addJob(makeJob(id: 1))
+
+        // Update a job that doesn't exist — should not crash
+        await store.updateJob(id: 999, status: .completed)
+
+        let jobs = await store.jobs
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.status == .pending)
     }
 }

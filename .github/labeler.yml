@@ -1,0 +1,40 @@
+ci:
+  - changed-files:
+      - any-glob-to-any-file: .github/**/*
+
+engine:
+  - changed-files:
+      - any-glob-to-any-file: Sources/Engines/**/*
+
+vm:
+  - changed-files:
+      - any-glob-to-any-file: Sources/Engines/VM/**/*
+
+github:
+  - changed-files:
+      - any-glob-to-any-file: Sources/Engines/GitHub/**/*
+
+queue:
+  - changed-files:
+      - any-glob-to-any-file: Sources/Engines/Queue/**/*
+
+ui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Sources/Views/**/*
+          - Sources/ViewModels/**/*
+
+models:
+  - changed-files:
+      - any-glob-to-any-file: Sources/Models/**/*
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: Tests/**/*
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Sources/Services/**/*
+          - Project.swift
+          - Tuist.swift

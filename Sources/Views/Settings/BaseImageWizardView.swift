@@ -41,7 +41,11 @@ struct BaseImageWizardView: View {
                     HStack(spacing: 6) {
                         ZStack {
                             Circle()
-                                .fill(step < currentStep ? AnyShapeStyle(.green) : step == currentStep ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                                .fill(
+                                    step < currentStep
+                                        ? AnyShapeStyle(.green)
+                                        : step == currentStep ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary)
+                                )
                                 .frame(width: 22, height: 22)
                             if step < currentStep {
                                 Image(systemName: "checkmark")
@@ -144,11 +148,13 @@ struct BaseImageWizardView: View {
                 Text("Download macOS Restore Image")
                     .font(.title3.weight(.medium))
 
-                Text("A macOS IPSW file (~16 GB) will be downloaded from Apple to create the base virtual machine image.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
+                Text(
+                    "A macOS IPSW file (~16 GB) will be downloaded from Apple to create the base virtual machine image."
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
 
                 Button("Download IPSW") {
                     startDownload()
@@ -175,8 +181,10 @@ struct BaseImageWizardView: View {
 
                 HStack {
                     // Downloaded / Total
-                    Text("\(formatBytes(imageManager.downloadedBytes)) / \(formatBytes(imageManager.totalDownloadBytes))")
-                        .monospacedDigit()
+                    Text(
+                        "\(formatBytes(imageManager.downloadedBytes)) / \(formatBytes(imageManager.totalDownloadBytes))"
+                    )
+                    .monospacedDigit()
 
                     Spacer()
 
@@ -253,11 +261,13 @@ struct BaseImageWizardView: View {
             Text("Install macOS")
                 .font(.title3.weight(.medium))
 
-            Text("macOS will be installed into a virtual machine disk image. This creates the base image that ephemeral runners will clone for each job.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+            Text(
+                "macOS will be installed into a virtual machine disk image. This creates the base image that ephemeral runners will clone for each job."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 380)
 
             let config = configStore.vmConfiguration
             HStack(spacing: 24) {
@@ -315,11 +325,13 @@ struct BaseImageWizardView: View {
             Text("Base image created")
                 .font(.title3.weight(.medium))
 
-            Text("Your ephemeral runner is ready to provision VMs for GitHub Actions jobs. Each job will get a fresh clone of this base image.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+            Text(
+                "Your ephemeral runner is ready to provision VMs for GitHub Actions jobs. Each job will get a fresh clone of this base image."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 380)
         }
     }
 
@@ -431,7 +443,8 @@ struct BaseImageWizardView: View {
             return configStore.baseImagePath
         }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport
+        return
+            appSupport
             .appendingPathComponent("Tarmac")
             .appendingPathComponent("BaseImage.img")
             .path
