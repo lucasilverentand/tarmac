@@ -57,6 +57,11 @@ final class AppState {
     // MARK: - Engine Lifecycle
 
     func start() async {
+        guard queueEngine == nil else {
+            Log.app.debug("Start ignored because app is already running")
+            return
+        }
+
         let issues = settingsViewModel.validateConfiguration()
         guard issues.isEmpty else {
             Log.app.warning("Cannot start: \(issues.joined(separator: ", "))")
@@ -138,6 +143,9 @@ final class AppState {
             let org = configStore.organizations.first { $0.name == job.organizationName }
             guard let org else {
                 Log.app.error("No org found for job \(job.id)")
+                await queueEngine.jobStore.updateJob(id: job.id, status: .failed)
+                queueViewModel.updateJobStatus(id: job.id, status: .failed)
+                await queueEngine.tryDispatch()
                 return
             }
 
@@ -175,6 +183,7 @@ final class AppState {
                 try? await vmEngine.teardown()
                 vmStatusViewModel.activeVM = nil
             }
+            await queueEngine.tryDispatch()
         }
     }
 

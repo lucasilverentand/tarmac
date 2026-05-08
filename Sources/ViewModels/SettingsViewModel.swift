@@ -123,6 +123,9 @@ final class SettingsViewModel {
             if org.appId.isEmpty {
                 issues.append("\(org.name): GitHub App ID is not configured")
             }
+            if org.scaleSetId == nil {
+                issues.append("\(org.name): Scale set ID is not configured")
+            }
             if !configStore.hasPrivateKey(for: org) {
                 issues.append("\(org.name): Private key is not imported")
             }

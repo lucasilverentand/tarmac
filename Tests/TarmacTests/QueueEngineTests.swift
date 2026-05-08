@@ -110,6 +110,27 @@ struct QueueEngineTests {
         #expect(job?.status == .completed)
     }
 
+    @Test("JobCompleted immediately dispatches next pending job")
+    func jobCompletedDispatchesNextPendingJob() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg()
+
+        await engine.handleMessages(
+            [
+                jobAvailableMessage(jobId: 10),
+                jobAvailableMessage(jobId: 11),
+            ],
+            org: org
+        )
+
+        await engine.handleMessages([jobCompletedMessage(jobId: 10, result: "success")], org: org)
+
+        let first = await store.job(byId: 10)
+        let second = await store.job(byId: 11)
+        #expect(first?.status == .completed)
+        #expect(second?.status == .provisioning)
+    }
+
     @Test("JobCompleted with failed marks .failed")
     func jobCompletedFailed() async throws {
         let (engine, store, _) = try makeEngine()

@@ -101,6 +101,18 @@ struct SettingsViewModelTests {
         #expect(issues.contains { $0.contains("my-org") && $0.contains("Private key") })
     }
 
+    @Test("validateConfiguration detects missing scale set ID")
+    func validateMissingScaleSet() {
+        let (vm, _, keychain) = makeVM()
+
+        let org = TestFactories.makeOrg(name: "my-org", scaleSetId: nil)
+        vm.addOrganization(org)
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+
+        let issues = vm.validateConfiguration()
+        #expect(issues.contains { $0.contains("my-org") && $0.contains("Scale set ID") })
+    }
+
     @Test("validateConfiguration detects all orgs disabled")
     func validateAllOrgsDisabled() {
         let (vm, _, _) = makeVM()
