@@ -7,10 +7,17 @@ struct BaseImageWizardView: View {
     @State private var isWorking = false
     @State private var errorMessage: String?
     @State private var ipswURL: URL?
-    @State private var imageManager = ImageManager()
+    @State private var imageManager: ImageManager
     @State private var downloadStartTime: Date?
 
     @Environment(\.dismiss) private var dismiss
+
+    init(configStore: ConfigStore) {
+        self.configStore = configStore
+        _imageManager = State(
+            initialValue: ImageManager(storageDirectory: URL(fileURLWithPath: configStore.storageDirectoryPath))
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -410,13 +417,15 @@ struct BaseImageWizardView: View {
         Task {
             do {
                 let vmConfig = configStore.vmConfiguration
-                let baseImagePath = resolvedBaseImagePath()
+                let baseImagePath = configStore.resolvedBaseImagePath
 
                 let diskManager = DiskImageManager()
                 let baseImageURL = URL(fileURLWithPath: baseImagePath)
                 try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB)
 
-                let platformStore = PlatformDataStore()
+                let platformStore = PlatformDataStore(
+                    directory: URL(fileURLWithPath: configStore.platformDirectoryPath)
+                )
                 try await imageManager.installMacOS(
                     ipsw: ipsw,
                     diskPath: baseImageURL,
@@ -436,18 +445,6 @@ struct BaseImageWizardView: View {
                 Log.image.error("Base image install failed: \(error.localizedDescription)")
             }
         }
-    }
-
-    private func resolvedBaseImagePath() -> String {
-        if !configStore.baseImagePath.isEmpty {
-            return configStore.baseImagePath
-        }
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return
-            appSupport
-            .appendingPathComponent("Tarmac")
-            .appendingPathComponent("BaseImage.img")
-            .path
     }
 
     // MARK: - Formatting

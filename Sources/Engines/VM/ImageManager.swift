@@ -17,9 +17,14 @@ final class ImageManager: Sendable {
     private var progressTimer: Timer?
     private var speedSampleBytes: Int64 = 0
     private var speedSampleTime: Date = Date()
+    private let storageDirectory: URL
+
+    init(storageDirectory: URL? = nil) {
+        self.storageDirectory = storageDirectory ?? Self.defaultStorageDirectory
+    }
 
     var canResume: Bool {
-        IPSWDownloader.hasResumeData
+        IPSWDownloader.hasResumeData(in: storageDirectory)
     }
 
     func downloadLatestIPSW() async throws -> URL {
@@ -37,7 +42,7 @@ final class ImageManager: Sendable {
         }
         Log.image.info("Downloading IPSW from \(downloadURL.absoluteString)...")
 
-        let destination = Self.ipswDestination
+        let destination = ipswDestination
         let cacheDir = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
 
@@ -55,7 +60,7 @@ final class ImageManager: Sendable {
         speedSampleTime = Date()
         isDownloading = true
 
-        let downloader = IPSWDownloader()
+        let downloader = IPSWDownloader(storageDirectory: storageDirectory)
         activeDownloader = downloader
 
         // Poll the downloader's progress on a timer so updates happen regardless of focus
@@ -67,7 +72,7 @@ final class ImageManager: Sendable {
             syncProgress(from: downloader)  // final sync
 
             try FileManager.default.moveItem(at: localURL, to: destination)
-            IPSWDownloader.clearResumeData()
+            IPSWDownloader.clearResumeData(in: storageDirectory)
             cleanupTempIPSWFiles()
 
             downloadProgress = 1.0
@@ -96,12 +101,12 @@ final class ImageManager: Sendable {
     }
 
     func clearResumeData() {
-        IPSWDownloader.clearResumeData()
+        IPSWDownloader.clearResumeData(in: storageDirectory)
         Log.image.info("Resume data cleared")
     }
 
     func cleanupTempIPSWFiles() {
-        let tmpDir = FileManager.default.temporaryDirectory
+        let tmpDir = downloadScratchDirectory
         guard
             let contents = try? FileManager.default.contentsOfDirectory(
                 at: tmpDir,
@@ -114,9 +119,17 @@ final class ImageManager: Sendable {
         }
     }
 
-    static var ipswDestination: URL {
+    var ipswDestination: URL {
+        storageDirectory.appendingPathComponent("restore.ipsw")
+    }
+
+    var downloadScratchDirectory: URL {
+        storageDirectory.appendingPathComponent("Downloads")
+    }
+
+    static var defaultStorageDirectory: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Tarmac/restore.ipsw")
+        return appSupport.appendingPathComponent("Tarmac")
     }
 
     // MARK: - Progress Timer
@@ -264,15 +277,23 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
     private var tempFileURL: URL?
     private var session: URLSession?
     private var downloadTask: URLSessionDownloadTask?
+    private let storageDirectory: URL
 
     // Atomic progress — written from delegate queue, read from main actor
     private let lock = NSLock()
     private var _bytesWritten: Int64 = 0
     private var _bytesExpected: Int64 = 0
 
-    private static var resumeDataURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Tarmac/ipsw-resume.data")
+    init(storageDirectory: URL) {
+        self.storageDirectory = storageDirectory
+    }
+
+    private var resumeDataURL: URL {
+        storageDirectory.appendingPathComponent("ipsw-resume.data")
+    }
+
+    private var scratchDirectory: URL {
+        storageDirectory.appendingPathComponent("Downloads")
     }
 
     func progressSnapshot() -> ProgressSnapshot {
@@ -287,7 +308,7 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
             let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
             self.session = session
 
-            if let resumeData = Self.loadResumeData() {
+            if let resumeData = loadResumeData() {
                 Log.image.info("Resuming download from saved state")
                 self.downloadTask = session.downloadTask(withResumeData: resumeData)
             } else {
@@ -299,33 +320,33 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
 
     func cancel() {
         downloadTask?.cancel(byProducingResumeData: { [weak self] data in
+            guard let self else { return }
             if let data {
-                Self.saveResumeData(data)
+                self.saveResumeData(data)
                 Log.image.info("Resume data saved (\(data.count) bytes)")
             }
             // The didCompleteWithError delegate will fire and resume the continuation
-            _ = self  // prevent premature dealloc
         })
     }
 
     // MARK: - Resume Data Persistence
 
-    static var hasResumeData: Bool {
-        FileManager.default.fileExists(atPath: resumeDataURL.path)
+    static func hasResumeData(in storageDirectory: URL) -> Bool {
+        FileManager.default.fileExists(atPath: storageDirectory.appendingPathComponent("ipsw-resume.data").path)
     }
 
-    static func saveResumeData(_ data: Data) {
+    private func saveResumeData(_ data: Data) {
         let dir = resumeDataURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? data.write(to: resumeDataURL, options: .atomic)
     }
 
-    static func loadResumeData() -> Data? {
+    private func loadResumeData() -> Data? {
         try? Data(contentsOf: resumeDataURL)
     }
 
-    static func clearResumeData() {
-        try? FileManager.default.removeItem(at: resumeDataURL)
+    static func clearResumeData(in storageDirectory: URL) {
+        try? FileManager.default.removeItem(at: storageDirectory.appendingPathComponent("ipsw-resume.data"))
     }
 
     // MARK: - URLSessionDownloadDelegate
@@ -348,7 +369,9 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        let stableURL = FileManager.default.temporaryDirectory
+        try? FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let stableURL =
+            scratchDirectory
             .appendingPathComponent("ipsw-\(UUID().uuidString).ipsw")
         do {
             try FileManager.default.copyItem(at: location, to: stableURL)
@@ -368,7 +391,7 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
             // Save resume data from the error if available
             let nsError = error as NSError
             if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-                Self.saveResumeData(resumeData)
+                saveResumeData(resumeData)
             }
             continuation?.resume(throwing: error)
         } else if let url = tempFileURL {

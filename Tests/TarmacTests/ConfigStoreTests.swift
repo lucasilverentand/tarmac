@@ -60,9 +60,28 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
+        #expect(!store.storageDirectoryPath.isEmpty)
         #expect(!store.cacheDirectoryPath.isEmpty)  // default is set
+        #expect(!store.hasCompletedStorageSetup)
 
         defaults.removePersistentDomain(forName: "test-config")
+    }
+
+    @Test("Configure storage derives managed paths")
+    func configureStorage() throws {
+        let (store, _) = makeStore()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tarmac-storage-\(UUID().uuidString)")
+
+        try store.configureStorage(at: directory)
+
+        #expect(store.hasCompletedStorageSetup)
+        #expect(store.storageDirectoryPath == directory.standardizedFileURL.path)
+        #expect(store.cacheDirectoryPath == directory.appendingPathComponent("Cache").path)
+        #expect(store.resolvedBaseImagePath == directory.appendingPathComponent("BaseImage.img").path)
+        #expect(store.platformDirectoryPath == directory.appendingPathComponent("Platform").path)
+
+        try? FileManager.default.removeItem(at: directory)
     }
 
     @Test("Remove organization")

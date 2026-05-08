@@ -70,8 +70,10 @@ struct SettingsViewModelTests {
     }
 
     @Test("validateConfiguration returns empty when fully configured")
-    func validateFullyConfigured() {
+    func validateFullyConfigured() throws {
         let (vm, _, keychain) = makeVM()
+        let storage = try TestFactories.makeTempDir()
+        try vm.configureStorage(at: storage)
 
         let org = TestFactories.makeOrg()
         vm.addOrganization(org)
@@ -79,6 +81,7 @@ struct SettingsViewModelTests {
 
         let issues = vm.validateConfiguration()
         #expect(issues.isEmpty)
+        TestFactories.cleanup(storage)
     }
 
     @Test("validateConfiguration returns issues when nothing configured")
@@ -87,6 +90,7 @@ struct SettingsViewModelTests {
 
         let issues = vm.validateConfiguration()
         #expect(issues.contains { $0.contains("No organizations") })
+        #expect(issues.contains { $0.contains("Storage location") })
     }
 
     @Test("validateConfiguration detects missing credentials per org")
