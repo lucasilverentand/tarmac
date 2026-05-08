@@ -14,7 +14,7 @@ struct AppStateTests {
         let (configStore, _) = TestFactories.makeConfigStore()
         let tempDir = try TestFactories.makeTempDir()
 
-        configStore.cacheDirectoryPath = tempDir.path
+        try configStore.configureStorage(at: tempDir)
 
         // Add orgs with valid config
         for org in orgs {
@@ -37,10 +37,11 @@ struct AppStateTests {
         let appState = AppState(
             configStore: configStore,
             githubClientFactory: { client },
-            vmEngineFactory: { cachePath, basePath, cacheConfig in
+            vmEngineFactory: { cachePath, basePath, platformPath, cacheConfig in
                 VMEngine(
                     cacheDirectoryPath: cachePath,
                     baseImagePath: basePath,
+                    platformDirectoryPath: platformPath,
                     cacheConfig: cacheConfig,
                     lifecycle: mock
                 )

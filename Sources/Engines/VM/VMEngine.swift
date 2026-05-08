@@ -28,15 +28,22 @@ final class VMEngine: VMManagerProtocol {
     init(
         cacheDirectoryPath: String,
         baseImagePath: String,
+        platformDirectoryPath: String? = nil,
         cacheConfig: CacheConfiguration = CacheConfiguration(),
-        platformStore: PlatformDataStore = PlatformDataStore(),
+        platformStore: PlatformDataStore? = nil,
         lifecycle: (any VMLifecycleProtocol)? = nil,
         diskManager: DiskImageManager = DiskImageManager(),
         imageManager: ImageManager = ImageManager()
     ) {
         self.sharedDirManager = SharedDirectoryManager(cacheDirectoryPath: cacheDirectoryPath)
         self.cacheManager = CacheManager(cacheDirectoryPath: cacheDirectoryPath)
-        self.platformStore = platformStore
+        if let platformStore {
+            self.platformStore = platformStore
+        } else if let platformDirectoryPath {
+            self.platformStore = PlatformDataStore(directory: URL(fileURLWithPath: platformDirectoryPath))
+        } else {
+            self.platformStore = PlatformDataStore()
+        }
         self.baseImageURL = URL(fileURLWithPath: baseImagePath)
         self.cacheConfig = cacheConfig
         self.lifecycle = lifecycle ?? VMLifecycle()

@@ -85,6 +85,10 @@ final class SettingsViewModel {
         }
     }
 
+    var storageDirectoryPath: String {
+        configStore.storageDirectoryPath
+    }
+
     var cacheDirectoryPath: String {
         get { configStore.cacheDirectoryPath }
         set {
@@ -96,6 +100,25 @@ final class SettingsViewModel {
     var resolvedCachePath: String {
         let base = configStore.cacheDirectoryPath
         return URL(fileURLWithPath: base).appendingPathComponent("actions-cache").path
+    }
+
+    var baseImagePath: String {
+        configStore.resolvedBaseImagePath
+    }
+
+    var platformDirectoryPath: String {
+        configStore.platformDirectoryPath
+    }
+
+    var restoreImagePath: String {
+        URL(fileURLWithPath: configStore.storageDirectoryPath)
+            .appendingPathComponent("restore.ipsw")
+            .path
+    }
+
+    func configureStorage(at url: URL) throws {
+        try configStore.configureStorage(at: url)
+        Log.config.info("Storage directory changed to \(url.path)")
     }
 
     func clearCache() {
@@ -114,6 +137,9 @@ final class SettingsViewModel {
         var issues: [String] = []
         if configStore.organizations.isEmpty {
             issues.append("No organizations configured")
+        }
+        if !configStore.hasCompletedStorageSetup {
+            issues.append("Storage location is not configured")
         }
         let enabled = configStore.organizations.filter(\.isEnabled)
         if enabled.isEmpty && !configStore.organizations.isEmpty {

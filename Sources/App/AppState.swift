@@ -14,7 +14,7 @@ final class AppState {
     private var syncTask: Task<Void, Never>?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
-    private let vmEngineFactory: (String, String, CacheConfiguration) -> VMEngine
+    private let vmEngineFactory: (String, String, String, CacheConfiguration) -> VMEngine
 
     init() {
         let configStore = ConfigStore()
@@ -23,10 +23,11 @@ final class AppState {
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = { GitHubClient() }
-        self.vmEngineFactory = { cachePath, basePath, cacheConfig in
+        self.vmEngineFactory = { cachePath, basePath, platformPath, cacheConfig in
             VMEngine(
                 cacheDirectoryPath: cachePath,
                 baseImagePath: basePath,
+                platformDirectoryPath: platformPath,
                 cacheConfig: cacheConfig
             )
         }
@@ -35,13 +36,15 @@ final class AppState {
     init(
         configStore: ConfigStore,
         githubClientFactory: @escaping () -> any GitHubClientProtocol = { GitHubClient() },
-        vmEngineFactory: @escaping (String, String, CacheConfiguration) -> VMEngine = {
+        vmEngineFactory: @escaping (String, String, String, CacheConfiguration) -> VMEngine = {
             cachePath,
             basePath,
+            platformPath,
             cacheConfig in
             VMEngine(
                 cacheDirectoryPath: cachePath,
                 baseImagePath: basePath,
+                platformDirectoryPath: platformPath,
                 cacheConfig: cacheConfig
             )
         }
@@ -72,7 +75,8 @@ final class AppState {
 
         let vmEngine = vmEngineFactory(
             configStore.cacheDirectoryPath,
-            resolvedBaseImagePath(),
+            configStore.resolvedBaseImagePath,
+            configStore.platformDirectoryPath,
             configStore.cacheConfig
         )
         self.vmEngine = vmEngine
@@ -199,17 +203,4 @@ final class AppState {
         }
     }
 
-    // MARK: - Helpers
-
-    private func resolvedBaseImagePath() -> String {
-        if !configStore.baseImagePath.isEmpty {
-            return configStore.baseImagePath
-        }
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return
-            appSupport
-            .appendingPathComponent("Tarmac")
-            .appendingPathComponent("BaseImage.img")
-            .path
-    }
 }
