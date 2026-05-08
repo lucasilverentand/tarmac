@@ -49,13 +49,17 @@ actor QueueEngine {
         }
     }
 
-    func stop() {
+    func stop() async {
         Log.queue.info("Stopping queue engine")
 
         // Cancelling tasks triggers session cleanup in each polling loop
         for (name, task) in pollingTasks {
             task.cancel()
             Log.queue.debug("Cancelled polling for \(name)")
+        }
+
+        for (_, task) in pollingTasks {
+            await task.value
         }
 
         pollingTasks.removeAll()
@@ -173,6 +177,7 @@ actor QueueEngine {
 
         let result: JobResult = completed.result == "success" ? .success : .failure(completed.result ?? "unknown")
         await dispatcher.markCompleted(jobId: completed.jobId, in: jobStore, result: result)
+        await tryDispatch()
     }
 
     // MARK: - Dispatch
