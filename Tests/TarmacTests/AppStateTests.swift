@@ -123,7 +123,7 @@ struct AppStateTests {
         #expect(!appState.queueViewModel.isPolling)
     }
 
-    @Test("resolvedBaseImagePath defaults to Application Support")
+    @Test("resolvedBaseImagePath defaults to configured storage root")
     @MainActor
     func resolvedBaseImagePathDefault() throws {
         let (configStore, _) = TestFactories.makeConfigStore()

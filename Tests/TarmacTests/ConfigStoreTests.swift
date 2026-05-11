@@ -60,9 +60,43 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
-        #expect(!store.cacheDirectoryPath.isEmpty)  // default is set
+        #expect(!store.storageRootPath.isEmpty)  // default is set
+        #expect(store.cacheDirectoryPath == store.storageRootPath)
 
         defaults.removePersistentDomain(forName: "test-config")
+    }
+
+    @Test("storageRootPath loads legacy cacheDirectoryPath")
+    func storageRootLoadsLegacyCacheDirectoryPath() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let legacyPath = "/tmp/tarmac-legacy-\(UUID().uuidString)"
+        defaults.set(legacyPath, forKey: "cacheDirectoryPath")
+
+        let store = ConfigStore(defaults: defaults, keychainService: keychain)
+
+        #expect(store.storageRootPath == legacyPath)
+        #expect(store.cacheDirectoryPath == legacyPath)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("save persists storage root to new and legacy keys")
+    func storageRootPersists() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let path = "/tmp/tarmac-storage-\(UUID().uuidString)"
+
+        let store = ConfigStore(defaults: defaults, keychainService: keychain)
+        store.storageRootPath = path
+        store.save()
+
+        #expect(defaults.string(forKey: "storageRootPath") == path)
+        #expect(defaults.string(forKey: "cacheDirectoryPath") == path)
+
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     @Test("Remove organization")

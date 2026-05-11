@@ -57,6 +57,7 @@ struct VMEngineTests {
 
         #expect(instance.state == .running)
         #expect(instance.jobId == 42)
+        #expect(instance.diskImagePath.deletingLastPathComponent().lastPathComponent == "disks")
         #expect(engine.currentInstance?.state == .running)
         #expect(engine.isRunning)
     }

@@ -71,4 +71,16 @@ struct PlatformDataStoreTests {
 
         #expect(!store.hasExistingPlatform)
     }
+
+    @Test("storage initializer uses platform directory under root")
+    func storageInitializerUsesPlatformDirectory() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let storage = StorageManager(rootDirectory: tempDir)
+        let store = PlatformDataStore(storage: storage)
+        try store.saveHardwareModel(Data([0x01]))
+
+        #expect(FileManager.default.fileExists(atPath: storage.platformDirectory.appendingPathComponent("hardwareModel.bin").path))
+    }
 }

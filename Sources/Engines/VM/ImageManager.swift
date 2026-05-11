@@ -4,6 +4,8 @@ import Virtualization
 @Observable
 @MainActor
 final class ImageManager: Sendable {
+    private let storage: StorageManager
+
     private(set) var downloadProgress: Double = 0
     private(set) var downloadedBytes: Int64 = 0
     private(set) var totalDownloadBytes: Int64 = 0
@@ -18,8 +20,12 @@ final class ImageManager: Sendable {
     private var speedSampleBytes: Int64 = 0
     private var speedSampleTime: Date = Date()
 
+    init(storage: StorageManager = StorageManager(rootDirectory: StorageManager.defaultRootDirectory)) {
+        self.storage = storage
+    }
+
     var canResume: Bool {
-        IPSWDownloader.hasResumeData
+        IPSWDownloader.hasResumeData(resumeDataURL: storage.ipswResumeDataURL, partialFileURL: storage.partialIPSWURL)
     }
 
     func downloadLatestIPSW() async throws -> URL {
@@ -37,9 +43,15 @@ final class ImageManager: Sendable {
         }
         Log.image.info("Downloading IPSW from \(downloadURL.absoluteString)...")
 
-        let destination = Self.ipswDestination
-        let cacheDir = destination.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        try storage.prepareBaseDirectories()
+        try storage.cleanupTransientFiles()
+
+        if let warning = storage.storageWarning(minimumFreeBytes: 25 * 1024 * 1024 * 1024) {
+            Log.image.warning("\(warning)")
+        }
+
+        let destination = storage.restoreIPSWURL
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
 
         // Remove completed file if re-downloading
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -55,7 +67,10 @@ final class ImageManager: Sendable {
         speedSampleTime = Date()
         isDownloading = true
 
-        let downloader = IPSWDownloader()
+        let downloader = IPSWDownloader(
+            resumeDataURL: storage.ipswResumeDataURL,
+            partialFileURL: storage.partialIPSWURL
+        )
         activeDownloader = downloader
 
         // Poll the downloader's progress on a timer so updates happen regardless of focus
@@ -66,8 +81,12 @@ final class ImageManager: Sendable {
             stopProgressTimer()
             syncProgress(from: downloader)  // final sync
 
+            try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: localURL, to: destination)
-            IPSWDownloader.clearResumeData()
+            IPSWDownloader.clearResumeData(
+                resumeDataURL: storage.ipswResumeDataURL,
+                partialFileURL: storage.partialIPSWURL
+            )
             cleanupTempIPSWFiles()
 
             downloadProgress = 1.0
@@ -96,12 +115,15 @@ final class ImageManager: Sendable {
     }
 
     func clearResumeData() {
-        IPSWDownloader.clearResumeData()
+        IPSWDownloader.clearResumeData(
+            resumeDataURL: storage.ipswResumeDataURL,
+            partialFileURL: storage.partialIPSWURL
+        )
         Log.image.info("Resume data cleared")
     }
 
     func cleanupTempIPSWFiles() {
-        let tmpDir = FileManager.default.temporaryDirectory
+        let tmpDir = storage.tmpDirectory
         guard
             let contents = try? FileManager.default.contentsOfDirectory(
                 at: tmpDir,
@@ -112,11 +134,7 @@ final class ImageManager: Sendable {
         for file in contents where file.lastPathComponent.hasPrefix("ipsw-") && file.pathExtension == "ipsw" {
             try? FileManager.default.removeItem(at: file)
         }
-    }
-
-    static var ipswDestination: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Tarmac/restore.ipsw")
+        try? FileManager.default.removeItem(at: storage.partialIPSWURL)
     }
 
     // MARK: - Progress Timer
@@ -253,26 +271,36 @@ enum ImageManagerError: LocalizedError {
 
 // MARK: - IPSW Downloader
 
-/// Delegate-based downloader that supports resume and exposes atomic progress snapshots.
-final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+/// Delegate-based downloader that stores partial IPSW data inside Tarmac's storage root.
+final class IPSWDownloader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     struct ProgressSnapshot: Sendable {
         let bytesWritten: Int64
         let bytesExpected: Int64
     }
 
+    private struct ResumeState: Codable {
+        let url: URL
+        let bytesWritten: Int64
+    }
+
+    private let resumeDataURL: URL
+    private let partialFileURL: URL
+
     private var continuation: CheckedContinuation<URL, Error>?
-    private var tempFileURL: URL?
     private var session: URLSession?
-    private var downloadTask: URLSessionDownloadTask?
+    private var downloadTask: URLSessionDataTask?
+    private var fileHandle: FileHandle?
+    private var sourceURL: URL?
 
     // Atomic progress — written from delegate queue, read from main actor
     private let lock = NSLock()
     private var _bytesWritten: Int64 = 0
     private var _bytesExpected: Int64 = 0
+    private var _shouldAppend = false
 
-    private static var resumeDataURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Tarmac/ipsw-resume.data")
+    init(resumeDataURL: URL, partialFileURL: URL) {
+        self.resumeDataURL = resumeDataURL
+        self.partialFileURL = partialFileURL
     }
 
     func progressSnapshot() -> ProgressSnapshot {
@@ -284,76 +312,140 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
     func download(from url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
+            self.sourceURL = url
             let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
             self.session = session
 
-            if let resumeData = Self.loadResumeData() {
-                Log.image.info("Resuming download from saved state")
-                self.downloadTask = session.downloadTask(withResumeData: resumeData)
+            var request = URLRequest(url: url)
+            if let resumeState = loadResumeState(),
+                resumeState.url == url,
+                FileManager.default.fileExists(atPath: partialFileURL.path),
+                resumeState.bytesWritten > 0
+            {
+                request.setValue("bytes=\(resumeState.bytesWritten)-", forHTTPHeaderField: "Range")
+                lock.withLock {
+                    _bytesWritten = resumeState.bytesWritten
+                    _bytesExpected = resumeState.bytesWritten
+                    _shouldAppend = true
+                }
+                Log.image.info("Resuming download from byte \(resumeState.bytesWritten)")
             } else {
-                self.downloadTask = session.downloadTask(with: url)
+                try? FileManager.default.removeItem(at: partialFileURL)
+                try? FileManager.default.removeItem(at: resumeDataURL)
+                lock.withLock {
+                    _bytesWritten = 0
+                    _bytesExpected = 0
+                    _shouldAppend = false
+                }
             }
+
+            self.downloadTask = session.dataTask(with: request)
             self.downloadTask?.resume()
         }
     }
 
     func cancel() {
-        downloadTask?.cancel(byProducingResumeData: { [weak self] data in
-            if let data {
-                Self.saveResumeData(data)
-                Log.image.info("Resume data saved (\(data.count) bytes)")
-            }
-            // The didCompleteWithError delegate will fire and resume the continuation
-            _ = self  // prevent premature dealloc
-        })
+        saveResumeState()
+        downloadTask?.cancel()
     }
 
     // MARK: - Resume Data Persistence
 
-    static var hasResumeData: Bool {
+    static func hasResumeData(resumeDataURL: URL, partialFileURL: URL) -> Bool {
         FileManager.default.fileExists(atPath: resumeDataURL.path)
+            && FileManager.default.fileExists(atPath: partialFileURL.path)
     }
 
-    static func saveResumeData(_ data: Data) {
-        let dir = resumeDataURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? data.write(to: resumeDataURL, options: .atomic)
-    }
-
-    static func loadResumeData() -> Data? {
-        try? Data(contentsOf: resumeDataURL)
-    }
-
-    static func clearResumeData() {
+    static func clearResumeData(resumeDataURL: URL, partialFileURL: URL) {
         try? FileManager.default.removeItem(at: resumeDataURL)
+        try? FileManager.default.removeItem(at: partialFileURL)
     }
 
-    // MARK: - URLSessionDownloadDelegate
+    private func saveResumeState() {
+        guard let sourceURL else { return }
+        let snapshot = progressSnapshot()
+        guard snapshot.bytesWritten > 0 else { return }
 
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        lock.withLock {
-            _bytesWritten = totalBytesWritten
-            _bytesExpected = totalBytesExpectedToWrite
+        let state = ResumeState(url: sourceURL, bytesWritten: snapshot.bytesWritten)
+        do {
+            try FileManager.default.createDirectory(
+                at: resumeDataURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(state)
+            try data.write(to: resumeDataURL, options: .atomic)
+            Log.image.info("Resume state saved at byte \(snapshot.bytesWritten)")
+        } catch {
+            Log.image.error("Failed to save resume state: \(error.localizedDescription)")
         }
     }
 
+    private func loadResumeState() -> ResumeState? {
+        guard let data = try? Data(contentsOf: resumeDataURL) else { return nil }
+        return try? JSONDecoder().decode(ResumeState.self, from: data)
+    }
+
+    private func closeFileHandle() {
+        try? fileHandle?.close()
+        fileHandle = nil
+    }
+
+    // MARK: - URLSessionDataDelegate
+
     func urlSession(
         _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
     ) {
-        let stableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ipsw-\(UUID().uuidString).ipsw")
         do {
-            try FileManager.default.copyItem(at: location, to: stableURL)
-            tempFileURL = stableURL
+            try FileManager.default.createDirectory(
+                at: partialFileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            let shouldAppend = lock.withLock { _shouldAppend && statusCode == 206 }
+            if !shouldAppend {
+                FileManager.default.createFile(atPath: partialFileURL.path, contents: nil)
+                lock.withLock {
+                    _bytesWritten = 0
+                    _shouldAppend = false
+                }
+            }
+
+            let handle = try FileHandle(forWritingTo: partialFileURL)
+            if shouldAppend {
+                try handle.seekToEnd()
+            }
+            fileHandle = handle
+
+            let expected = response.expectedContentLength
+            lock.withLock {
+                if expected > 0 {
+                    _bytesExpected = _bytesWritten + expected
+                }
+            }
+            completionHandler(.allow)
         } catch {
+            continuation?.resume(throwing: error)
+            continuation = nil
+            completionHandler(.cancel)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        do {
+            try fileHandle?.write(contentsOf: data)
+            lock.withLock {
+                _bytesWritten += Int64(data.count)
+                if _bytesExpected < _bytesWritten {
+                    _bytesExpected = _bytesWritten
+                }
+            }
+        } catch {
+            saveResumeState()
+            dataTask.cancel()
             continuation?.resume(throwing: error)
             continuation = nil
         }
@@ -364,15 +456,12 @@ final class IPSWDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
         task: URLSessionTask,
         didCompleteWithError error: Error?
     ) {
+        closeFileHandle()
         if let error {
-            // Save resume data from the error if available
-            let nsError = error as NSError
-            if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-                Self.saveResumeData(resumeData)
-            }
+            saveResumeState()
             continuation?.resume(throwing: error)
-        } else if let url = tempFileURL {
-            continuation?.resume(returning: url)
+        } else if FileManager.default.fileExists(atPath: partialFileURL.path) {
+            continuation?.resume(returning: partialFileURL)
         } else {
             continuation?.resume(throwing: ImageManagerError.noDownloadURL)
         }

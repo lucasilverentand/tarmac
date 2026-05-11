@@ -10,7 +10,11 @@ final class ConfigStore {
     var vmConfiguration: VMConfiguration = VMConfiguration()
     var cacheConfig: CacheConfiguration = CacheConfiguration()
     var baseImagePath: String = ""
-    var cacheDirectoryPath: String = ""
+    var storageRootPath: String = ""
+    var cacheDirectoryPath: String {
+        get { storageRootPath }
+        set { storageRootPath = newValue }
+    }
     var launchAtLogin: Bool = false
 
     init(
@@ -75,7 +79,8 @@ final class ConfigStore {
             defaults.set(data, forKey: "cacheConfiguration")
         }
         defaults.set(baseImagePath, forKey: "baseImagePath")
-        defaults.set(cacheDirectoryPath, forKey: "cacheDirectoryPath")
+        defaults.set(storageRootPath, forKey: "storageRootPath")
+        defaults.set(storageRootPath, forKey: "cacheDirectoryPath")
         defaults.set(launchAtLogin, forKey: "launchAtLogin")
         Log.config.debug("Configuration saved")
     }
@@ -97,12 +102,14 @@ final class ConfigStore {
             cacheConfig = config
         }
         baseImagePath = defaults.string(forKey: "baseImagePath") ?? ""
-        cacheDirectoryPath = defaults.string(forKey: "cacheDirectoryPath") ?? ""
+        storageRootPath =
+            defaults.string(forKey: "storageRootPath")
+            ?? defaults.string(forKey: "cacheDirectoryPath")
+            ?? ""
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
 
-        if cacheDirectoryPath.isEmpty {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            cacheDirectoryPath = appSupport.appendingPathComponent("Tarmac/Cache").path
+        if storageRootPath.isEmpty {
+            storageRootPath = StorageManager.defaultRootDirectory.path
         }
 
         Log.config.debug("Configuration loaded: \(self.organizations.count) organizations")

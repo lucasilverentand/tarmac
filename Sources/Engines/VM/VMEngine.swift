@@ -10,6 +10,7 @@ final class VMEngine: VMManagerProtocol {
     private let sharedDirManager: SharedDirectoryManager
     private let cacheManager: CacheManager
     private let platformStore: PlatformDataStore
+    private let storage: StorageManager
     private let baseImageURL: URL
 
     private(set) var currentInstance: VMInstance?
@@ -29,19 +30,21 @@ final class VMEngine: VMManagerProtocol {
         cacheDirectoryPath: String,
         baseImagePath: String,
         cacheConfig: CacheConfiguration = CacheConfiguration(),
-        platformStore: PlatformDataStore = PlatformDataStore(),
+        platformStore: PlatformDataStore? = nil,
         lifecycle: (any VMLifecycleProtocol)? = nil,
         diskManager: DiskImageManager = DiskImageManager(),
-        imageManager: ImageManager = ImageManager()
+        imageManager: ImageManager? = nil
     ) {
-        self.sharedDirManager = SharedDirectoryManager(cacheDirectoryPath: cacheDirectoryPath)
-        self.cacheManager = CacheManager(cacheDirectoryPath: cacheDirectoryPath)
-        self.platformStore = platformStore
+        let storage = StorageManager(rootPath: cacheDirectoryPath)
+        self.storage = storage
+        self.sharedDirManager = SharedDirectoryManager(storage: storage)
+        self.cacheManager = CacheManager(storage: storage)
+        self.platformStore = platformStore ?? PlatformDataStore(storage: storage)
         self.baseImageURL = URL(fileURLWithPath: baseImagePath)
         self.cacheConfig = cacheConfig
         self.lifecycle = lifecycle ?? VMLifecycle()
         self.diskManager = diskManager
-        self.imageManager = imageManager
+        self.imageManager = imageManager ?? ImageManager(storage: storage)
     }
 
     // MARK: - Base Image
@@ -50,6 +53,8 @@ final class VMEngine: VMManagerProtocol {
         let path = baseImageURL.path
         Log.vm.info("Creating base image at \(path)")
 
+        try storage.prepareBaseDirectories()
+        try storage.cleanupTransientFiles()
         try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB)
 
         try await imageManager.installMacOS(
@@ -69,9 +74,15 @@ final class VMEngine: VMManagerProtocol {
         config: VMConfiguration,
         sharedDirectory: URL
     ) async throws -> VMInstance {
+        try storage.prepareBaseDirectories()
+        try storage.cleanupTransientFiles()
+
+        if let warning = storage.storageWarning(minimumFreeBytes: Int64(config.diskSizeGB) * 1024 * 1024 * 1024 / 2) {
+            Log.vm.warning("\(warning)")
+        }
+
         let instanceId = UUID()
-        let clonedDiskPath = sharedDirManager.baseDirectory
-            .appendingPathComponent("disks")
+        let clonedDiskPath = storage.disksDirectory
             .appendingPathComponent("\(instanceId.uuidString).img")
 
         try diskManager.cloneDisk(from: baseImageURL, to: clonedDiskPath)

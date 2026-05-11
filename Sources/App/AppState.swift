@@ -64,14 +64,15 @@ final class AppState {
         }
 
         let client = githubClientFactory()
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
         let githubEngine = GitHubEngine(
             client: client,
-            cacheDirectory: URL(fileURLWithPath: configStore.cacheDirectoryPath)
+            storage: storage
         )
         self.githubEngine = githubEngine
 
         let vmEngine = vmEngineFactory(
-            configStore.cacheDirectoryPath,
+            configStore.storageRootPath,
             resolvedBaseImagePath(),
             configStore.cacheConfig
         )
@@ -205,11 +206,6 @@ final class AppState {
         if !configStore.baseImagePath.isEmpty {
             return configStore.baseImagePath
         }
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return
-            appSupport
-            .appendingPathComponent("Tarmac")
-            .appendingPathComponent("BaseImage.img")
-            .path
+        return StorageManager(rootPath: configStore.storageRootPath).baseImageURL.path
     }
 }
