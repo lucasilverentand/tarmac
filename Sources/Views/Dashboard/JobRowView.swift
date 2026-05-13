@@ -2,16 +2,23 @@ import SwiftUI
 
 struct JobRowView: View {
     let job: RunnerJob
+    var isProminent: Bool = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(statusColor)
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(statusColor.opacity(0.14))
 
-            VStack(alignment: .leading, spacing: 2) {
+                Image(systemName: statusSystemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(statusColor)
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(job.workflowName ?? "Job #\(job.id)")
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(isProminent ? .semibold : .medium))
                     .lineLimit(1)
 
                 Text("\(job.organizationName)\(repoSuffix)")
@@ -27,7 +34,14 @@ struct JobRowView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            if isProminent {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.10))
+            }
+        }
     }
 
     private var repoSuffix: String {
@@ -44,6 +58,16 @@ struct JobRowView: View {
         case .running: .green
         case .completed: .gray
         case .failed: .red
+        }
+    }
+
+    private var statusSystemImage: String {
+        switch job.status {
+        case .pending: "clock.fill"
+        case .provisioning: "shippingbox.fill"
+        case .running: "play.fill"
+        case .completed: "checkmark"
+        case .failed: "xmark"
         }
     }
 
