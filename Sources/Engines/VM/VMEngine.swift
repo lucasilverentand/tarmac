@@ -56,7 +56,7 @@ final class VMEngine: VMManagerProtocol {
 
         try storage.prepareBaseDirectories()
         try storage.cleanupTransientFiles()
-        try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB)
+        try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB, overwrite: true)
 
         try await imageManager.installMacOS(
             ipsw: ipsw,
@@ -107,13 +107,21 @@ final class VMEngine: VMManagerProtocol {
 
         currentInstance = instance
 
-        try await lifecycle.bootVM(
-            vmConfig: config,
-            diskPath: clonedDiskPath,
-            platformStore: platformStore,
-            sharedDirectoryURL: sharedDirectory,
-            cacheDirectoryURL: cacheDirectoryURL
-        )
+        do {
+            try await lifecycle.bootVM(
+                vmConfig: config,
+                diskPath: clonedDiskPath,
+                platformStore: platformStore,
+                sharedDirectoryURL: sharedDirectory,
+                cacheDirectoryURL: cacheDirectoryURL
+            )
+        } catch {
+            instance.state = .failed
+            currentInstance = instance
+            try? diskManager.deleteDisk(at: clonedDiskPath)
+            Log.vm.error("VM boot failed for job \(jobId): \(error.localizedDescription)")
+            throw error
+        }
 
         instance.state = .running
         currentInstance = instance
@@ -145,7 +153,12 @@ final class VMEngine: VMManagerProtocol {
             jitConfig: jitConfig
         )
 
-        _ = try await bootVM(for: job.id, config: config, sharedDirectory: sharedDir)
+        do {
+            _ = try await bootVM(for: job.id, config: config, sharedDirectory: sharedDir)
+        } catch {
+            try? sharedDirManager.cleanupJob(jobId: job.id)
+            throw error
+        }
     }
 
     func teardown() async throws {

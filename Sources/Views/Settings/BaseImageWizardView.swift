@@ -426,7 +426,7 @@ struct BaseImageWizardView: View {
 
                 let diskManager = DiskImageManager()
                 let baseImageURL = URL(fileURLWithPath: baseImagePath)
-                try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB)
+                try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB, overwrite: true)
 
                 let platformStore = PlatformDataStore(storage: storage)
                 try await imageManager.installMacOS(
