@@ -172,7 +172,7 @@ final class AppState {
             queueViewModel.updateJobStatus(id: job.id, status: .failed)
 
             // Teardown on failure
-            if vmEngine.isRunning {
+            if vmEngine.currentInstance != nil {
                 try? await vmEngine.teardown()
                 vmStatusViewModel.activeVM = nil
             }
