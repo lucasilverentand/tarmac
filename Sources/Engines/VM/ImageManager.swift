@@ -13,16 +13,23 @@ final class ImageManager: Sendable {
     private(set) var isDownloading: Bool = false
 
     private(set) var installProgress: Double = 0
+    private(set) var installStatus: String = "Ready to install"
+    private(set) var installElapsedSeconds: Int = 0
     private var progressObservation: NSKeyValueObservation?
 
     private var activeDownloader: IPSWDownloader?
-    private var progressTimer: Timer?
+    private var downloadProgressTimer: Timer?
+    private var installProgressTimer: Timer?
+    private var installStartedAt: Date?
     private var speedSampleBytes: Int64 = 0
     private var speedSampleTime: Date = Date()
 
     init(storageDirectory: URL? = nil) {
         self.storage = StorageManager(rootDirectory: storageDirectory ?? StorageManager.defaultRootDirectory)
     }
+
+    private let progressRefreshInterval: TimeInterval = 0.1
+    private let speedSampleInterval: TimeInterval = 0.5
 
     init(storage: StorageManager = StorageManager(rootDirectory: StorageManager.defaultRootDirectory)) {
         self.storage = storage
@@ -81,11 +88,11 @@ final class ImageManager: Sendable {
         activeDownloader = downloader
 
         // Poll the downloader's progress on a timer so updates happen regardless of focus
-        startProgressTimer()
+        startDownloadProgressTimer()
 
         do {
             let localURL = try await downloader.download(from: downloadURL)
-            stopProgressTimer()
+            stopDownloadProgressTimer()
             syncProgress(from: downloader)  // final sync
 
             try? FileManager.default.removeItem(at: destination)
@@ -105,7 +112,7 @@ final class ImageManager: Sendable {
             Log.image.info("IPSW downloaded to \(destination.path)")
             return destination
         } catch {
-            stopProgressTimer()
+            stopDownloadProgressTimer()
             isDownloading = false
             activeDownloader = nil
             // Resume data is saved automatically by the downloader on failure
@@ -115,7 +122,7 @@ final class ImageManager: Sendable {
 
     func cancelDownload() {
         activeDownloader?.cancel()
-        stopProgressTimer()
+        stopDownloadProgressTimer()
         isDownloading = false
         activeDownloader = nil
         Log.image.info("Download cancelled")
@@ -146,18 +153,22 @@ final class ImageManager: Sendable {
 
     // MARK: - Progress Timer
 
-    private func startProgressTimer() {
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+    private func startDownloadProgressTimer() {
+        stopDownloadProgressTimer()
+
+        let timer = Timer(timeInterval: progressRefreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let downloader = self.activeDownloader else { return }
                 self.syncProgress(from: downloader)
             }
         }
+        downloadProgressTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
-    private func stopProgressTimer() {
-        progressTimer?.invalidate()
-        progressTimer = nil
+    private func stopDownloadProgressTimer() {
+        downloadProgressTimer?.invalidate()
+        downloadProgressTimer = nil
     }
 
     private func syncProgress(from downloader: IPSWDownloader) {
@@ -171,7 +182,7 @@ final class ImageManager: Sendable {
 
         let now = Date()
         let elapsed = now.timeIntervalSince(speedSampleTime)
-        if elapsed >= 0.5 {
+        if elapsed >= speedSampleInterval {
             let delta = snapshot.bytesWritten - speedSampleBytes
             downloadSpeed = Double(delta) / elapsed
             speedSampleBytes = snapshot.bytesWritten
@@ -188,6 +199,12 @@ final class ImageManager: Sendable {
         platformStore: PlatformDataStore
     ) async throws {
         Log.image.info("Starting macOS install from \(ipsw.lastPathComponent)")
+        resetInstallState(status: "Preparing restore image...")
+
+        defer {
+            stopInstallProgressTimer()
+            progressObservation = nil
+        }
 
         let hardwareModelData = try await withCheckedThrowingContinuation {
             (continuation: CheckedContinuation<Data, Error>) in
@@ -209,6 +226,7 @@ final class ImageManager: Sendable {
             throw ImageManagerError.unsupportedHardware
         }
         let machineIdentifier = VZMacMachineIdentifier()
+        installStatus = "Configuring virtual machine..."
 
         try platformStore.saveHardwareModel(hardwareModelData)
         try platformStore.saveMachineIdentifier(machineIdentifier.dataRepresentation)
@@ -238,12 +256,15 @@ final class ImageManager: Sendable {
 
         let vm = VZVirtualMachine(configuration: vmConfig)
         let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipsw)
+        installStatus = "Starting macOS installer..."
 
         progressObservation = installer.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
+            let fractionCompleted = progress.fractionCompleted
             Task { @MainActor in
-                self?.installProgress = progress.fractionCompleted
+                self?.syncInstallProgress(fractionCompleted)
             }
         }
+        startInstallProgressTimer(progress: installer.progress)
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             installer.install { result in
@@ -256,9 +277,56 @@ final class ImageManager: Sendable {
             }
         }
 
-        progressObservation = nil
+        installStatus = "Finalizing base image..."
         installProgress = 1.0
         Log.image.info("macOS installation completed")
+    }
+
+    private func resetInstallState(status: String) {
+        installProgress = 0
+        installStatus = status
+        installElapsedSeconds = 0
+        installStartedAt = Date()
+    }
+
+    private func startInstallProgressTimer(progress: Progress) {
+        stopInstallProgressTimer()
+
+        let timer = Timer(timeInterval: progressRefreshInterval, repeats: true) { [weak self, weak progress] _ in
+            let fractionCompleted = progress?.fractionCompleted
+            Task { @MainActor in
+                guard let self else { return }
+                self.updateInstallElapsedTime()
+                if let fractionCompleted {
+                    self.syncInstallProgress(fractionCompleted)
+                }
+            }
+        }
+        installProgressTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopInstallProgressTimer() {
+        installProgressTimer?.invalidate()
+        installProgressTimer = nil
+    }
+
+    private func syncInstallProgress(_ fractionCompleted: Double) {
+        let clampedProgress = min(max(fractionCompleted, 0), 1)
+        if installProgress != clampedProgress {
+            installProgress = clampedProgress
+        }
+        if clampedProgress > 0, clampedProgress < 1 {
+            installStatus = "Installing macOS..."
+        }
+    }
+
+    private func updateInstallElapsedTime() {
+        guard let installStartedAt else { return }
+        let elapsedSeconds = max(0, Int(Date().timeIntervalSince(installStartedAt)))
+        if installElapsedSeconds != elapsedSeconds {
+            installElapsedSeconds = elapsedSeconds
+        }
     }
 }
 
