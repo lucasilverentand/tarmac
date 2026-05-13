@@ -5,8 +5,24 @@ let project = Project(
     settings: .settings(
         base: [
             "SWIFT_VERSION": "6.2",
-            "CODE_SIGN_STYLE": "Automatic",
-            "CODE_SIGN_IDENTITY": "Apple Development",
+        ],
+        configurations: [
+            .debug(
+                name: "Debug",
+                settings: [
+                    "CODE_SIGN_STYLE": "Manual",
+                    "CODE_SIGN_IDENTITY": "-",
+                    "CODE_SIGNING_REQUIRED": "NO",
+                    "DEVELOPMENT_TEAM": "",
+                ]
+            ),
+            .release(
+                name: "Release",
+                settings: [
+                    "CODE_SIGN_STYLE": "Automatic",
+                    "CODE_SIGN_IDENTITY": "Apple Development",
+                ]
+            ),
         ]
     ),
     targets: [
@@ -22,16 +38,33 @@ let project = Project(
             sources: ["Sources/**"],
             resources: ["Resources/**"],
             entitlements: .file(path: "Tarmac.entitlements"),
-            settings: .settings(base: [
-                "CODE_SIGN_IDENTITY": "Apple Development",
-                "CODE_SIGN_STYLE": "Automatic",
-            ])
+            settings: .settings(
+                configurations: [
+                    .debug(
+                        name: "Debug",
+                        settings: [
+                            "CODE_SIGN_STYLE": "Manual",
+                            "CODE_SIGN_IDENTITY": "-",
+                            "CODE_SIGNING_REQUIRED": "NO",
+                            "DEVELOPMENT_TEAM": "",
+                        ]
+                    ),
+                    .release(
+                        name: "Release",
+                        settings: [
+                            "CODE_SIGN_IDENTITY": "Apple Development",
+                            "CODE_SIGN_STYLE": "Automatic",
+                        ]
+                    ),
+                ]
+            )
         ),
         .target(
             name: "TarmacTests",
             destinations: .macOS,
             product: .unitTests,
             bundleId: "studio.seventwo.tarmac.tests",
+            deploymentTargets: .macOS("15.0"),
             sources: ["Tests/**"],
             dependencies: [
                 .target(name: "Tarmac"),

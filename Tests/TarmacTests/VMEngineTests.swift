@@ -57,6 +57,7 @@ struct VMEngineTests {
 
         #expect(instance.state == .running)
         #expect(instance.jobId == 42)
+        #expect(instance.diskImagePath.deletingLastPathComponent().lastPathComponent == "disks")
         #expect(engine.currentInstance?.state == .running)
         #expect(engine.isRunning)
     }
@@ -170,7 +171,7 @@ struct VMEngineTests {
         #expect(engine.currentInstance == nil)
     }
 
-    @Test("Boot failure cleans up")
+    @Test("Boot failure cleans up cloned disk")
     @MainActor
     func bootFailureCleanup() async throws {
         let mock = MockVMLifecycle()
@@ -189,9 +190,36 @@ struct VMEngineTests {
             )
         }
 
-        // After boot failure, instance was set to booting but never to running
-        // The instance is still set since we set it before boot attempt
-        #expect(engine.currentInstance?.state == .booting)
+        #expect(engine.currentInstance?.state == .failed)
+        if let diskPath = mock.lastBootDiskPath {
+            #expect(!FileManager.default.fileExists(atPath: diskPath.path))
+        }
+    }
+
+    @Test("provisionAndRun cleans shared directory when boot fails")
+    @MainActor
+    func provisionAndRunCleansSharedDirectoryOnBootFailure() async throws {
+        let mock = MockVMLifecycle()
+        mock.shouldThrowOnBoot = true
+        let (engine, _, tempDir) = try makeEngine(lifecycle: mock)
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerPath = tempDir.appendingPathComponent("runner")
+        try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+
+        var job = TestFactories.makeJob(id: 123)
+        job.jitConfig = "jit-config"
+
+        await #expect(throws: Error.self) {
+            try await engine.provisionAndRun(
+                job: job,
+                config: VMConfiguration(),
+                runnerPath: runnerPath
+            )
+        }
+
+        let sharedDir = tempDir.appendingPathComponent("jobs/123")
+        #expect(!FileManager.default.fileExists(atPath: sharedDir.path))
     }
 
     @Test("cacheSizeBytes delegates to CacheManager")

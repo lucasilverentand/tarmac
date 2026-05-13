@@ -15,7 +15,7 @@ struct BaseImageWizardView: View {
     init(configStore: ConfigStore) {
         self.configStore = configStore
         _imageManager = State(
-            initialValue: ImageManager(storageDirectory: URL(fileURLWithPath: configStore.storageDirectoryPath))
+            initialValue: ImageManager(storage: StorageManager(rootPath: configStore.storageRootPath))
         )
     }
 
@@ -417,15 +417,16 @@ struct BaseImageWizardView: View {
         Task {
             do {
                 let vmConfig = configStore.vmConfiguration
-                let baseImagePath = configStore.resolvedBaseImagePath
+                let storage = StorageManager(rootPath: configStore.storageRootPath)
+                try storage.prepareBaseDirectories()
+                try storage.cleanupTransientFiles()
+                let baseImagePath = resolvedBaseImagePath(storage: storage)
 
                 let diskManager = DiskImageManager()
                 let baseImageURL = URL(fileURLWithPath: baseImagePath)
-                try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB)
+                try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB, overwrite: true)
 
-                let platformStore = PlatformDataStore(
-                    directory: URL(fileURLWithPath: configStore.platformDirectoryPath)
-                )
+                let platformStore = PlatformDataStore(storage: storage)
                 try await imageManager.installMacOS(
                     ipsw: ipsw,
                     diskPath: baseImageURL,
@@ -435,6 +436,7 @@ struct BaseImageWizardView: View {
 
                 configStore.baseImagePath = baseImagePath
                 configStore.save()
+                try? FileManager.default.removeItem(at: ipsw)
 
                 isWorking = false
                 currentStep = 2
@@ -445,6 +447,13 @@ struct BaseImageWizardView: View {
                 Log.image.error("Base image install failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func resolvedBaseImagePath(storage: StorageManager) -> String {
+        if !configStore.baseImagePath.isEmpty {
+            return configStore.baseImagePath
+        }
+        return storage.baseImageURL.path
     }
 
     // MARK: - Formatting

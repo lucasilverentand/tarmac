@@ -11,10 +11,22 @@ actor GitHubEngine {
         keychainService: any KeychainServiceProtocol = KeychainService(),
         cacheDirectory: URL
     ) {
+        self.init(
+            client: client,
+            keychainService: keychainService,
+            storage: StorageManager(rootDirectory: cacheDirectory)
+        )
+    }
+
+    init(
+        client: any GitHubClientProtocol = GitHubClient(),
+        keychainService: any KeychainServiceProtocol = KeychainService(),
+        storage: StorageManager
+    ) {
         self.client = client
         self.keychainService = keychainService
         self.tokenManager = TokenManager(client: client)
-        self.runnerProvider = RunnerProvider(client: client, cacheDirectory: cacheDirectory)
+        self.runnerProvider = RunnerProvider(client: client, storage: storage)
     }
 
     func installationToken(for org: Organization) async throws -> String {

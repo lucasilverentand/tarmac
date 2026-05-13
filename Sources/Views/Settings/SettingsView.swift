@@ -34,9 +34,9 @@ private struct GeneralSettingsTab: View {
         Form {
             Toggle("Launch at login", isOn: $viewModel.launchAtLogin)
 
-            LabeledContent("Storage directory") {
+            LabeledContent("Storage folder") {
                 HStack {
-                    Text(viewModel.storageDirectoryPath)
+                    Text(viewModel.storageRootPath)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -48,6 +48,23 @@ private struct GeneralSettingsTab: View {
                     .controlSize(.small)
                 }
             }
+
+            LabeledContent("Storage use") {
+                Text(viewModel.storageUsageDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let warning = viewModel.storageWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Button("Clean Up Storage") {
+                viewModel.cleanupStorage()
+            }
+
             if let storageError {
                 Label(storageError, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)

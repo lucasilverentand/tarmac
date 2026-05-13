@@ -6,7 +6,7 @@ struct CacheConfiguration: Codable, Sendable {
     var retentionDays: Int = 14
 
     /// The directory on the host where persistent caches are stored.
-    /// Resolved at runtime from ConfigStore.cacheDirectoryPath + "/actions-cache".
+    /// Resolved at runtime from ConfigStore.storageRootPath + "/actions-cache".
     var hostCachePath: String = ""
 
     /// The mount point inside the guest VM where the cache directory appears.

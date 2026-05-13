@@ -2,12 +2,16 @@ import Foundation
 
 actor RunnerProvider {
     private let client: any GitHubClientProtocol
-    private let cacheDirectory: URL
+    private let storage: StorageManager
     private var cachedRunnerPath: URL?
 
     init(client: any GitHubClientProtocol, cacheDirectory: URL) {
+        self.init(client: client, storage: StorageManager(rootDirectory: cacheDirectory))
+    }
+
+    init(client: any GitHubClientProtocol, storage: StorageManager) {
         self.client = client
-        self.cacheDirectory = cacheDirectory
+        self.storage = storage
     }
 
     func ensureRunner(token: String, org: String) async throws -> URL {
@@ -30,14 +34,15 @@ actor RunnerProvider {
             throw RunnerProviderError.noCompatibleRunner
         }
 
-        let runnerDir = cacheDirectory.appendingPathComponent("runner")
+        let runnerDir = storage.runnerDirectory
         try? FileManager.default.removeItem(at: runnerDir)
         try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: storage.tmpDirectory, withIntermediateDirectories: true)
 
         Log.runner.info("Downloading runner from \(macOSARM.downloadUrl)")
         let (tarURL, _) = try await URLSession.shared.download(from: URL(string: macOSARM.downloadUrl)!)
 
-        let tarDest = cacheDirectory.appendingPathComponent(macOSARM.filename)
+        let tarDest = storage.tmpDirectory.appendingPathComponent(macOSARM.filename)
         try? FileManager.default.removeItem(at: tarDest)
         try FileManager.default.moveItem(at: tarURL, to: tarDest)
 

@@ -72,14 +72,15 @@ final class AppState {
         }
 
         let client = githubClientFactory()
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
         let githubEngine = GitHubEngine(
             client: client,
-            cacheDirectory: URL(fileURLWithPath: configStore.cacheDirectoryPath)
+            storage: storage
         )
         self.githubEngine = githubEngine
 
         let vmEngine = vmEngineFactory(
-            configStore.cacheDirectoryPath,
+            configStore.storageRootPath,
             configStore.resolvedBaseImagePath,
             configStore.platformDirectoryPath,
             configStore.cacheConfig
@@ -183,7 +184,7 @@ final class AppState {
             queueViewModel.updateJobStatus(id: job.id, status: .failed)
 
             // Teardown on failure
-            if vmEngine.isRunning {
+            if vmEngine.currentInstance != nil {
                 try? await vmEngine.teardown()
                 vmStatusViewModel.activeVM = nil
             }
@@ -211,5 +212,4 @@ final class AppState {
             }
         }
     }
-
 }

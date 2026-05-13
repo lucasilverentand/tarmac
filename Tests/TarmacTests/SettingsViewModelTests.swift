@@ -136,4 +136,33 @@ struct SettingsViewModelTests {
         #expect(store.vmConfiguration.cpuCount == 12)
         #expect(store.vmConfiguration.memorySizeGB == 32)
     }
+
+    @Test("storageRootPath setter migrates managed artifacts")
+    func storageRootMigratesArtifacts() throws {
+        let (vm, store, _) = makeVM()
+        let oldRoot = try TestFactories.makeTempDir()
+        let newRoot = try TestFactories.makeTempDir()
+        defer {
+            TestFactories.cleanup(oldRoot)
+            TestFactories.cleanup(newRoot)
+        }
+
+        store.storageRootPath = oldRoot.path
+        let oldStorage = StorageManager(rootDirectory: oldRoot)
+        try FileManager.default.createDirectory(at: oldStorage.runnerDirectory, withIntermediateDirectories: true)
+        try "runner".write(
+            to: oldStorage.runnerDirectory.appendingPathComponent("run.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        vm.storageRootPath = newRoot.path
+
+        let newStorage = StorageManager(rootDirectory: newRoot)
+        #expect(store.storageRootPath == newStorage.rootDirectory.path)
+        #expect(store.baseImagePath == newStorage.baseImageURL.path)
+        #expect(
+            FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
+        )
+    }
 }

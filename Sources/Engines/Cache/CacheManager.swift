@@ -4,8 +4,11 @@ struct CacheManager: Sendable {
     let baseDirectory: URL
 
     init(cacheDirectoryPath: String) {
-        self.baseDirectory = URL(fileURLWithPath: cacheDirectoryPath)
-            .appendingPathComponent("actions-cache")
+        self.init(storage: StorageManager(rootPath: cacheDirectoryPath))
+    }
+
+    init(storage: StorageManager) {
+        self.baseDirectory = storage.actionsCacheDirectory
     }
 
     /// Ensure the persistent cache directory structure exists on the host.

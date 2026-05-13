@@ -7,9 +7,13 @@ struct PlatformDataStore: Sendable {
         if let directory {
             self.directory = directory
         } else {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            self.directory = appSupport.appendingPathComponent("Tarmac/Platform")
+            self.directory = StorageManager.defaultRootDirectory.appendingPathComponent("Platform")
         }
+        try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+    }
+
+    init(storage: StorageManager) {
+        self.directory = storage.platformDirectory
         try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
     }
 

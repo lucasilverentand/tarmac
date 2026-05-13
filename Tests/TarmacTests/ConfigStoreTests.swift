@@ -61,10 +61,46 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
         #expect(!store.storageDirectoryPath.isEmpty)
-        #expect(!store.cacheDirectoryPath.isEmpty)  // default is set
+        #expect(store.storageRootPath == store.storageDirectoryPath)
+        #expect(store.cacheDirectoryPath == StorageManager(rootPath: store.storageRootPath).actionsCacheDirectory.path)
         #expect(!store.hasCompletedStorageSetup)
 
         defaults.removePersistentDomain(forName: "test-config")
+    }
+
+    @Test("storageRootPath loads legacy cacheDirectoryPath")
+    func storageRootLoadsLegacyCacheDirectoryPath() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let legacyPath = "/tmp/tarmac-legacy-\(UUID().uuidString)"
+        defaults.set(legacyPath, forKey: "cacheDirectoryPath")
+
+        let store = ConfigStore(defaults: defaults, keychainService: keychain)
+
+        #expect(store.storageRootPath == legacyPath)
+        #expect(store.cacheDirectoryPath == StorageManager(rootPath: legacyPath).actionsCacheDirectory.path)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("save persists storage root to new and legacy keys")
+    func storageRootPersists() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let path = "/tmp/tarmac-storage-\(UUID().uuidString)"
+
+        let store = ConfigStore(defaults: defaults, keychainService: keychain)
+        store.storageRootPath = path
+        store.save()
+
+        #expect(defaults.string(forKey: "storageRootPath") == path)
+        #expect(
+            defaults.string(forKey: "cacheDirectoryPath") == StorageManager(rootPath: path).actionsCacheDirectory.path
+        )
+
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     @Test("Configure storage derives managed paths")
@@ -77,7 +113,7 @@ struct ConfigStoreTests {
 
         #expect(store.hasCompletedStorageSetup)
         #expect(store.storageDirectoryPath == directory.standardizedFileURL.path)
-        #expect(store.cacheDirectoryPath == directory.appendingPathComponent("Cache").path)
+        #expect(store.cacheDirectoryPath == StorageManager(rootDirectory: directory).actionsCacheDirectory.path)
         #expect(store.resolvedBaseImagePath == directory.appendingPathComponent("BaseImage.img").path)
         #expect(store.platformDirectoryPath == directory.appendingPathComponent("Platform").path)
 

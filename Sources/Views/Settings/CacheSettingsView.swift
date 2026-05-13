@@ -34,6 +34,14 @@ struct CacheSettingsView: View {
                             .truncationMode(.middle)
                     }
 
+                    LabeledContent("Storage folder") {
+                        Text(viewModel.storageRootPath)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
                     LabeledContent("Guest mount point") {
                         Text(CacheConfiguration.guestMountPoint)
                             .font(.caption.monospaced())

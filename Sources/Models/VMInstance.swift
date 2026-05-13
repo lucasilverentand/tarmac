@@ -12,5 +12,6 @@ struct VMInstance: Sendable {
         case running
         case stopping
         case stopped
+        case failed
     }
 }

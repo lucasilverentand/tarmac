@@ -2,9 +2,15 @@ import Foundation
 
 struct SharedDirectoryManager: Sendable {
     let baseDirectory: URL
+    private let storage: StorageManager
 
     init(cacheDirectoryPath: String) {
-        self.baseDirectory = URL(fileURLWithPath: cacheDirectoryPath)
+        self.init(storage: StorageManager(rootPath: cacheDirectoryPath))
+    }
+
+    init(storage: StorageManager) {
+        self.storage = storage
+        self.baseDirectory = storage.rootDirectory
     }
 
     func prepareForJob(jobId: Int64, runnerPath: URL, jitConfig: String) throws -> URL {
@@ -24,8 +30,7 @@ struct SharedDirectoryManager: Sendable {
         let jitConfigPath = jobDir.appendingPathComponent("jitconfig")
         try jitConfig.write(to: jitConfigPath, atomically: true, encoding: .utf8)
 
-        // Ensure persistent cache directory exists
-        try fm.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
 
         Log.vm.info("Shared directory prepared for job \(jobId) at \(jobDir.path)")
         return jobDir
@@ -41,7 +46,7 @@ struct SharedDirectoryManager: Sendable {
     // MARK: - Paths
 
     private var jobsDirectory: URL {
-        baseDirectory.appendingPathComponent("jobs")
+        storage.jobsDirectory
     }
 
     private func jobDirectory(for jobId: Int64) -> URL {
@@ -49,6 +54,6 @@ struct SharedDirectoryManager: Sendable {
     }
 
     var cacheDirectory: URL {
-        baseDirectory.appendingPathComponent("cache")
+        storage.actionsCacheDirectory
     }
 }

@@ -90,16 +90,59 @@ final class SettingsViewModel {
     }
 
     var cacheDirectoryPath: String {
-        get { configStore.cacheDirectoryPath }
+        get { configStore.storageRootPath }
         set {
-            configStore.cacheDirectoryPath = newValue
+            let oldRoot = URL(fileURLWithPath: configStore.storageRootPath)
+            let newStorage = StorageManager(rootPath: newValue)
+            do {
+                let explicitBaseImageURL =
+                    configStore.baseImagePath.isEmpty
+                    ? nil
+                    : URL(fileURLWithPath: configStore.baseImagePath)
+                let result = try newStorage.migrateManagedData(
+                    from: oldRoot,
+                    explicitBaseImageURL: explicitBaseImageURL
+                )
+                if result.movedItems > 0 {
+                    Log.config.info("Migrated \(result.movedItems) storage item(s) to \(newStorage.rootDirectory.path)")
+                }
+                if result.skippedExistingDestination > 0 {
+                    Log.config.warning(
+                        "Skipped \(result.skippedExistingDestination) storage item(s) because the destination already exists"
+                    )
+                }
+                configStore.storageRootPath = newStorage.rootDirectory.path
+                configStore.baseImagePath = newStorage.baseImageURL.path
+            } catch {
+                Log.config.error("Failed to migrate storage folder: \(error.localizedDescription)")
+                return
+            }
             configStore.save()
         }
     }
 
+    var storageRootPath: String {
+        get { cacheDirectoryPath }
+        set { cacheDirectoryPath = newValue }
+    }
+
     var resolvedCachePath: String {
-        let base = configStore.cacheDirectoryPath
-        return URL(fileURLWithPath: base).appendingPathComponent("actions-cache").path
+        StorageManager(rootPath: configStore.storageRootPath).actionsCacheDirectory.path
+    }
+
+    var storageUsageDescription: String {
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        let used = (try? storage.totalManagedSizeBytes()) ?? 0
+        let free = storage.availableCapacityBytes()
+        if let free {
+            return "\(formatBytes(used)) used, \(formatBytes(free)) available"
+        }
+        return "\(formatBytes(used)) used"
+    }
+
+    var storageWarning: String? {
+        StorageManager(rootPath: configStore.storageRootPath)
+            .storageWarning(minimumFreeBytes: 25 * 1024 * 1024 * 1024)
     }
 
     var baseImagePath: String {
@@ -122,12 +165,23 @@ final class SettingsViewModel {
     }
 
     func clearCache() {
-        let manager = CacheManager(cacheDirectoryPath: configStore.cacheDirectoryPath)
+        let manager = CacheManager(storage: StorageManager(rootPath: configStore.storageRootPath))
         do {
             try manager.clear()
             Log.cache.info("Cache cleared from settings")
         } catch {
             Log.cache.error("Failed to clear cache: \(error.localizedDescription)")
+        }
+    }
+
+    func cleanupStorage() {
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        do {
+            try storage.cleanupTransientFiles()
+            try CacheManager(storage: storage).enforceMaxSize(maxSizeGB: configStore.cacheConfig.maxSizeGB)
+            Log.cache.info("Storage cleanup completed from settings")
+        } catch {
+            Log.cache.error("Failed to clean storage: \(error.localizedDescription)")
         }
     }
 
@@ -158,6 +212,13 @@ final class SettingsViewModel {
         }
         return issues
     }
+}
+
+private func formatBytes(_ bytes: Int64) -> String {
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+    return formatter.string(fromByteCount: bytes)
 }
 
 enum SettingsError: LocalizedError {

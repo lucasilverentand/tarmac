@@ -10,6 +10,7 @@ final class VMEngine: VMManagerProtocol {
     private let sharedDirManager: SharedDirectoryManager
     private let cacheManager: CacheManager
     private let platformStore: PlatformDataStore
+    private let storage: StorageManager
     private let baseImageURL: URL
 
     private(set) var currentInstance: VMInstance?
@@ -33,22 +34,18 @@ final class VMEngine: VMManagerProtocol {
         platformStore: PlatformDataStore? = nil,
         lifecycle: (any VMLifecycleProtocol)? = nil,
         diskManager: DiskImageManager = DiskImageManager(),
-        imageManager: ImageManager = ImageManager()
+        imageManager: ImageManager? = nil
     ) {
-        self.sharedDirManager = SharedDirectoryManager(cacheDirectoryPath: cacheDirectoryPath)
-        self.cacheManager = CacheManager(cacheDirectoryPath: cacheDirectoryPath)
-        if let platformStore {
-            self.platformStore = platformStore
-        } else if let platformDirectoryPath {
-            self.platformStore = PlatformDataStore(directory: URL(fileURLWithPath: platformDirectoryPath))
-        } else {
-            self.platformStore = PlatformDataStore()
-        }
+        let storage = StorageManager(rootPath: cacheDirectoryPath)
+        self.storage = storage
+        self.sharedDirManager = SharedDirectoryManager(storage: storage)
+        self.cacheManager = CacheManager(storage: storage)
+        self.platformStore = platformStore ?? PlatformDataStore(storage: storage)
         self.baseImageURL = URL(fileURLWithPath: baseImagePath)
         self.cacheConfig = cacheConfig
         self.lifecycle = lifecycle ?? VMLifecycle()
         self.diskManager = diskManager
-        self.imageManager = imageManager
+        self.imageManager = imageManager ?? ImageManager(storage: storage)
     }
 
     // MARK: - Base Image
@@ -57,7 +54,9 @@ final class VMEngine: VMManagerProtocol {
         let path = baseImageURL.path
         Log.vm.info("Creating base image at \(path)")
 
-        try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB)
+        try storage.prepareBaseDirectories()
+        try storage.cleanupTransientFiles()
+        try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB, overwrite: true)
 
         try await imageManager.installMacOS(
             ipsw: ipsw,
@@ -76,9 +75,15 @@ final class VMEngine: VMManagerProtocol {
         config: VMConfiguration,
         sharedDirectory: URL
     ) async throws -> VMInstance {
+        try storage.prepareBaseDirectories()
+        try storage.cleanupTransientFiles()
+
+        if let warning = storage.storageWarning(minimumFreeBytes: Int64(config.diskSizeGB) * 1024 * 1024 * 1024 / 2) {
+            Log.vm.warning("\(warning)")
+        }
+
         let instanceId = UUID()
-        let clonedDiskPath = sharedDirManager.baseDirectory
-            .appendingPathComponent("disks")
+        let clonedDiskPath = storage.disksDirectory
             .appendingPathComponent("\(instanceId.uuidString).img")
 
         try diskManager.cloneDisk(from: baseImageURL, to: clonedDiskPath)
@@ -102,13 +107,21 @@ final class VMEngine: VMManagerProtocol {
 
         currentInstance = instance
 
-        try await lifecycle.bootVM(
-            vmConfig: config,
-            diskPath: clonedDiskPath,
-            platformStore: platformStore,
-            sharedDirectoryURL: sharedDirectory,
-            cacheDirectoryURL: cacheDirectoryURL
-        )
+        do {
+            try await lifecycle.bootVM(
+                vmConfig: config,
+                diskPath: clonedDiskPath,
+                platformStore: platformStore,
+                sharedDirectoryURL: sharedDirectory,
+                cacheDirectoryURL: cacheDirectoryURL
+            )
+        } catch {
+            instance.state = .failed
+            currentInstance = instance
+            try? diskManager.deleteDisk(at: clonedDiskPath)
+            Log.vm.error("VM boot failed for job \(jobId): \(error.localizedDescription)")
+            throw error
+        }
 
         instance.state = .running
         currentInstance = instance
@@ -140,7 +153,12 @@ final class VMEngine: VMManagerProtocol {
             jitConfig: jitConfig
         )
 
-        _ = try await bootVM(for: job.id, config: config, sharedDirectory: sharedDir)
+        do {
+            _ = try await bootVM(for: job.id, config: config, sharedDirectory: sharedDir)
+        } catch {
+            try? sharedDirManager.cleanupJob(jobId: job.id)
+            throw error
+        }
     }
 
     func teardown() async throws {

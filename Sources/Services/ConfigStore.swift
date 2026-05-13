@@ -11,13 +11,33 @@ final class ConfigStore {
     var cacheConfig: CacheConfiguration = CacheConfiguration()
     var storageDirectoryPath: String = ""
     var baseImagePath: String = ""
-    var cacheDirectoryPath: String = ""
     var hasCompletedStorageSetup: Bool = false
+
+    var cacheDirectoryPath: String {
+        get { StorageManager(rootPath: storageDirectoryPath).actionsCacheDirectory.path }
+        set {
+            if storageDirectoryPath.isEmpty {
+                storageDirectoryPath =
+                    URL(fileURLWithPath: newValue)
+                    .deletingLastPathComponent()
+                    .standardizedFileURL
+                    .path
+            }
+        }
+    }
+
+    var storageRootPath: String {
+        get { storageDirectoryPath }
+        set {
+            let root = URL(fileURLWithPath: newValue).standardizedFileURL
+            storageDirectoryPath = root.path
+            baseImagePath = root.appendingPathComponent("BaseImage.img").path
+        }
+    }
     var launchAtLogin: Bool = false
 
     static var defaultStorageDirectoryPath: String {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Tarmac").path
+        StorageManager.defaultRootDirectory.path
     }
 
     init(
@@ -92,9 +112,7 @@ final class ConfigStore {
         let root = directory.standardizedFileURL
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        storageDirectoryPath = root.path
-        cacheDirectoryPath = root.appendingPathComponent("Cache").path
-        baseImagePath = root.appendingPathComponent("BaseImage.img").path
+        storageRootPath = root.path
         hasCompletedStorageSetup = true
         save()
     }
@@ -112,6 +130,7 @@ final class ConfigStore {
         defaults.set(storageDirectoryPath, forKey: "storageDirectoryPath")
         defaults.set(baseImagePath, forKey: "baseImagePath")
         defaults.set(cacheDirectoryPath, forKey: "cacheDirectoryPath")
+        defaults.set(storageRootPath, forKey: "storageRootPath")
         defaults.set(hasCompletedStorageSetup, forKey: "hasCompletedStorageSetup")
         defaults.set(launchAtLogin, forKey: "launchAtLogin")
         Log.config.debug("Configuration saved")
@@ -135,7 +154,8 @@ final class ConfigStore {
         }
         storageDirectoryPath = defaults.string(forKey: "storageDirectoryPath") ?? ""
         baseImagePath = defaults.string(forKey: "baseImagePath") ?? ""
-        cacheDirectoryPath = defaults.string(forKey: "cacheDirectoryPath") ?? ""
+        let legacyStorageRootPath = defaults.string(forKey: "storageRootPath")
+        let legacyCacheDirectoryPath = defaults.string(forKey: "cacheDirectoryPath")
         hasCompletedStorageSetup = defaults.bool(forKey: "hasCompletedStorageSetup")
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
 
@@ -145,12 +165,15 @@ final class ConfigStore {
             || defaults.string(forKey: "cacheDirectoryPath") != nil
 
         if storageDirectoryPath.isEmpty {
-            storageDirectoryPath = Self.defaultStorageDirectoryPath
+            storageDirectoryPath =
+                legacyStorageRootPath
+                ?? legacyCacheDirectoryPath
+                ?? Self.defaultStorageDirectoryPath
             hasCompletedStorageSetup = hasCompletedStorageSetup || hasExistingConfig
         }
 
-        if cacheDirectoryPath.isEmpty {
-            cacheDirectoryPath = URL(fileURLWithPath: storageDirectoryPath).appendingPathComponent("Cache").path
+        if baseImagePath.isEmpty {
+            baseImagePath = StorageManager(rootPath: storageDirectoryPath).baseImageURL.path
         }
 
         Log.config.debug("Configuration loaded: \(self.organizations.count) organizations")

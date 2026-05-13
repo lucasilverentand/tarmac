@@ -1,0 +1,226 @@
+import Foundation
+
+struct StorageManager: Sendable {
+    let rootDirectory: URL
+
+    init(rootPath: String) {
+        self.rootDirectory = URL(fileURLWithPath: rootPath).standardizedFileURL
+    }
+
+    init(rootDirectory: URL) {
+        self.rootDirectory = rootDirectory.standardizedFileURL
+    }
+
+    static var defaultRootDirectory: URL {
+        appSupportDirectory.appendingPathComponent("Storage", isDirectory: true)
+    }
+
+    static var appSupportDirectory: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("Tarmac", isDirectory: true)
+    }
+
+    var baseImageURL: URL { rootDirectory.appendingPathComponent("BaseImage.img") }
+    var restoreIPSWURL: URL { rootDirectory.appendingPathComponent("restore.ipsw") }
+    var ipswResumeDataURL: URL { rootDirectory.appendingPathComponent("ipsw-resume.json") }
+    var platformDirectory: URL { rootDirectory.appendingPathComponent("Platform", isDirectory: true) }
+    var runnerDirectory: URL { rootDirectory.appendingPathComponent("runner", isDirectory: true) }
+    var jobsDirectory: URL { rootDirectory.appendingPathComponent("jobs", isDirectory: true) }
+    var disksDirectory: URL { rootDirectory.appendingPathComponent("disks", isDirectory: true) }
+    var actionsCacheDirectory: URL { rootDirectory.appendingPathComponent("actions-cache", isDirectory: true) }
+    var legacySharedCacheDirectory: URL { rootDirectory.appendingPathComponent("cache", isDirectory: true) }
+    var tmpDirectory: URL { rootDirectory.appendingPathComponent("tmp", isDirectory: true) }
+    var partialIPSWURL: URL { tmpDirectory.appendingPathComponent("restore.ipsw.download") }
+
+    func prepareBaseDirectories() throws {
+        let fm = FileManager.default
+        for directory in [
+            rootDirectory, platformDirectory, jobsDirectory, disksDirectory, actionsCacheDirectory, tmpDirectory,
+        ] {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+    }
+
+    func totalManagedSizeBytes() throws -> Int64 {
+        try sizeOfItems([
+            baseImageURL,
+            restoreIPSWURL,
+            ipswResumeDataURL,
+            platformDirectory,
+            runnerDirectory,
+            jobsDirectory,
+            disksDirectory,
+            actionsCacheDirectory,
+            legacySharedCacheDirectory,
+            tmpDirectory,
+        ])
+    }
+
+    func availableCapacityBytes() -> Int64? {
+        guard let values = try? rootDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        else {
+            return nil
+        }
+        return values.volumeAvailableCapacityForImportantUsage
+    }
+
+    func storageWarning(minimumFreeBytes: Int64) -> String? {
+        guard let freeBytes = availableCapacityBytes(), freeBytes < minimumFreeBytes else { return nil }
+        return "Storage folder is low on free space."
+    }
+
+    func cleanupTransientFiles(olderThan interval: TimeInterval = 24 * 60 * 60) throws {
+        let cutoff = Date().addingTimeInterval(-interval)
+        try removeContents(in: jobsDirectory, olderThan: cutoff)
+        try removeContents(in: disksDirectory, olderThan: cutoff)
+        try removeContents(in: tmpDirectory, olderThan: cutoff)
+    }
+
+    @discardableResult
+    func migrateManagedData(from oldRoot: URL?, explicitBaseImageURL: URL?) throws -> StorageMigrationResult {
+        try prepareBaseDirectories()
+
+        var result = StorageMigrationResult()
+        let fm = FileManager.default
+        var sources: [(URL, URL)] = []
+
+        if let oldRoot {
+            let oldStorage = StorageManager(rootDirectory: oldRoot)
+            sources.append(contentsOf: [
+                (oldStorage.baseImageURL, baseImageURL),
+                (oldStorage.restoreIPSWURL, restoreIPSWURL),
+                (oldStorage.ipswResumeDataURL, ipswResumeDataURL),
+                (oldRoot.appendingPathComponent("ipsw-resume.data"), ipswResumeDataURL),
+                (oldStorage.platformDirectory, platformDirectory),
+                (oldStorage.runnerDirectory, runnerDirectory),
+                (oldStorage.jobsDirectory, jobsDirectory),
+                (oldStorage.disksDirectory, disksDirectory),
+                (oldStorage.actionsCacheDirectory, actionsCacheDirectory),
+                (oldStorage.legacySharedCacheDirectory, legacySharedCacheDirectory),
+                (oldStorage.tmpDirectory, tmpDirectory),
+            ])
+        }
+
+        let legacyAppSupport = Self.appSupportDirectory
+        sources.append(contentsOf: [
+            (legacyAppSupport.appendingPathComponent("BaseImage.img"), baseImageURL),
+            (legacyAppSupport.appendingPathComponent("restore.ipsw"), restoreIPSWURL),
+            (legacyAppSupport.appendingPathComponent("ipsw-resume.data"), ipswResumeDataURL),
+            (legacyAppSupport.appendingPathComponent("ipsw-resume.json"), ipswResumeDataURL),
+            (legacyAppSupport.appendingPathComponent("Platform", isDirectory: true), platformDirectory),
+        ])
+
+        if let explicitBaseImageURL {
+            sources.append((explicitBaseImageURL, baseImageURL))
+        }
+
+        for (source, destination) in sources {
+            try moveIfPresent(from: source, to: destination, fileManager: fm, result: &result)
+        }
+
+        return result
+    }
+
+    private func moveIfPresent(
+        from source: URL,
+        to destination: URL,
+        fileManager fm: FileManager,
+        result: inout StorageMigrationResult
+    ) throws {
+        let sourcePath = source.standardizedFileURL.path
+        let destinationPath = destination.standardizedFileURL.path
+        guard sourcePath != destinationPath else { return }
+        guard fm.fileExists(atPath: sourcePath) else { return }
+
+        if fm.fileExists(atPath: destinationPath) {
+            var sourceIsDirectory: ObjCBool = false
+            var destinationIsDirectory: ObjCBool = false
+            fm.fileExists(atPath: sourcePath, isDirectory: &sourceIsDirectory)
+            fm.fileExists(atPath: destinationPath, isDirectory: &destinationIsDirectory)
+            if sourceIsDirectory.boolValue && destinationIsDirectory.boolValue {
+                let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+                for item in contents {
+                    let childDestination = destination.appendingPathComponent(item.lastPathComponent)
+                    if fm.fileExists(atPath: childDestination.path) {
+                        result.skippedExistingDestination += 1
+                        continue
+                    }
+                    try fm.moveItem(at: item, to: childDestination)
+                    result.movedItems += 1
+                }
+                if (try? fm.contentsOfDirectory(atPath: sourcePath).isEmpty) == true {
+                    try? fm.removeItem(at: source)
+                }
+            } else {
+                result.skippedExistingDestination += 1
+            }
+            return
+        }
+
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.moveItem(at: source, to: destination)
+        result.movedItems += 1
+        if destinationPath == baseImageURL.standardizedFileURL.path {
+            result.movedBaseImage = true
+        }
+    }
+
+    private func removeContents(in directory: URL, olderThan cutoff: Date) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: directory.path) else { return }
+
+        let contents = try fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        for item in contents {
+            let modified = try item.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            if modified ?? .distantPast < cutoff {
+                try fm.removeItem(at: item)
+            }
+        }
+    }
+
+    private func sizeOfItems(_ urls: [URL]) throws -> Int64 {
+        var total: Int64 = 0
+        for url in urls {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            total += try itemSize(at: url)
+        }
+        return total
+    }
+
+    private func itemSize(at url: URL) throws -> Int64 {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return 0 }
+
+        if !isDirectory.boolValue {
+            let values = try url.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
+            return Int64(values.totalFileAllocatedSize ?? 0)
+        }
+
+        let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        var total: Int64 = 0
+        while let fileURL = enumerator?.nextObject() as? URL {
+            let values = try fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
+            total += Int64(values.totalFileAllocatedSize ?? 0)
+        }
+        return total
+    }
+}
+
+struct StorageMigrationResult: Sendable {
+    var movedItems: Int = 0
+    var skippedExistingDestination: Int = 0
+    var movedBaseImage: Bool = false
+}
