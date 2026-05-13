@@ -4,18 +4,24 @@ struct DashboardView: View {
     let appState: AppState
 
     var body: some View {
-        HSplitView {
-            JobQueueView(queueViewModel: appState.queueViewModel)
-                .frame(minWidth: 520)
+        Group {
+            if appState.configStore.hasCompletedStorageSetup {
+                HSplitView {
+                    JobQueueView(queueViewModel: appState.queueViewModel)
+                        .frame(minWidth: 520)
 
-            VMStatusCard(
-                vmStatusViewModel: appState.vmStatusViewModel,
-                vmConfig: appState.configStore.vmConfiguration,
-                configStore: appState.configStore
-            )
-            .frame(minWidth: 320, idealWidth: 340, maxWidth: 380)
+                    VMStatusCard(
+                        vmStatusViewModel: appState.vmStatusViewModel,
+                        vmConfig: appState.configStore.vmConfiguration,
+                        configStore: appState.configStore
+                    )
+                    .frame(minWidth: 320, idealWidth: 340, maxWidth: 380)
+                }
+                .frame(minWidth: 900, minHeight: 560)
+            } else {
+                StorageOnboardingView(configStore: appState.configStore)
+            }
         }
-        .frame(minWidth: 900, minHeight: 560)
     }
 }
 

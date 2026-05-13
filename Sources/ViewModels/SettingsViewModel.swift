@@ -85,6 +85,10 @@ final class SettingsViewModel {
         }
     }
 
+    var storageDirectoryPath: String {
+        configStore.storageDirectoryPath
+    }
+
     var cacheDirectoryPath: String {
         get { configStore.storageRootPath }
         set {
@@ -141,6 +145,25 @@ final class SettingsViewModel {
             .storageWarning(minimumFreeBytes: 25 * 1024 * 1024 * 1024)
     }
 
+    var baseImagePath: String {
+        configStore.resolvedBaseImagePath
+    }
+
+    var platformDirectoryPath: String {
+        configStore.platformDirectoryPath
+    }
+
+    var restoreImagePath: String {
+        URL(fileURLWithPath: configStore.storageDirectoryPath)
+            .appendingPathComponent("restore.ipsw")
+            .path
+    }
+
+    func configureStorage(at url: URL) throws {
+        try configStore.configureStorage(at: url)
+        Log.config.info("Storage directory changed to \(url.path)")
+    }
+
     func clearCache() {
         let manager = CacheManager(storage: StorageManager(rootPath: configStore.storageRootPath))
         do {
@@ -169,6 +192,9 @@ final class SettingsViewModel {
         if configStore.organizations.isEmpty {
             issues.append("No organizations configured")
         }
+        if !configStore.hasCompletedStorageSetup {
+            issues.append("Storage location is not configured")
+        }
         let enabled = configStore.organizations.filter(\.isEnabled)
         if enabled.isEmpty && !configStore.organizations.isEmpty {
             issues.append("All organizations are disabled")
@@ -176,6 +202,9 @@ final class SettingsViewModel {
         for org in enabled {
             if org.appId.isEmpty {
                 issues.append("\(org.name): GitHub App ID is not configured")
+            }
+            if org.scaleSetId == nil {
+                issues.append("\(org.name): Scale set ID is not configured")
             }
             if !configStore.hasPrivateKey(for: org) {
                 issues.append("\(org.name): Private key is not imported")

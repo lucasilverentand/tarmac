@@ -44,12 +44,15 @@ struct JobQueueView: View {
 
             Spacer()
 
-            Label(queueViewModel.isPolling ? "Listening" : "Paused", systemImage: queueViewModel.isPolling ? "dot.radiowaves.left.and.right" : "pause.circle")
-                .font(.callout.weight(.medium))
-                .foregroundStyle(queueViewModel.isPolling ? .green : .secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .dashboardGlassSurface(tint: queueViewModel.isPolling ? .green.opacity(0.12) : nil)
+            Label(
+                queueViewModel.isPolling ? "Listening" : "Paused",
+                systemImage: queueViewModel.isPolling ? "dot.radiowaves.left.and.right" : "pause.circle"
+            )
+            .font(.callout.weight(.medium))
+            .foregroundStyle(queueViewModel.isPolling ? .green : .secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .dashboardGlassSurface(tint: queueViewModel.isPolling ? .green.opacity(0.12) : nil)
         }
     }
 

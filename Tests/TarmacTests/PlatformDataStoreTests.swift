@@ -81,6 +81,10 @@ struct PlatformDataStoreTests {
         let store = PlatformDataStore(storage: storage)
         try store.saveHardwareModel(Data([0x01]))
 
-        #expect(FileManager.default.fileExists(atPath: storage.platformDirectory.appendingPathComponent("hardwareModel.bin").path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: storage.platformDirectory.appendingPathComponent("hardwareModel.bin").path
+            )
+        )
     }
 }

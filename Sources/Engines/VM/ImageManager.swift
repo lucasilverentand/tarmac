@@ -24,6 +24,10 @@ final class ImageManager: Sendable {
     private var speedSampleBytes: Int64 = 0
     private var speedSampleTime: Date = Date()
 
+    init(storageDirectory: URL? = nil) {
+        self.storage = StorageManager(rootDirectory: storageDirectory ?? StorageManager.defaultRootDirectory)
+    }
+
     private let progressRefreshInterval: TimeInterval = 0.1
     private let speedSampleInterval: TimeInterval = 0.5
 
@@ -58,7 +62,10 @@ final class ImageManager: Sendable {
         }
 
         let destination = storage.restoreIPSWURL
-        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
 
         // Remove completed file if re-downloading
         if FileManager.default.fileExists(atPath: destination.path) {

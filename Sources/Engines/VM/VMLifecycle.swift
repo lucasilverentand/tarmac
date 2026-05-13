@@ -52,7 +52,7 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
         let platform = VZMacPlatformConfiguration()
         platform.hardwareModel = hardwareModel
         platform.machineIdentifier = machineIdentifier
-        platform.auxiliaryStorage = try VZMacAuxiliaryStorage(
+        platform.auxiliaryStorage = VZMacAuxiliaryStorage(
             url: platformStore.auxiliaryStoragePath
         )
 
