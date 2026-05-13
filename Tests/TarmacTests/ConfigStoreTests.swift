@@ -60,8 +60,10 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
-        #expect(!store.storageRootPath.isEmpty)  // default is set
-        #expect(store.cacheDirectoryPath == store.storageRootPath)
+        #expect(!store.storageDirectoryPath.isEmpty)
+        #expect(store.storageRootPath == store.storageDirectoryPath)
+        #expect(store.cacheDirectoryPath == StorageManager(rootPath: store.storageRootPath).actionsCacheDirectory.path)
+        #expect(!store.hasCompletedStorageSetup)
 
         defaults.removePersistentDomain(forName: "test-config")
     }
@@ -77,7 +79,7 @@ struct ConfigStoreTests {
         let store = ConfigStore(defaults: defaults, keychainService: keychain)
 
         #expect(store.storageRootPath == legacyPath)
-        #expect(store.cacheDirectoryPath == legacyPath)
+        #expect(store.cacheDirectoryPath == StorageManager(rootPath: legacyPath).actionsCacheDirectory.path)
 
         defaults.removePersistentDomain(forName: suiteName)
     }
@@ -94,9 +96,28 @@ struct ConfigStoreTests {
         store.save()
 
         #expect(defaults.string(forKey: "storageRootPath") == path)
-        #expect(defaults.string(forKey: "cacheDirectoryPath") == path)
+        #expect(
+            defaults.string(forKey: "cacheDirectoryPath") == StorageManager(rootPath: path).actionsCacheDirectory.path
+        )
 
         defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("Configure storage derives managed paths")
+    func configureStorage() throws {
+        let (store, _) = makeStore()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tarmac-storage-\(UUID().uuidString)")
+
+        try store.configureStorage(at: directory)
+
+        #expect(store.hasCompletedStorageSetup)
+        #expect(store.storageDirectoryPath == directory.standardizedFileURL.path)
+        #expect(store.cacheDirectoryPath == StorageManager(rootDirectory: directory).actionsCacheDirectory.path)
+        #expect(store.resolvedBaseImagePath == directory.appendingPathComponent("BaseImage.img").path)
+        #expect(store.platformDirectoryPath == directory.appendingPathComponent("Platform").path)
+
+        try? FileManager.default.removeItem(at: directory)
     }
 
     @Test("Remove organization")

@@ -28,6 +28,8 @@ struct SettingsView: View {
 private struct GeneralSettingsTab: View {
     @Bindable var viewModel: SettingsViewModel
 
+    @State private var storageError: String?
+
     var body: some View {
         Form {
             Toggle("Launch at login", isOn: $viewModel.launchAtLogin)
@@ -62,9 +64,38 @@ private struct GeneralSettingsTab: View {
             Button("Clean Up Storage") {
                 viewModel.cleanupStorage()
             }
+
+            if let storageError {
+                Label(storageError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Section("Derived Paths") {
+                LabeledContent("Base image") {
+                    pathText(viewModel.baseImagePath)
+                }
+                LabeledContent("Restore image") {
+                    pathText(viewModel.restoreImagePath)
+                }
+                LabeledContent("Platform identity") {
+                    pathText(viewModel.platformDirectoryPath)
+                }
+                LabeledContent("Actions cache") {
+                    pathText(viewModel.resolvedCachePath)
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    private func pathText(_ path: String) -> some View {
+        Text(path)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
     }
 
     private func chooseDirectory() {
@@ -74,7 +105,12 @@ private struct GeneralSettingsTab: View {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            viewModel.storageRootPath = url.path
+            do {
+                try viewModel.configureStorage(at: url)
+                storageError = nil
+            } catch {
+                storageError = error.localizedDescription
+            }
         }
     }
 }

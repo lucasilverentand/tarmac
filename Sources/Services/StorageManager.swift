@@ -36,7 +36,9 @@ struct StorageManager: Sendable {
 
     func prepareBaseDirectories() throws {
         let fm = FileManager.default
-        for directory in [rootDirectory, platformDirectory, jobsDirectory, disksDirectory, actionsCacheDirectory, tmpDirectory] {
+        for directory in [
+            rootDirectory, platformDirectory, jobsDirectory, disksDirectory, actionsCacheDirectory, tmpDirectory,
+        ] {
             try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         }
     }
@@ -57,7 +59,8 @@ struct StorageManager: Sendable {
     }
 
     func availableCapacityBytes() -> Int64? {
-        guard let values = try? rootDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]) else {
+        guard let values = try? rootDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        else {
             return nil
         }
         return values.volumeAvailableCapacityForImportantUsage

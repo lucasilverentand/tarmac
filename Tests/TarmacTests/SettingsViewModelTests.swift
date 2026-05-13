@@ -70,8 +70,10 @@ struct SettingsViewModelTests {
     }
 
     @Test("validateConfiguration returns empty when fully configured")
-    func validateFullyConfigured() {
+    func validateFullyConfigured() throws {
         let (vm, _, keychain) = makeVM()
+        let storage = try TestFactories.makeTempDir()
+        try vm.configureStorage(at: storage)
 
         let org = TestFactories.makeOrg()
         vm.addOrganization(org)
@@ -79,6 +81,7 @@ struct SettingsViewModelTests {
 
         let issues = vm.validateConfiguration()
         #expect(issues.isEmpty)
+        TestFactories.cleanup(storage)
     }
 
     @Test("validateConfiguration returns issues when nothing configured")
@@ -87,6 +90,7 @@ struct SettingsViewModelTests {
 
         let issues = vm.validateConfiguration()
         #expect(issues.contains { $0.contains("No organizations") })
+        #expect(issues.contains { $0.contains("Storage location") })
     }
 
     @Test("validateConfiguration detects missing credentials per org")
@@ -99,6 +103,18 @@ struct SettingsViewModelTests {
         let issues = vm.validateConfiguration()
         #expect(issues.contains { $0.contains("my-org") && $0.contains("App ID") })
         #expect(issues.contains { $0.contains("my-org") && $0.contains("Private key") })
+    }
+
+    @Test("validateConfiguration detects missing scale set ID")
+    func validateMissingScaleSet() {
+        let (vm, _, keychain) = makeVM()
+
+        let org = TestFactories.makeOrg(name: "my-org", scaleSetId: nil)
+        vm.addOrganization(org)
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+
+        let issues = vm.validateConfiguration()
+        #expect(issues.contains { $0.contains("my-org") && $0.contains("Scale set ID") })
     }
 
     @Test("validateConfiguration detects all orgs disabled")
@@ -145,6 +161,8 @@ struct SettingsViewModelTests {
         let newStorage = StorageManager(rootDirectory: newRoot)
         #expect(store.storageRootPath == newStorage.rootDirectory.path)
         #expect(store.baseImagePath == newStorage.baseImageURL.path)
-        #expect(FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path))
+        #expect(
+            FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
+        )
     }
 }

@@ -86,7 +86,7 @@ struct JWTGenerator: Sendable {
                     return key
                 }
             }
-            let cfError = error?.takeRetainedValue()
+            _ = error?.takeRetainedValue()
             throw JWTError.invalidPrivateKey
         }
 

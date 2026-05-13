@@ -51,7 +51,11 @@ struct StorageManagerTests {
         let oldStorage = StorageManager(rootDirectory: oldRoot)
         try FileManager.default.createDirectory(at: oldStorage.runnerDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: oldStorage.actionsCacheDirectory, withIntermediateDirectories: true)
-        try "runner".write(to: oldStorage.runnerDirectory.appendingPathComponent("run.sh"), atomically: true, encoding: .utf8)
+        try "runner".write(
+            to: oldStorage.runnerDirectory.appendingPathComponent("run.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
         try "cache".write(
             to: oldStorage.actionsCacheDirectory.appendingPathComponent("entry"),
             atomically: true,
@@ -63,8 +67,14 @@ struct StorageManagerTests {
         let result = try newStorage.migrateManagedData(from: oldRoot, explicitBaseImageURL: explicitBase)
 
         #expect(result.movedItems >= 3)
-        #expect(FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path))
-        #expect(FileManager.default.fileExists(atPath: newStorage.actionsCacheDirectory.appendingPathComponent("entry").path))
+        #expect(
+            FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: newStorage.actionsCacheDirectory.appendingPathComponent("entry").path
+            )
+        )
         #expect(FileManager.default.fileExists(atPath: newStorage.baseImageURL.path))
         #expect(!FileManager.default.fileExists(atPath: explicitBase.path))
     }

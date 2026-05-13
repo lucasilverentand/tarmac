@@ -29,6 +29,7 @@ final class VMEngine: VMManagerProtocol {
     init(
         cacheDirectoryPath: String,
         baseImagePath: String,
+        platformDirectoryPath: String? = nil,
         cacheConfig: CacheConfiguration = CacheConfiguration(),
         platformStore: PlatformDataStore? = nil,
         lifecycle: (any VMLifecycleProtocol)? = nil,
