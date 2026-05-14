@@ -12,8 +12,8 @@ struct TarmacApp: App {
             MenuBarView(appState: appState)
                 .onAppear {
                     Log.app.info("Menu bar popover appeared")
-                    if appState.configStore.organizations.isEmpty {
-                        Log.app.info("No orgs configured — opening dashboard for onboarding")
+                    if !appState.configStore.hasCompletedStorageSetup || appState.configStore.organizations.isEmpty {
+                        Log.app.info("Setup incomplete — opening dashboard for onboarding")
                         openWindow(id: "dashboard")
                     }
                 }

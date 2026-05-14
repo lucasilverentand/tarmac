@@ -118,9 +118,6 @@ struct JobLifecycleIntegrationTests {
         // Complete first job
         await engine.handleMessages([jobCompletedMessage(jobId: 1)], org: org)
 
-        // Try dispatch again — second job should now dispatch
-        await engine.tryDispatch()
-
         let job2 = await store.job(byId: 2)
         #expect(job2?.status == .provisioning)
     }

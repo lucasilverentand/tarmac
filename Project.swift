@@ -64,6 +64,7 @@ let project = Project(
             destinations: .macOS,
             product: .unitTests,
             bundleId: "studio.seventwo.tarmac.tests",
+            deploymentTargets: .macOS("26.0"),
             sources: ["Tests/**"],
             dependencies: [
                 .target(name: "Tarmac"),

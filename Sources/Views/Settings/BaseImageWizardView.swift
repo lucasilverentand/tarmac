@@ -185,6 +185,7 @@ struct BaseImageWizardView: View {
             VStack(spacing: 8) {
                 ProgressView(value: imageManager.downloadProgress)
                     .progressViewStyle(.linear)
+                    .animation(.linear(duration: 0.1), value: imageManager.downloadProgress)
 
                 HStack {
                     // Downloaded / Total
@@ -300,15 +301,16 @@ struct BaseImageWizardView: View {
                 .foregroundStyle(.tint)
                 .symbolEffect(.pulse)
 
-            Text("Installing macOS 26...")
+            Text(imageManager.installStatus)
                 .font(.subheadline.weight(.medium))
 
             VStack(spacing: 8) {
                 ProgressView(value: imageManager.installProgress)
                     .progressViewStyle(.linear)
+                    .animation(.linear(duration: 0.1), value: imageManager.installProgress)
 
                 HStack {
-                    Text("This may take 15\u{2013}30 minutes")
+                    Text(formatElapsed(imageManager.installElapsedSeconds))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Spacer()
@@ -424,7 +426,7 @@ struct BaseImageWizardView: View {
 
                 let diskManager = DiskImageManager()
                 let baseImageURL = URL(fileURLWithPath: baseImagePath)
-                try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB)
+                try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB, overwrite: true)
 
                 let platformStore = PlatformDataStore(storage: storage)
                 try await imageManager.installMacOS(
@@ -477,5 +479,21 @@ struct BaseImageWizardView: View {
         let hours = minutes / 60
         let remainingMinutes = minutes % 60
         return "\(hours)h \(remainingMinutes)m remaining"
+    }
+
+    private func formatElapsed(_ seconds: Int) -> String {
+        if seconds < 60 {
+            return "\(seconds)s elapsed"
+        }
+
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        if minutes < 60 {
+            return remainingSeconds > 0 ? "\(minutes)m \(remainingSeconds)s elapsed" : "\(minutes)m elapsed"
+        }
+
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        return remainingMinutes > 0 ? "\(hours)h \(remainingMinutes)m elapsed" : "\(hours)h elapsed"
     }
 }

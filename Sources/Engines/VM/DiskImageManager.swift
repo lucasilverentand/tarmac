@@ -1,11 +1,15 @@
 import Foundation
 
 struct DiskImageManager: Sendable {
-    func createSparseDisk(at url: URL, sizeGB: Int) throws {
+    func createSparseDisk(at url: URL, sizeGB: Int, overwrite: Bool = false) throws {
         let fm = FileManager.default
         let dir = url.deletingLastPathComponent()
         if !fm.fileExists(atPath: dir.path) {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+
+        if overwrite, fm.fileExists(atPath: url.path) {
+            try fm.removeItem(at: url)
         }
 
         guard fm.createFile(atPath: url.path, contents: nil) else {

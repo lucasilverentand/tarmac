@@ -14,7 +14,7 @@ final class AppState {
     private var syncTask: Task<Void, Never>?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
-    private let vmEngineFactory: (String, String, CacheConfiguration) -> VMEngine
+    private let vmEngineFactory: (String, String, String, CacheConfiguration) -> VMEngine
 
     init() {
         let configStore = ConfigStore()
@@ -23,10 +23,11 @@ final class AppState {
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = { GitHubClient() }
-        self.vmEngineFactory = { cachePath, basePath, cacheConfig in
+        self.vmEngineFactory = { cachePath, basePath, platformPath, cacheConfig in
             VMEngine(
                 cacheDirectoryPath: cachePath,
                 baseImagePath: basePath,
+                platformDirectoryPath: platformPath,
                 cacheConfig: cacheConfig
             )
         }
@@ -35,13 +36,15 @@ final class AppState {
     init(
         configStore: ConfigStore,
         githubClientFactory: @escaping () -> any GitHubClientProtocol = { GitHubClient() },
-        vmEngineFactory: @escaping (String, String, CacheConfiguration) -> VMEngine = {
+        vmEngineFactory: @escaping (String, String, String, CacheConfiguration) -> VMEngine = {
             cachePath,
             basePath,
+            platformPath,
             cacheConfig in
             VMEngine(
                 cacheDirectoryPath: cachePath,
                 baseImagePath: basePath,
+                platformDirectoryPath: platformPath,
                 cacheConfig: cacheConfig
             )
         }
@@ -57,6 +60,11 @@ final class AppState {
     // MARK: - Engine Lifecycle
 
     func start() async {
+        guard queueEngine == nil else {
+            Log.app.debug("Start ignored because app is already running")
+            return
+        }
+
         let issues = settingsViewModel.validateConfiguration()
         guard issues.isEmpty else {
             Log.app.warning("Cannot start: \(issues.joined(separator: ", "))")
@@ -73,7 +81,8 @@ final class AppState {
 
         let vmEngine = vmEngineFactory(
             configStore.storageRootPath,
-            resolvedBaseImagePath(),
+            configStore.resolvedBaseImagePath,
+            configStore.platformDirectoryPath,
             configStore.cacheConfig
         )
         self.vmEngine = vmEngine
@@ -139,6 +148,9 @@ final class AppState {
             let org = configStore.organizations.first { $0.name == job.organizationName }
             guard let org else {
                 Log.app.error("No org found for job \(job.id)")
+                await queueEngine.jobStore.updateJob(id: job.id, status: .failed)
+                queueViewModel.updateJobStatus(id: job.id, status: .failed)
+                await queueEngine.tryDispatch()
                 return
             }
 
@@ -172,10 +184,11 @@ final class AppState {
             queueViewModel.updateJobStatus(id: job.id, status: .failed)
 
             // Teardown on failure
-            if vmEngine.isRunning {
+            if vmEngine.currentInstance != nil {
                 try? await vmEngine.teardown()
                 vmStatusViewModel.activeVM = nil
             }
+            await queueEngine.tryDispatch()
         }
     }
 
@@ -198,14 +211,5 @@ final class AppState {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
-    }
-
-    // MARK: - Helpers
-
-    private func resolvedBaseImagePath() -> String {
-        if !configStore.baseImagePath.isEmpty {
-            return configStore.baseImagePath
-        }
-        return StorageManager(rootPath: configStore.storageRootPath).baseImageURL.path
     }
 }
