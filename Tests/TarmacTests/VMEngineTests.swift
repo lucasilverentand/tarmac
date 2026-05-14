@@ -246,4 +246,94 @@ struct VMEngineTests {
         // No direct way to verify, but this shouldn't crash
         // The config is used during bootVM when cache is enabled
     }
+
+    // MARK: - Boot Verification
+
+    @Test("verifyBaseImage writes marker and transitions to verified")
+    @MainActor
+    func verifyBaseImageSuccess() async throws {
+        let (engine, mock, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        #expect(!engine.baseImageVerified)
+        #expect(!engine.baseImageReady)
+
+        try await engine.verifyBaseImage(config: VMConfiguration(), holdSeconds: 0)
+
+        #expect(mock.bootCallCount == 1)
+        #expect(mock.stopCallCount == 1)
+        #expect(engine.verificationState == .verified)
+        #expect(engine.baseImageVerified)
+        #expect(engine.baseImageReady)
+
+        let storage = StorageManager(rootPath: tempDir.path)
+        #expect(FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
+    }
+
+    @Test("verifyBaseImage throws when base image is missing")
+    @MainActor
+    func verifyBaseImageMissing() async throws {
+        let (engine, _, tempDir) = try makeEngine(baseImageExists: false)
+        defer { TestFactories.cleanup(tempDir) }
+
+        await #expect(throws: VMEngineError.self) {
+            try await engine.verifyBaseImage(config: VMConfiguration(), holdSeconds: 0)
+        }
+        #expect(!engine.baseImageVerified)
+    }
+
+    @Test("verifyBaseImage failure leaves no marker and reports failure state")
+    @MainActor
+    func verifyBaseImageBootFailure() async throws {
+        let mock = MockVMLifecycle()
+        mock.shouldThrowOnBoot = true
+        let (engine, _, tempDir) = try makeEngine(lifecycle: mock)
+        defer { TestFactories.cleanup(tempDir) }
+
+        await #expect(throws: VMEngineError.self) {
+            try await engine.verifyBaseImage(config: VMConfiguration(), holdSeconds: 0)
+        }
+
+        #expect(!engine.baseImageVerified)
+        #expect(!engine.baseImageReady)
+        if case .failed = engine.verificationState {
+            // expected
+        } else {
+            Issue.record("Expected verificationState to be .failed, got \(engine.verificationState)")
+        }
+    }
+
+    @Test("verifyBaseImage failure cleans up the cloned disk")
+    @MainActor
+    func verifyBaseImageCleanupOnFailure() async throws {
+        let mock = MockVMLifecycle()
+        mock.shouldThrowOnBoot = true
+        let (engine, _, tempDir) = try makeEngine(lifecycle: mock)
+        defer { TestFactories.cleanup(tempDir) }
+
+        _ = try? await engine.verifyBaseImage(config: VMConfiguration(), holdSeconds: 0)
+
+        let disks = tempDir.appendingPathComponent("disks")
+        let leftovers = (try? FileManager.default.contentsOfDirectory(at: disks, includingPropertiesForKeys: nil)) ?? []
+        let verifyClones = leftovers.filter { $0.lastPathComponent.hasPrefix("verify-") }
+        #expect(verifyClones.isEmpty)
+    }
+
+    @Test("baseImageReady requires both file presence and verified marker")
+    @MainActor
+    func baseImageReadyGating() throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        #expect(engine.baseImageExists)
+        #expect(!engine.baseImageVerified)
+        #expect(!engine.baseImageReady)
+
+        let storage = StorageManager(rootPath: tempDir.path)
+        try storage.prepareBaseDirectories()
+        try storage.markBaseImageVerified()
+
+        #expect(engine.baseImageVerified)
+        #expect(engine.baseImageReady)
+    }
 }

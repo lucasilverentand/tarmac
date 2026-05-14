@@ -1,5 +1,12 @@
 import SwiftUI
 
+enum VerifyDisplayState: Equatable {
+    case idle
+    case running
+    case success
+    case failed(message: String)
+}
+
 struct BaseImageWizardView: View {
     let configStore: ConfigStore
 
@@ -9,6 +16,7 @@ struct BaseImageWizardView: View {
     @State private var ipswURL: URL?
     @State private var imageManager: ImageManager
     @State private var downloadStartTime: Date?
+    @State private var verificationStatus: VerifyDisplayState = .idle
 
     @Environment(\.dismiss) private var dismiss
 
@@ -44,7 +52,7 @@ struct BaseImageWizardView: View {
                 .padding(.top, 20)
 
             HStack(spacing: 16) {
-                ForEach(0..<3) { step in
+                ForEach(0..<4) { step in
                     HStack(spacing: 6) {
                         ZStack {
                             Circle()
@@ -69,11 +77,11 @@ struct BaseImageWizardView: View {
                             .foregroundStyle(step == currentStep ? .primary : .secondary)
                     }
 
-                    if step < 2 {
+                    if step < 3 {
                         Rectangle()
                             .fill(step < currentStep ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
                             .frame(height: 1)
-                            .frame(maxWidth: 32)
+                            .frame(maxWidth: 24)
                     }
                 }
             }
@@ -85,7 +93,8 @@ struct BaseImageWizardView: View {
         switch step {
         case 0: "Download"
         case 1: "Install"
-        case 2: "Done"
+        case 2: "Verify"
+        case 3: "Done"
         default: ""
         }
     }
@@ -97,7 +106,8 @@ struct BaseImageWizardView: View {
         switch currentStep {
         case 0: downloadStep
         case 1: installStep
-        case 2: completeStep
+        case 2: verifyStep
+        case 3: completeStep
         default: EmptyView()
         }
     }
@@ -323,6 +333,68 @@ struct BaseImageWizardView: View {
         }
     }
 
+    // MARK: - Verify Step
+
+    private var verifyStep: some View {
+        VStack(spacing: 20) {
+            switch verificationStatus {
+            case .idle, .running:
+                verifyRunningView
+            case .failed(let message):
+                verifyFailedView(message: message)
+            case .success:
+                verifyRunningView
+            }
+        }
+    }
+
+    private var verifyRunningView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: 44))
+                .foregroundStyle(.tint)
+                .symbolEffect(.pulse)
+
+            Text("Verifying base image")
+                .font(.title3.weight(.medium))
+
+            Text(
+                "Tarmac is booting a clone of the base image to confirm it works. This usually takes under a minute."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 380)
+
+            ProgressView()
+                .controlSize(.large)
+        }
+    }
+
+    private func verifyFailedView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.red)
+
+            Text("Verification failed")
+                .font(.title3.weight(.medium))
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .lineLimit(4)
+
+            Button("Retry Verification") {
+                startVerify()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+    }
+
     // MARK: - Complete Step
 
     private var completeStep: some View {
@@ -358,7 +430,7 @@ struct BaseImageWizardView: View {
 
             Spacer()
 
-            if currentStep == 2 {
+            if currentStep == 3 {
                 Button("Done") {
                     dismiss()
                 }
@@ -439,14 +511,43 @@ struct BaseImageWizardView: View {
                 configStore.baseImagePath = baseImagePath
                 configStore.save()
                 try? FileManager.default.removeItem(at: ipsw)
+                // A fresh install invalidates any previous verification marker.
+                try? storage.clearBaseImageVerified()
 
                 isWorking = false
                 currentStep = 2
-                Log.image.info("Base image installation completed")
+                Log.image.info("Base image installation completed; starting verification")
+                startVerify()
             } catch {
                 isWorking = false
                 errorMessage = error.localizedDescription
                 Log.image.error("Base image install failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func startVerify() {
+        errorMessage = nil
+        verificationStatus = .running
+
+        Task {
+            do {
+                let vmConfig = configStore.vmConfiguration
+                let storage = StorageManager(rootPath: configStore.storageRootPath)
+                let baseImagePath = resolvedBaseImagePath(storage: storage)
+
+                let engine = VMEngine(
+                    cacheDirectoryPath: configStore.storageRootPath,
+                    baseImagePath: baseImagePath
+                )
+                try await engine.verifyBaseImage(config: vmConfig)
+
+                verificationStatus = .success
+                currentStep = 3
+                Log.vm.info("Base image verification completed")
+            } catch {
+                verificationStatus = .failed(message: error.localizedDescription)
+                Log.vm.error("Base image verification failed: \(error.localizedDescription)")
             }
         }
     }
