@@ -164,8 +164,10 @@ final class SettingsViewModel {
 
     // MARK: - Validation
 
-    func validateConfiguration() -> [String] {
-        var issues: [String] = []
+    func validateConfiguration(
+        hostCapability: HostCapability = .current()
+    ) -> [String] {
+        var issues: [String] = hostCapability.issues
         if configStore.organizations.isEmpty {
             issues.append("No organizations configured")
         }

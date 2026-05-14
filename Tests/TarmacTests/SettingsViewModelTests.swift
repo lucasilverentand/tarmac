@@ -6,6 +6,11 @@ import Testing
 @Suite("SettingsViewModel")
 @MainActor
 struct SettingsViewModelTests {
+    private static let supportedHost = HostCapability(
+        isVirtualizationSupported: true,
+        operatingSystemVersion: OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+    )
+
     private func makeVM() -> (SettingsViewModel, ConfigStore, PreviewKeychainService) {
         let suiteName = "test-settings-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -77,7 +82,7 @@ struct SettingsViewModelTests {
         vm.addOrganization(org)
         _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
 
-        let issues = vm.validateConfiguration()
+        let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
         #expect(issues.isEmpty)
     }
 
@@ -85,7 +90,7 @@ struct SettingsViewModelTests {
     func validateNothingConfigured() {
         let (vm, _, _) = makeVM()
 
-        let issues = vm.validateConfiguration()
+        let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
         #expect(issues.contains { $0.contains("No organizations") })
     }
 
@@ -96,7 +101,7 @@ struct SettingsViewModelTests {
         let org = TestFactories.makeOrg(name: "my-org", appId: "")
         vm.addOrganization(org)
 
-        let issues = vm.validateConfiguration()
+        let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
         #expect(issues.contains { $0.contains("my-org") && $0.contains("App ID") })
         #expect(issues.contains { $0.contains("my-org") && $0.contains("Private key") })
     }
@@ -108,8 +113,24 @@ struct SettingsViewModelTests {
         let org = TestFactories.makeOrg(isEnabled: false)
         vm.addOrganization(org)
 
-        let issues = vm.validateConfiguration()
+        let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
         #expect(issues.contains { $0.contains("disabled") })
+    }
+
+    @Test("validateConfiguration surfaces unsupported host issues")
+    func validateUnsupportedHostSurfacesIssues() {
+        let (vm, _, keychain) = makeVM()
+        let org = TestFactories.makeOrg()
+        vm.addOrganization(org)
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+
+        let unsupported = HostCapability(
+            isVirtualizationSupported: false,
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 5, patchVersion: 0)
+        )
+        let issues = vm.validateConfiguration(hostCapability: unsupported)
+        #expect(issues.contains { $0.contains("Virtualization") })
+        #expect(issues.contains { $0.contains("macOS 26") })
     }
 
     @Test("vmConfiguration setter persists")

@@ -31,7 +31,7 @@ let project = Project(
             destinations: .macOS,
             product: .app,
             bundleId: "studio.seventwo.tarmac",
-            deploymentTargets: .macOS("15.0"),
+            deploymentTargets: .macOS("26.0"),
             infoPlist: .extendingDefault(with: [
                 "LSUIElement": true,
             ]),
