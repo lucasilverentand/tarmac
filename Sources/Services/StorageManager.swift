@@ -23,6 +23,7 @@ struct StorageManager: Sendable {
     }
 
     var baseImageURL: URL { rootDirectory.appendingPathComponent("BaseImage.img") }
+    var baseImageVerifiedMarkerURL: URL { platformDirectory.appendingPathComponent("baseImageVerified.json") }
     var restoreIPSWURL: URL { rootDirectory.appendingPathComponent("restore.ipsw") }
     var ipswResumeDataURL: URL { rootDirectory.appendingPathComponent("ipsw-resume.json") }
     var platformDirectory: URL { rootDirectory.appendingPathComponent("Platform", isDirectory: true) }
@@ -69,6 +70,24 @@ struct StorageManager: Sendable {
     func storageWarning(minimumFreeBytes: Int64) -> String? {
         guard let freeBytes = availableCapacityBytes(), freeBytes < minimumFreeBytes else { return nil }
         return "Storage folder is low on free space."
+    }
+
+    func isBaseImageVerified() -> Bool {
+        FileManager.default.fileExists(atPath: baseImageVerifiedMarkerURL.path)
+    }
+
+    func markBaseImageVerified(at date: Date = Date()) throws {
+        try FileManager.default.createDirectory(at: platformDirectory, withIntermediateDirectories: true)
+        let marker = BaseImageVerificationMarker(verifiedAt: date)
+        let data = try JSONEncoder.iso8601.encode(marker)
+        try data.write(to: baseImageVerifiedMarkerURL, options: .atomic)
+    }
+
+    func clearBaseImageVerified() throws {
+        let url = baseImageVerifiedMarkerURL
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     func cleanupTransientFiles(olderThan interval: TimeInterval = 24 * 60 * 60) throws {
@@ -223,4 +242,16 @@ struct StorageMigrationResult: Sendable {
     var movedItems: Int = 0
     var skippedExistingDestination: Int = 0
     var movedBaseImage: Bool = false
+}
+
+struct BaseImageVerificationMarker: Codable, Sendable {
+    let verifiedAt: Date
+}
+
+extension JSONEncoder {
+    fileprivate static let iso8601: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
 }

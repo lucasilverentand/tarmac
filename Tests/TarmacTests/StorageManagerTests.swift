@@ -79,6 +79,23 @@ struct StorageManagerTests {
         #expect(!FileManager.default.fileExists(atPath: explicitBase.path))
     }
 
+    @Test("base image verification marker lifecycle")
+    func baseImageVerifiedMarkerLifecycle() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        #expect(!storage.isBaseImageVerified())
+
+        try storage.markBaseImageVerified()
+        #expect(storage.isBaseImageVerified())
+        #expect(FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
+
+        try storage.clearBaseImageVerified()
+        #expect(!storage.isBaseImageVerified())
+        #expect(!FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
+    }
+
     @Test("cleanupTransientFiles removes stale transient data")
     func cleanupTransientFiles() throws {
         let root = try TestFactories.makeTempDir()

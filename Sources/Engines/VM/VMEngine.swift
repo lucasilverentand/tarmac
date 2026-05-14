@@ -14,12 +14,22 @@ final class VMEngine: VMManagerProtocol {
     private let baseImageURL: URL
 
     private(set) var currentInstance: VMInstance?
+    private(set) var verificationState: BaseImageVerificationState = .notStarted
     private var cacheConfig: CacheConfiguration
 
     var isRunning: Bool { currentInstance?.state == .running }
 
     var baseImageExists: Bool {
         FileManager.default.fileExists(atPath: baseImageURL.path)
+    }
+
+    var baseImageVerified: Bool {
+        storage.isBaseImageVerified()
+    }
+
+    /// True only when the base image both exists on disk and has passed boot verification.
+    var baseImageReady: Bool {
+        baseImageExists && baseImageVerified
     }
 
     var installProgress: Double {
@@ -64,6 +74,10 @@ final class VMEngine: VMManagerProtocol {
         try storage.cleanupTransientFiles()
         try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB, overwrite: true)
 
+        // A fresh install invalidates any previous verification.
+        try? storage.clearBaseImageVerified()
+        verificationState = .notStarted
+
         try await imageManager.installMacOS(
             ipsw: ipsw,
             diskPath: baseImageURL,
@@ -72,6 +86,68 @@ final class VMEngine: VMManagerProtocol {
         )
 
         Log.vm.info("Base image created successfully")
+    }
+
+    /// Boot a clone of the base image, hold it briefly, then stop cleanly.
+    /// Writes the verified marker only when the full cycle succeeds.
+    func verifyBaseImage(
+        config: VMConfiguration,
+        holdSeconds: TimeInterval = 10
+    ) async throws {
+        guard baseImageExists else {
+            throw VMEngineError.baseImageMissing
+        }
+
+        try storage.prepareBaseDirectories()
+        verificationState = .verifying
+
+        let clonePath = storage.disksDirectory
+            .appendingPathComponent("verify-\(UUID().uuidString).img")
+
+        do {
+            try diskManager.cloneDisk(from: baseImageURL, to: clonePath)
+        } catch {
+            verificationState = .failed(message: "Could not clone base image: \(error.localizedDescription)")
+            throw VMEngineError.verificationFailed(reason: error.localizedDescription)
+        }
+
+        defer { try? diskManager.deleteDisk(at: clonePath) }
+
+        do {
+            try await lifecycle.bootVM(
+                vmConfig: config,
+                diskPath: clonePath,
+                platformStore: platformStore,
+                sharedDirectoryURL: nil,
+                cacheDirectoryURL: nil
+            )
+        } catch {
+            verificationState = .failed(message: "Boot failed: \(error.localizedDescription)")
+            Log.vm.error("Base image verification boot failed: \(error.localizedDescription)")
+            throw VMEngineError.verificationFailed(reason: error.localizedDescription)
+        }
+
+        if holdSeconds > 0 {
+            try? await Task.sleep(for: .seconds(holdSeconds))
+        }
+
+        do {
+            try await lifecycle.stopVM()
+        } catch {
+            verificationState = .failed(message: "Stop failed: \(error.localizedDescription)")
+            Log.vm.error("Base image verification stop failed: \(error.localizedDescription)")
+            throw VMEngineError.verificationFailed(reason: error.localizedDescription)
+        }
+
+        do {
+            try storage.markBaseImageVerified()
+        } catch {
+            verificationState = .failed(message: "Could not write verified marker: \(error.localizedDescription)")
+            throw VMEngineError.verificationFailed(reason: error.localizedDescription)
+        }
+
+        verificationState = .verified
+        Log.vm.info("Base image verification succeeded")
     }
 
     // MARK: - VM Lifecycle
@@ -202,11 +278,24 @@ final class VMEngine: VMManagerProtocol {
 
 enum VMEngineError: LocalizedError {
     case missingJITConfig
+    case baseImageMissing
+    case verificationFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
         case .missingJITConfig:
             "Job is missing JIT configuration"
+        case .baseImageMissing:
+            "Base image does not exist on disk"
+        case .verificationFailed(let reason):
+            "Base image verification failed: \(reason)"
         }
     }
+}
+
+enum BaseImageVerificationState: Equatable, Sendable {
+    case notStarted
+    case verifying
+    case verified
+    case failed(message: String)
 }
