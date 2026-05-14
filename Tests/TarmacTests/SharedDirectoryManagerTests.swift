@@ -5,19 +5,13 @@ import Testing
 
 @Suite("SharedDirectoryManager")
 struct SharedDirectoryManagerTests {
-    @Test("prepareForJob creates directory with runner symlink and jitconfig")
+    @Test("prepareForJob creates directory with runner package and jitconfig")
     func prepareForJobCreatesStructure() throws {
         let tempDir = try TestFactories.makeTempDir()
         defer { TestFactories.cleanup(tempDir) }
 
-        // Create a fake runner directory
         let runnerDir = tempDir.appendingPathComponent("runner-bin")
-        try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
-        try "#!/bin/bash".write(
-            to: runnerDir.appendingPathComponent("run.sh"),
-            atomically: true,
-            encoding: .utf8
-        )
+        try makeRunnerPackage(at: runnerDir)
 
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
         let jobDir = try manager.prepareForJob(
@@ -26,13 +20,10 @@ struct SharedDirectoryManagerTests {
             jitConfig: "test-jit-config-data"
         )
 
-        // Check runner symlink exists
-        let runnerLink = jobDir.appendingPathComponent("runner")
-        #expect(FileManager.default.fileExists(atPath: runnerLink.path))
-
-        // Check it's a symlink pointing to the runner dir
-        let linkDest = try FileManager.default.destinationOfSymbolicLink(atPath: runnerLink.path)
-        #expect(linkDest == runnerDir.path)
+        let runnerCopy = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
+        let runScript = runnerCopy.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
+        #expect(FileManager.default.fileExists(atPath: runnerCopy.path))
+        #expect(FileManager.default.fileExists(atPath: runScript.path))
     }
 
     @Test("prepareForJob writes correct jitconfig content")
@@ -41,7 +32,7 @@ struct SharedDirectoryManagerTests {
         defer { TestFactories.cleanup(tempDir) }
 
         let runnerDir = tempDir.appendingPathComponent("runner-bin")
-        try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
+        try makeRunnerPackage(at: runnerDir)
 
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
         let jobDir = try manager.prepareForJob(
@@ -50,7 +41,7 @@ struct SharedDirectoryManagerTests {
             jitConfig: "my-encoded-config"
         )
 
-        let jitPath = jobDir.appendingPathComponent("jitconfig")
+        let jitPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
         let content = try String(contentsOf: jitPath, encoding: .utf8)
         #expect(content == "my-encoded-config")
     }
@@ -61,7 +52,7 @@ struct SharedDirectoryManagerTests {
         defer { TestFactories.cleanup(tempDir) }
 
         let runnerDir = tempDir.appendingPathComponent("runner-bin")
-        try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
+        try makeRunnerPackage(at: runnerDir)
 
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
         _ = try manager.prepareForJob(jobId: 55, runnerPath: runnerDir, jitConfig: "cfg")
@@ -81,5 +72,81 @@ struct SharedDirectoryManagerTests {
 
         // Should not throw
         try manager.cleanupJob(jobId: 999)
+    }
+
+    @Test("prepareForJob fails when runner package is missing")
+    func missingRunnerPackageFails() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+
+        #expect(throws: SharedDirectoryError.self) {
+            try manager.prepareForJob(
+                jobId: 1,
+                runnerPath: tempDir.appendingPathComponent("missing-runner"),
+                jitConfig: "cfg"
+            )
+        }
+    }
+
+    @Test("prepareForJob fails when runner entrypoint is missing")
+    func missingRunnerEntrypointFails() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+
+        #expect(throws: SharedDirectoryError.self) {
+            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, jitConfig: "cfg")
+        }
+    }
+
+    @Test("prepareForJob fails when jitconfig is empty")
+    func emptyJITConfigFails() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try makeRunnerPackage(at: runnerDir)
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+
+        #expect(throws: SharedDirectoryError.self) {
+            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, jitConfig: " \n ")
+        }
+    }
+
+    @Test("prepareForJob fails when runner entrypoint is not executable")
+    func nonExecutableRunnerEntrypointFails() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
+        try "#!/bin/bash".write(
+            to: runnerDir.appendingPathComponent("run.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+
+        #expect(throws: SharedDirectoryError.self) {
+            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, jitConfig: "cfg")
+        }
+    }
+
+    private func makeRunnerPackage(at runnerDir: URL) throws {
+        try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
+        let runScript = runnerDir.appendingPathComponent("run.sh")
+        try "#!/bin/bash".write(to: runScript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: runScript.path
+        )
     }
 }

@@ -117,9 +117,10 @@ struct VMEngineTests {
         let (engine, mock, tempDir) = try makeEngine()
         defer { TestFactories.cleanup(tempDir) }
 
-        // Create the runner binary that prepareForJob will symlink to
+        // Create the runner package that prepareForJob will copy into the shared directory.
         let runnerPath = tempDir.appendingPathComponent("runner")
         try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
 
         var job = TestFactories.makeJob(id: 99)
         job.jitConfig = "test-jit-config"
@@ -143,6 +144,7 @@ struct VMEngineTests {
 
         let runnerPath = tempDir.appendingPathComponent("runner")
         try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
 
         var job = TestFactories.makeJob(id: 50)
         job.jitConfig = "jit-config"
@@ -218,5 +220,14 @@ struct VMEngineTests {
 
         // No direct way to verify, but this shouldn't crash
         // The config is used during bootVM when cache is enabled
+    }
+
+    private func writeExecutableRunScript(in runnerPath: URL) throws {
+        let runScript = runnerPath.appendingPathComponent("run.sh")
+        try "#!/bin/bash".write(to: runScript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: runScript.path
+        )
     }
 }

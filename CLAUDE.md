@@ -55,3 +55,11 @@ TarmacApp (@main)
 4. Clone base VM disk → configure VZ* → boot VM
 5. Guest LaunchDaemon runs `./run.sh --jitconfig` from VirtioFS shared dir
 6. JobCompleted → stop VM → delete clone → mark .completed
+
+## Guest Bootstrap
+
+The base image needs the post-install LaunchDaemon package in `Resources/GuestBootstrap`.
+Install it once from inside the prepared base image with `sudo install-tarmac-runner-bootstrap.sh`.
+On job boot it mounts VirtioFS tag `shared` at `/Volumes/tarmac-shared`, tries optional tag
+`actions-cache` at `/Volumes/actions-cache`, writes `bootstrap.log`, `runner.log`, and `exit-code`
+back into the shared job directory, then shuts the guest down after the runner exits.
