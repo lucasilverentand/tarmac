@@ -16,6 +16,8 @@ struct VMEngineTests {
         if baseImageExists {
             // Create a small file as the base image
             try Data(repeating: 0x00, count: 1024).write(to: baseImagePath)
+            let storage = StorageManager(rootDirectory: tempDir)
+            try storage.markBaseImageReady(at: baseImagePath)
         }
 
         let mock = lifecycle ?? MockVMLifecycle()
@@ -38,6 +40,24 @@ struct VMEngineTests {
         let (engine2, _, tempDir2) = try makeEngine(baseImageExists: false)
         defer { TestFactories.cleanup(tempDir2) }
         #expect(!engine2.baseImageExists)
+    }
+
+    @Test("baseImageExists requires successful verification marker")
+    @MainActor
+    func baseImageExistsRequiresVerificationMarker() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let baseImagePath = tempDir.appendingPathComponent("base.img")
+        try Data(repeating: 0x00, count: 1024).write(to: baseImagePath)
+
+        let engine = VMEngine(
+            cacheDirectoryPath: tempDir.path,
+            baseImagePath: baseImagePath.path,
+            lifecycle: MockVMLifecycle()
+        )
+
+        #expect(!engine.baseImageExists)
     }
 
     @Test("bootVM sets instance state to booting then running")

@@ -23,6 +23,7 @@ struct StorageManager: Sendable {
     }
 
     var baseImageURL: URL { rootDirectory.appendingPathComponent("BaseImage.img") }
+    var baseImageReadinessURL: URL { rootDirectory.appendingPathComponent("BaseImage.ready.json") }
     var restoreIPSWURL: URL { rootDirectory.appendingPathComponent("restore.ipsw") }
     var ipswResumeDataURL: URL { rootDirectory.appendingPathComponent("ipsw-resume.json") }
     var platformDirectory: URL { rootDirectory.appendingPathComponent("Platform", isDirectory: true) }
@@ -36,7 +37,9 @@ struct StorageManager: Sendable {
 
     func prepareBaseDirectories() throws {
         let fm = FileManager.default
-        for directory in [rootDirectory, platformDirectory, jobsDirectory, disksDirectory, actionsCacheDirectory, tmpDirectory] {
+        for directory in [
+            rootDirectory, platformDirectory, jobsDirectory, disksDirectory, actionsCacheDirectory, tmpDirectory,
+        ] {
             try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         }
     }
@@ -44,6 +47,7 @@ struct StorageManager: Sendable {
     func totalManagedSizeBytes() throws -> Int64 {
         try sizeOfItems([
             baseImageURL,
+            baseImageReadinessURL,
             restoreIPSWURL,
             ipswResumeDataURL,
             platformDirectory,
@@ -57,7 +61,8 @@ struct StorageManager: Sendable {
     }
 
     func availableCapacityBytes() -> Int64? {
-        guard let values = try? rootDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]) else {
+        guard let values = try? rootDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        else {
             return nil
         }
         return values.volumeAvailableCapacityForImportantUsage
@@ -73,6 +78,33 @@ struct StorageManager: Sendable {
         try removeContents(in: jobsDirectory, olderThan: cutoff)
         try removeContents(in: disksDirectory, olderThan: cutoff)
         try removeContents(in: tmpDirectory, olderThan: cutoff)
+    }
+
+    func markBaseImageReady(at diskURL: URL, verifiedAt: Date = Date()) throws {
+        try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+        let record = BaseImageReadinessRecord(
+            diskPath: diskURL.standardizedFileURL.path,
+            verifiedAt: verifiedAt
+        )
+        let data = try JSONEncoder().encode(record)
+        try data.write(to: baseImageReadinessURL, options: .atomic)
+    }
+
+    func clearBaseImageReadiness() throws {
+        guard FileManager.default.fileExists(atPath: baseImageReadinessURL.path) else { return }
+        try FileManager.default.removeItem(at: baseImageReadinessURL)
+    }
+
+    func isBaseImageReady(at diskURL: URL) -> Bool {
+        guard
+            FileManager.default.fileExists(atPath: diskURL.path),
+            let data = try? Data(contentsOf: baseImageReadinessURL),
+            let record = try? JSONDecoder().decode(BaseImageReadinessRecord.self, from: data)
+        else {
+            return false
+        }
+
+        return record.diskPath == diskURL.standardizedFileURL.path
     }
 
     @discardableResult
@@ -220,4 +252,9 @@ struct StorageMigrationResult: Sendable {
     var movedItems: Int = 0
     var skippedExistingDestination: Int = 0
     var movedBaseImage: Bool = false
+}
+
+struct BaseImageReadinessRecord: Codable, Equatable, Sendable {
+    let diskPath: String
+    let verifiedAt: Date
 }

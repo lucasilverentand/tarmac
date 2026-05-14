@@ -14,8 +14,23 @@ struct BaseImageWizardView: View {
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        let baseImageURL = Self.resolvedBaseImageURL(configStore: configStore, storage: storage)
+        let platformStore = PlatformDataStore(storage: storage)
         _imageManager = State(
-            initialValue: ImageManager(storage: StorageManager(rootPath: configStore.storageRootPath))
+            initialValue: ImageManager(storage: storage)
+        )
+        _currentStep = State(
+            initialValue: Self.initialStep(
+                storage: storage,
+                baseImageURL: baseImageURL,
+                platformStore: platformStore
+            )
+        )
+        _ipswURL = State(
+            initialValue: FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path)
+                ? storage.restoreIPSWURL
+                : nil
         )
     }
 
@@ -32,7 +47,7 @@ struct BaseImageWizardView: View {
             navigationBar
                 .padding(16)
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 560, height: 440)
     }
 
     // MARK: - Header
@@ -44,7 +59,7 @@ struct BaseImageWizardView: View {
                 .padding(.top, 20)
 
             HStack(spacing: 16) {
-                ForEach(0..<3) { step in
+                ForEach(0..<4) { step in
                     HStack(spacing: 6) {
                         ZStack {
                             Circle()
@@ -69,7 +84,7 @@ struct BaseImageWizardView: View {
                             .foregroundStyle(step == currentStep ? .primary : .secondary)
                     }
 
-                    if step < 2 {
+                    if step < 3 {
                         Rectangle()
                             .fill(step < currentStep ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
                             .frame(height: 1)
@@ -85,7 +100,8 @@ struct BaseImageWizardView: View {
         switch step {
         case 0: "Download"
         case 1: "Install"
-        case 2: "Done"
+        case 2: "Verify"
+        case 3: "Ready"
         default: ""
         }
     }
@@ -97,7 +113,8 @@ struct BaseImageWizardView: View {
         switch currentStep {
         case 0: downloadStep
         case 1: installStep
-        case 2: completeStep
+        case 2: verificationStep
+        case 3: completeStep
         default: EmptyView()
         }
     }
@@ -321,6 +338,76 @@ struct BaseImageWizardView: View {
         }
     }
 
+    // MARK: - Verification Step
+
+    private var verificationStep: some View {
+        VStack(spacing: 20) {
+            if isWorking {
+                verificationProgressView
+            } else {
+                verificationIdleView
+            }
+
+            if let error = errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(3)
+            }
+        }
+    }
+
+    private var verificationIdleView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: 44))
+                .foregroundStyle(.tint)
+
+            Text("Verify Base Image")
+                .font(.title3.weight(.medium))
+
+            Text("Tarmac will boot the installed image once, then stop it before marking it ready.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+
+            Button("Verify Image") {
+                startVerification()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+    }
+
+    private var verificationProgressView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: 36))
+                .foregroundStyle(.tint)
+                .symbolEffect(.pulse)
+
+            Text("Booting base image...")
+                .font(.subheadline.weight(.medium))
+
+            VStack(spacing: 8) {
+                ProgressView(value: imageManager.verificationProgress)
+                    .progressViewStyle(.linear)
+
+                HStack {
+                    Text("Starting and stopping the verification VM")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("\(Int(imageManager.verificationProgress * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: 360)
+        }
+    }
+
     // MARK: - Complete Step
 
     private var completeStep: some View {
@@ -329,7 +416,7 @@ struct BaseImageWizardView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.green)
 
-            Text("Base image created")
+            Text("Base image ready")
                 .font(.title3.weight(.medium))
 
             Text(
@@ -346,7 +433,7 @@ struct BaseImageWizardView: View {
 
     private var navigationBar: some View {
         HStack {
-            if currentStep > 0 && currentStep < 2 {
+            if currentStep > 0 && currentStep < 3 {
                 Button("Back") {
                     currentStep -= 1
                     errorMessage = nil
@@ -356,7 +443,7 @@ struct BaseImageWizardView: View {
 
             Spacer()
 
-            if currentStep == 2 {
+            if currentStep == 3 {
                 Button("Done") {
                     dismiss()
                 }
@@ -424,6 +511,7 @@ struct BaseImageWizardView: View {
 
                 let diskManager = DiskImageManager()
                 let baseImageURL = URL(fileURLWithPath: baseImagePath)
+                try storage.clearBaseImageReadiness()
                 try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB)
 
                 let platformStore = PlatformDataStore(storage: storage)
@@ -434,26 +522,94 @@ struct BaseImageWizardView: View {
                     platformStore: platformStore
                 )
 
+                currentStep = 2
+                try await imageManager.verifyBaseImageBoot(
+                    diskPath: baseImageURL,
+                    config: vmConfig,
+                    platformStore: platformStore
+                )
+
                 configStore.baseImagePath = baseImagePath
                 configStore.save()
                 try? FileManager.default.removeItem(at: ipsw)
 
                 isWorking = false
-                currentStep = 2
-                Log.image.info("Base image installation completed")
+                currentStep = 3
+                Log.image.info("Base image installation and verification completed")
             } catch {
                 isWorking = false
                 errorMessage = error.localizedDescription
-                Log.image.error("Base image install failed: \(error.localizedDescription)")
+                if currentStep == 2 {
+                    Log.image.error("Base image verification failed: \(error.localizedDescription)")
+                } else {
+                    Log.image.error("Base image install failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func startVerification() {
+        isWorking = true
+        errorMessage = nil
+        currentStep = 2
+
+        Task {
+            do {
+                let vmConfig = configStore.vmConfiguration
+                let storage = StorageManager(rootPath: configStore.storageRootPath)
+                try storage.prepareBaseDirectories()
+                let baseImagePath = resolvedBaseImagePath(storage: storage)
+                let baseImageURL = URL(fileURLWithPath: baseImagePath)
+                let platformStore = PlatformDataStore(storage: storage)
+
+                try await imageManager.verifyBaseImageBoot(
+                    diskPath: baseImageURL,
+                    config: vmConfig,
+                    platformStore: platformStore
+                )
+
+                configStore.baseImagePath = baseImagePath
+                configStore.save()
+                try? FileManager.default.removeItem(at: storage.restoreIPSWURL)
+
+                isWorking = false
+                currentStep = 3
+                Log.image.info("Base image verification completed")
+            } catch {
+                isWorking = false
+                errorMessage = error.localizedDescription
+                Log.image.error("Base image verification failed: \(error.localizedDescription)")
             }
         }
     }
 
     private func resolvedBaseImagePath(storage: StorageManager) -> String {
+        Self.resolvedBaseImageURL(configStore: configStore, storage: storage).path
+    }
+
+    private static func resolvedBaseImageURL(configStore: ConfigStore, storage: StorageManager) -> URL {
         if !configStore.baseImagePath.isEmpty {
-            return configStore.baseImagePath
+            return URL(fileURLWithPath: configStore.baseImagePath)
         }
-        return storage.baseImageURL.path
+        return storage.baseImageURL
+    }
+
+    private static func initialStep(
+        storage: StorageManager,
+        baseImageURL: URL,
+        platformStore: PlatformDataStore
+    ) -> Int {
+        let fm = FileManager.default
+        if storage.isBaseImageReady(at: baseImageURL) {
+            return 3
+        }
+        if fm.fileExists(atPath: baseImageURL.path), platformStore.hasExistingPlatform {
+            return 2
+        }
+        if fm.fileExists(atPath: storage.restoreIPSWURL.path) {
+            return 1
+        }
+        return 0
     }
 
     // MARK: - Formatting

@@ -6,6 +6,8 @@ import Virtualization
 final class ImageManager: Sendable {
     private let storage: StorageManager
 
+    private(set) var setupState: BaseImageSetupState = .idle
+
     private(set) var downloadProgress: Double = 0
     private(set) var downloadedBytes: Int64 = 0
     private(set) var totalDownloadBytes: Int64 = 0
@@ -14,6 +16,8 @@ final class ImageManager: Sendable {
 
     private(set) var installProgress: Double = 0
     private var progressObservation: NSKeyValueObservation?
+
+    private(set) var verificationProgress: Double = 0
 
     private var activeDownloader: IPSWDownloader?
     private var progressTimer: Timer?
@@ -30,6 +34,7 @@ final class ImageManager: Sendable {
 
     func downloadLatestIPSW() async throws -> URL {
         Log.image.info("Fetching latest supported restore image...")
+        setupState = .downloading
 
         let downloadURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
             VZMacOSRestoreImage.fetchLatestSupported { result in
@@ -51,7 +56,10 @@ final class ImageManager: Sendable {
         }
 
         let destination = storage.restoreIPSWURL
-        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
 
         // Remove completed file if re-downloading
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -94,6 +102,7 @@ final class ImageManager: Sendable {
             downloadSpeed = 0
             isDownloading = false
             activeDownloader = nil
+            setupState = .downloaded
 
             Log.image.info("IPSW downloaded to \(destination.path)")
             return destination
@@ -101,6 +110,7 @@ final class ImageManager: Sendable {
             stopProgressTimer()
             isDownloading = false
             activeDownloader = nil
+            setupState = .downloadFailed
             // Resume data is saved automatically by the downloader on failure
             throw error
         }
@@ -180,84 +190,135 @@ final class ImageManager: Sendable {
         config: VMConfiguration,
         platformStore: PlatformDataStore
     ) async throws {
+        setupState = .installing
+        installProgress = 0
         Log.image.info("Starting macOS install from \(ipsw.lastPathComponent)")
 
-        let hardwareModelData = try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Data, Error>) in
-            VZMacOSRestoreImage.load(from: ipsw) { result in
-                switch result {
-                case .success(let image):
-                    guard let requirements = image.mostFeaturefulSupportedConfiguration else {
-                        continuation.resume(throwing: ImageManagerError.unsupportedHardware)
-                        return
+        do {
+            let hardwareModelData = try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Data, Error>) in
+                VZMacOSRestoreImage.load(from: ipsw) { result in
+                    switch result {
+                    case .success(let image):
+                        guard let requirements = image.mostFeaturefulSupportedConfiguration else {
+                            continuation.resume(throwing: ImageManagerError.unsupportedHardware)
+                            return
+                        }
+                        continuation.resume(returning: requirements.hardwareModel.dataRepresentation)
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
                     }
-                    continuation.resume(returning: requirements.hardwareModel.dataRepresentation)
-                case .failure(let error):
-                    continuation.resume(throwing: error)
                 }
             }
-        }
 
-        guard let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData) else {
-            throw ImageManagerError.unsupportedHardware
-        }
-        let machineIdentifier = VZMacMachineIdentifier()
-
-        try platformStore.saveHardwareModel(hardwareModelData)
-        try platformStore.saveMachineIdentifier(machineIdentifier.dataRepresentation)
-
-        let platform = VZMacPlatformConfiguration()
-        platform.hardwareModel = hardwareModel
-        platform.machineIdentifier = machineIdentifier
-        platform.auxiliaryStorage = try VZMacAuxiliaryStorage(
-            creatingStorageAt: platformStore.auxiliaryStoragePath,
-            hardwareModel: hardwareModel
-        )
-
-        let vmConfig = VZVirtualMachineConfiguration()
-        vmConfig.platform = platform
-        vmConfig.bootLoader = VZMacOSBootLoader()
-        vmConfig.cpuCount = min(config.cpuCount, VZVirtualMachineConfiguration.maximumAllowedCPUCount)
-        vmConfig.memorySize = min(config.memorySize, VZVirtualMachineConfiguration.maximumAllowedMemorySize)
-
-        let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: diskPath, readOnly: false)
-        vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)]
-
-        let network = VZVirtioNetworkDeviceConfiguration()
-        network.attachment = VZNATNetworkDeviceAttachment()
-        vmConfig.networkDevices = [network]
-
-        try vmConfig.validate()
-
-        let vm = VZVirtualMachine(configuration: vmConfig)
-        let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipsw)
-
-        progressObservation = installer.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-            Task { @MainActor in
-                self?.installProgress = progress.fractionCompleted
+            guard let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData) else {
+                throw ImageManagerError.unsupportedHardware
             }
-        }
+            let machineIdentifier = VZMacMachineIdentifier()
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            installer.install { result in
-                switch result {
-                case .success:
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
+            try platformStore.saveHardwareModel(hardwareModelData)
+            try platformStore.saveMachineIdentifier(machineIdentifier.dataRepresentation)
+
+            let platform = VZMacPlatformConfiguration()
+            platform.hardwareModel = hardwareModel
+            platform.machineIdentifier = machineIdentifier
+            platform.auxiliaryStorage = try VZMacAuxiliaryStorage(
+                creatingStorageAt: platformStore.auxiliaryStoragePath,
+                hardwareModel: hardwareModel
+            )
+
+            let vmConfig = VZVirtualMachineConfiguration()
+            vmConfig.platform = platform
+            vmConfig.bootLoader = VZMacOSBootLoader()
+            vmConfig.cpuCount = min(config.cpuCount, VZVirtualMachineConfiguration.maximumAllowedCPUCount)
+            vmConfig.memorySize = min(config.memorySize, VZVirtualMachineConfiguration.maximumAllowedMemorySize)
+
+            let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: diskPath, readOnly: false)
+            vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)]
+
+            let network = VZVirtioNetworkDeviceConfiguration()
+            network.attachment = VZNATNetworkDeviceAttachment()
+            vmConfig.networkDevices = [network]
+
+            try vmConfig.validate()
+
+            let vm = VZVirtualMachine(configuration: vmConfig)
+            let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipsw)
+
+            progressObservation = installer.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
+                Task { @MainActor in
+                    self?.installProgress = progress.fractionCompleted
                 }
             }
-        }
 
-        progressObservation = nil
-        installProgress = 1.0
-        Log.image.info("macOS installation completed")
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                installer.install { result in
+                    switch result {
+                    case .success:
+                        continuation.resume()
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+
+            progressObservation = nil
+            installProgress = 1.0
+            setupState = .installed
+            Log.image.info("macOS installation completed")
+        } catch {
+            progressObservation = nil
+            setupState = .installFailed
+            throw error
+        }
     }
+
+    func verifyBaseImageBoot(
+        diskPath: URL,
+        config: VMConfiguration,
+        platformStore: PlatformDataStore,
+        verifier: any BaseImageBootVerifying = BaseImageBootVerifier()
+    ) async throws {
+        setupState = .verifying
+        verificationProgress = 0
+        Log.image.info("Verifying base image can boot")
+
+        do {
+            try await verifier.verifyBaseImageBoot(
+                config: config,
+                diskPath: diskPath,
+                platformStore: platformStore
+            ) { [weak self] progress in
+                self?.verificationProgress = progress
+            }
+            try storage.markBaseImageReady(at: diskPath)
+            verificationProgress = 1.0
+            setupState = .ready
+            Log.image.info("Base image boot verification completed")
+        } catch {
+            setupState = .verificationFailed
+            throw ImageManagerError.bootVerificationFailed(error.localizedDescription)
+        }
+    }
+}
+
+enum BaseImageSetupState: String, Codable, Equatable, Sendable {
+    case idle
+    case downloading
+    case downloadFailed
+    case downloaded
+    case installing
+    case installFailed
+    case installed
+    case verifying
+    case verificationFailed
+    case ready
 }
 
 enum ImageManagerError: LocalizedError {
     case noDownloadURL
     case unsupportedHardware
+    case bootVerificationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -265,6 +326,54 @@ enum ImageManagerError: LocalizedError {
             "No download URL available for the restore image"
         case .unsupportedHardware:
             "This Mac does not support the required virtualization hardware"
+        case .bootVerificationFailed(let reason):
+            "Base image verification failed: \(reason)"
+        }
+    }
+}
+
+@MainActor
+protocol BaseImageBootVerifying: AnyObject, Sendable {
+    func verifyBaseImageBoot(
+        config: VMConfiguration,
+        diskPath: URL,
+        platformStore: PlatformDataStore,
+        progress: @escaping @MainActor (Double) -> Void
+    ) async throws
+}
+
+@MainActor
+final class BaseImageBootVerifier: BaseImageBootVerifying {
+    private let lifecycle: any VMLifecycleProtocol
+
+    init(lifecycle: any VMLifecycleProtocol = VMLifecycle()) {
+        self.lifecycle = lifecycle
+    }
+
+    func verifyBaseImageBoot(
+        config: VMConfiguration,
+        diskPath: URL,
+        platformStore: PlatformDataStore,
+        progress: @escaping @MainActor (Double) -> Void
+    ) async throws {
+        progress(0.15)
+        try await lifecycle.bootVM(
+            vmConfig: config,
+            diskPath: diskPath,
+            platformStore: platformStore,
+            sharedDirectoryURL: nil,
+            cacheDirectoryURL: nil
+        )
+
+        do {
+            progress(0.75)
+            try await lifecycle.stopVM()
+            progress(1.0)
+        } catch {
+            if lifecycle.isBooted {
+                try? await lifecycle.stopVM()
+            }
+            throw error
         }
     }
 }

@@ -145,6 +145,8 @@ struct SettingsViewModelTests {
         let newStorage = StorageManager(rootDirectory: newRoot)
         #expect(store.storageRootPath == newStorage.rootDirectory.path)
         #expect(store.baseImagePath == newStorage.baseImageURL.path)
-        #expect(FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path))
+        #expect(
+            FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
+        )
     }
 }

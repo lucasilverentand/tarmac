@@ -19,11 +19,15 @@ final class VMEngine: VMManagerProtocol {
     var isRunning: Bool { currentInstance?.state == .running }
 
     var baseImageExists: Bool {
-        FileManager.default.fileExists(atPath: baseImageURL.path)
+        storage.isBaseImageReady(at: baseImageURL)
     }
 
     var installProgress: Double {
         imageManager.installProgress
+    }
+
+    var verificationProgress: Double {
+        imageManager.verificationProgress
     }
 
     init(
@@ -55,10 +59,17 @@ final class VMEngine: VMManagerProtocol {
 
         try storage.prepareBaseDirectories()
         try storage.cleanupTransientFiles()
+        try storage.clearBaseImageReadiness()
         try diskManager.createSparseDisk(at: baseImageURL, sizeGB: config.diskSizeGB)
 
         try await imageManager.installMacOS(
             ipsw: ipsw,
+            diskPath: baseImageURL,
+            config: config,
+            platformStore: platformStore
+        )
+
+        try await imageManager.verifyBaseImageBoot(
             diskPath: baseImageURL,
             config: config,
             platformStore: platformStore
