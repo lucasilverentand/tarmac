@@ -40,7 +40,13 @@ final class VMEngine: VMManagerProtocol {
         self.storage = storage
         self.sharedDirManager = SharedDirectoryManager(storage: storage)
         self.cacheManager = CacheManager(storage: storage)
-        self.platformStore = platformStore ?? PlatformDataStore(storage: storage)
+        if let platformStore {
+            self.platformStore = platformStore
+        } else if let platformDirectoryPath {
+            self.platformStore = PlatformDataStore(directory: URL(fileURLWithPath: platformDirectoryPath))
+        } else {
+            self.platformStore = PlatformDataStore(storage: storage)
+        }
         self.baseImageURL = URL(fileURLWithPath: baseImagePath)
         self.cacheConfig = cacheConfig
         self.lifecycle = lifecycle ?? VMLifecycle()

@@ -152,11 +152,11 @@ struct BaseImageWizardView: View {
                     .controlSize(.large)
                 }
             } else {
-                Text("Download macOS Restore Image")
+                Text("Download macOS 26 Restore Image")
                     .font(.title3.weight(.medium))
 
                 Text(
-                    "A macOS IPSW file (~16 GB) will be downloaded from Apple to create the base virtual machine image."
+                    "A macOS 26 IPSW file (~16 GB) will be downloaded from Apple to create the base virtual machine image. Older macOS releases are not supported."
                 )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -179,7 +179,7 @@ struct BaseImageWizardView: View {
                 .foregroundStyle(.tint)
                 .symbolEffect(.pulse)
 
-            Text("Downloading macOS restore image...")
+            Text("Downloading macOS 26 restore image...")
                 .font(.subheadline.weight(.medium))
 
             VStack(spacing: 8) {
@@ -266,11 +266,11 @@ struct BaseImageWizardView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.tint)
 
-            Text("Install macOS")
+            Text("Install macOS 26")
                 .font(.title3.weight(.medium))
 
             Text(
-                "macOS will be installed into a virtual machine disk image. This creates the base image that ephemeral runners will clone for each job."
+                "macOS 26 will be installed into a virtual machine disk image. This creates the base image that ephemeral runners will clone for each job."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)

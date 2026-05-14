@@ -24,8 +24,8 @@ final class ImageManager: Sendable {
     private var speedSampleBytes: Int64 = 0
     private var speedSampleTime: Date = Date()
 
-    init(storageDirectory: URL? = nil) {
-        self.storage = StorageManager(rootDirectory: storageDirectory ?? StorageManager.defaultRootDirectory)
+    init(storageDirectory: URL) {
+        self.storage = StorageManager(rootDirectory: storageDirectory)
     }
 
     private let progressRefreshInterval: TimeInterval = 0.1
@@ -211,6 +211,15 @@ final class ImageManager: Sendable {
             VZMacOSRestoreImage.load(from: ipsw) { result in
                 switch result {
                 case .success(let image):
+                    guard HostCapability.isRestoreImageSupported(version: image.operatingSystemVersion) else {
+                        continuation.resume(
+                            throwing: ImageManagerError.unsupportedGuestVersion(
+                                found: image.operatingSystemVersion,
+                                minimumMajor: HostCapability.minimumMajorVersion
+                            )
+                        )
+                        return
+                    }
                     guard let requirements = image.mostFeaturefulSupportedConfiguration else {
                         continuation.resume(throwing: ImageManagerError.unsupportedHardware)
                         return
@@ -333,6 +342,7 @@ final class ImageManager: Sendable {
 enum ImageManagerError: LocalizedError {
     case noDownloadURL
     case unsupportedHardware
+    case unsupportedGuestVersion(found: OperatingSystemVersion, minimumMajor: Int)
 
     var errorDescription: String? {
         switch self {
@@ -340,6 +350,9 @@ enum ImageManagerError: LocalizedError {
             "No download URL available for the restore image"
         case .unsupportedHardware:
             "This Mac does not support the required virtualization hardware"
+        case .unsupportedGuestVersion(let found, let minimumMajor):
+            "Restore image is macOS \(found.majorVersion).\(found.minorVersion); "
+                + "Tarmac requires macOS \(minimumMajor) or later."
         }
     }
 }
