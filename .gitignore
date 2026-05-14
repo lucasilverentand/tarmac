@@ -34,3 +34,6 @@ Package.resolved
 
 # Environment
 .env*
+
+# Local agent worktrees
+.claude/worktrees/
