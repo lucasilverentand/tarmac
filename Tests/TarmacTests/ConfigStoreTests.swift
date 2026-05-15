@@ -60,12 +60,38 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
+        #expect(store.diagnosticsRetentionConfig.maxBundleCount == 100)
+        #expect(store.diagnosticsRetentionConfig.maxAgeDays == 14)
         #expect(!store.storageDirectoryPath.isEmpty)
         #expect(store.storageRootPath == store.storageDirectoryPath)
         #expect(store.cacheDirectoryPath == StorageManager(rootPath: store.storageRootPath).actionsCacheDirectory.path)
         #expect(!store.hasCompletedStorageSetup)
 
         defaults.removePersistentDomain(forName: "test-config")
+    }
+
+    @Test("Save and load diagnostics retention round-trip")
+    func diagnosticsRetentionRoundTrip() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+
+        let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
+        store1.diagnosticsRetentionConfig = DiagnosticsRetentionConfiguration(
+            maxBundleCount: 20,
+            maxAgeDays: 7,
+            maxSizeMB: 128,
+            keepSuccessfulJobLogs: true
+        )
+        store1.save()
+
+        let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
+        #expect(store2.diagnosticsRetentionConfig.maxBundleCount == 20)
+        #expect(store2.diagnosticsRetentionConfig.maxAgeDays == 7)
+        #expect(store2.diagnosticsRetentionConfig.maxSizeMB == 128)
+        #expect(store2.diagnosticsRetentionConfig.keepSuccessfulJobLogs)
+
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     @Test("storageRootPath loads legacy cacheDirectoryPath")

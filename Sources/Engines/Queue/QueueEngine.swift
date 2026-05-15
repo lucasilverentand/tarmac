@@ -4,6 +4,7 @@ actor QueueEngine {
     let jobStore: JobStore
     let dispatcher: JobDispatcher
     var onJobReady: (@Sendable (RunnerJob) async -> Void)?
+    var onJobCompleted: (@Sendable (RunnerJob, JobResult) async -> Void)?
 
     private let github: GitHubEngine
     private let client: any GitHubClientProtocol
@@ -25,6 +26,10 @@ actor QueueEngine {
 
     func setOnJobReady(_ callback: @escaping @Sendable (RunnerJob) async -> Void) {
         onJobReady = callback
+    }
+
+    func setOnJobCompleted(_ callback: @escaping @Sendable (RunnerJob, JobResult) async -> Void) {
+        onJobCompleted = callback
     }
 
     // MARK: - Lifecycle
@@ -157,6 +162,7 @@ actor QueueEngine {
         let job = RunnerJob(
             id: base.jobId,
             organizationName: org.name,
+            runnerRequestId: base.runnerRequestId,
             status: .pending,
             workflowName: base.workflowRunName,
             repositoryName: base.repositoryName,
@@ -177,6 +183,9 @@ actor QueueEngine {
 
         let result: JobResult = completed.result == "success" ? .success : .failure(completed.result ?? "unknown")
         await dispatcher.markCompleted(jobId: completed.jobId, in: jobStore, result: result)
+        if let completedJob = await jobStore.job(byId: completed.jobId) {
+            await onJobCompleted?(completedJob, result)
+        }
         await tryDispatch()
     }
 

@@ -41,13 +41,16 @@ actor JobStore {
         Log.queue.info("Job \(job.id) added (\(job.organizationName))")
     }
 
-    func updateJob(id: Int64, status: JobStatus) {
+    func updateJob(id: Int64, status: JobStatus, failureReason: String? = nil) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else {
             Log.queue.warning("Job \(id) not found for status update")
             return
         }
 
         jobs[index].status = status
+        if let failureReason {
+            jobs[index].failureReason = failureReason
+        }
 
         switch status {
         case .provisioning, .running:
@@ -62,6 +65,36 @@ actor JobStore {
         }
 
         Log.queue.info("Job \(id) → \(status.rawValue)")
+    }
+
+    func updateRunnerLease(jobId: Int64, runnerName: String) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobId }) else {
+            Log.queue.warning("Job \(jobId) not found for runner lease update")
+            return
+        }
+
+        jobs[index].runnerName = runnerName
+        persistIfTerminal(jobs[index])
+    }
+
+    func updateVMInstance(jobId: Int64, vmInstanceId: UUID) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobId }) else {
+            Log.queue.warning("Job \(jobId) not found for VM instance update")
+            return
+        }
+
+        jobs[index].vmInstanceId = vmInstanceId
+        persistIfTerminal(jobs[index])
+    }
+
+    func updateDiagnosticsBundle(jobId: Int64, path: String) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobId }) else {
+            Log.queue.warning("Job \(jobId) not found for diagnostics update")
+            return
+        }
+
+        jobs[index].diagnosticsBundlePath = path
+        persistIfTerminal(jobs[index])
     }
 
     func removeJob(id: Int64) {
@@ -94,6 +127,12 @@ actor JobStore {
 
         if let data = try? JSONEncoder().encode(Array(completed)) {
             defaults.set(data, forKey: historyKey)
+        }
+    }
+
+    private func persistIfTerminal(_ job: RunnerJob) {
+        if job.status == .completed || job.status == .failed {
+            persistHistory()
         }
     }
 }

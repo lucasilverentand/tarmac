@@ -77,6 +77,14 @@ final class SettingsViewModel {
         }
     }
 
+    var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration {
+        get { configStore.diagnosticsRetentionConfig }
+        set {
+            configStore.diagnosticsRetentionConfig = newValue
+            configStore.save()
+        }
+    }
+
     // MARK: - General
 
     var launchAtLogin: Bool {

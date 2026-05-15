@@ -3,14 +3,18 @@ import Foundation
 struct RunnerJob: Identifiable, Codable, Sendable {
     let id: Int64
     let organizationName: String
+    var runnerRequestId: Int64? = nil
     var status: JobStatus
-    var workflowName: String?
-    var repositoryName: String?
-    var jitConfig: String?
+    var workflowName: String? = nil
+    var repositoryName: String? = nil
+    var jitConfig: String? = nil
+    var runnerName: String? = nil
+    var vmInstanceId: UUID? = nil
+    var diagnosticsBundlePath: String? = nil
     let queuedAt: Date
-    var startedAt: Date?
-    var completedAt: Date?
-    var failureReason: String?
+    var startedAt: Date? = nil
+    var completedAt: Date? = nil
+    var failureReason: String? = nil
 
     var duration: TimeInterval? {
         guard let start = startedAt else { return nil }

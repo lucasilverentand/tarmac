@@ -50,7 +50,7 @@ actor JobDispatcher {
             await store.updateJob(id: jobId, status: .completed)
             Log.queue.info("Job \(jobId) completed successfully")
         case .failure(let reason):
-            await store.updateJob(id: jobId, status: .failed)
+            await store.updateJob(id: jobId, status: .failed, failureReason: reason)
             Log.queue.warning("Job \(jobId) failed: \(reason)")
         }
 

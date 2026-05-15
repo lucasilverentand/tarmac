@@ -37,12 +37,13 @@ struct AppStateTests {
         let appState = AppState(
             configStore: configStore,
             githubClientFactory: { client },
-            vmEngineFactory: { cachePath, basePath, platformPath, cacheConfig in
+            vmEngineFactory: { cachePath, basePath, platformPath, cacheConfig, diagnosticsRetention in
                 VMEngine(
                     cacheDirectoryPath: cachePath,
                     baseImagePath: basePath,
                     platformDirectoryPath: platformPath,
                     cacheConfig: cacheConfig,
+                    diagnosticsRetention: diagnosticsRetention,
                     lifecycle: mock
                 )
             }

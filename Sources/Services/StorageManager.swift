@@ -30,6 +30,7 @@ struct StorageManager: Sendable {
     var runnerDirectory: URL { rootDirectory.appendingPathComponent("runner", isDirectory: true) }
     var jobsDirectory: URL { rootDirectory.appendingPathComponent("jobs", isDirectory: true) }
     var disksDirectory: URL { rootDirectory.appendingPathComponent("disks", isDirectory: true) }
+    var diagnosticsDirectory: URL { rootDirectory.appendingPathComponent("diagnostics", isDirectory: true) }
     var actionsCacheDirectory: URL { rootDirectory.appendingPathComponent("actions-cache", isDirectory: true) }
     var legacySharedCacheDirectory: URL { rootDirectory.appendingPathComponent("cache", isDirectory: true) }
     var tmpDirectory: URL { rootDirectory.appendingPathComponent("tmp", isDirectory: true) }
@@ -38,7 +39,8 @@ struct StorageManager: Sendable {
     func prepareBaseDirectories() throws {
         let fm = FileManager.default
         for directory in [
-            rootDirectory, platformDirectory, jobsDirectory, disksDirectory, actionsCacheDirectory, tmpDirectory,
+            rootDirectory, platformDirectory, jobsDirectory, disksDirectory, diagnosticsDirectory,
+            actionsCacheDirectory, tmpDirectory,
         ] {
             try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         }
@@ -53,6 +55,7 @@ struct StorageManager: Sendable {
             runnerDirectory,
             jobsDirectory,
             disksDirectory,
+            diagnosticsDirectory,
             actionsCacheDirectory,
             legacySharedCacheDirectory,
             tmpDirectory,
@@ -116,6 +119,7 @@ struct StorageManager: Sendable {
                 (oldStorage.runnerDirectory, runnerDirectory),
                 (oldStorage.jobsDirectory, jobsDirectory),
                 (oldStorage.disksDirectory, disksDirectory),
+                (oldStorage.diagnosticsDirectory, diagnosticsDirectory),
                 (oldStorage.actionsCacheDirectory, actionsCacheDirectory),
                 (oldStorage.legacySharedCacheDirectory, legacySharedCacheDirectory),
                 (oldStorage.tmpDirectory, tmpDirectory),
