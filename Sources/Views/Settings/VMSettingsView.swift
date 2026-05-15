@@ -27,12 +27,23 @@ struct VMSettingsView: View {
                     in: 40...500,
                     step: 10
                 )
+
+                Stepper(
+                    "Runner timeout: \(viewModel.vmConfiguration.runnerCompletionTimeoutSeconds / 60) min",
+                    value: $viewModel.vmConfiguration.runnerCompletionTimeoutSeconds,
+                    in: 300...28_800,
+                    step: 300
+                )
             }
 
             Section("Current Configuration") {
                 LabeledContent("CPU", value: "\(viewModel.vmConfiguration.cpuCount) cores")
                 LabeledContent("Memory", value: "\(viewModel.vmConfiguration.memorySizeGB) GB")
                 LabeledContent("Disk", value: "\(viewModel.vmConfiguration.diskSizeGB) GB")
+                LabeledContent(
+                    "Runner timeout",
+                    value: "\(viewModel.vmConfiguration.runnerCompletionTimeoutSeconds / 60) min"
+                )
             }
         }
         .formStyle(.grouped)

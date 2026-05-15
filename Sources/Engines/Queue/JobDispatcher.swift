@@ -58,7 +58,25 @@ actor JobDispatcher {
     }
 }
 
-enum JobResult: Sendable {
+enum JobResult: Equatable, Sendable {
     case success
     case failure(String)
+
+    var logDescription: String {
+        switch self {
+        case .success:
+            "success"
+        case .failure(let reason):
+            "failure: \(reason)"
+        }
+    }
+
+    var jobStatus: JobStatus {
+        switch self {
+        case .success:
+            .completed
+        case .failure:
+            .failed
+        }
+    }
 }

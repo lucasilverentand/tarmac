@@ -146,13 +146,30 @@ struct ModelCodableTests {
 
     @Test("VMConfiguration round-trip")
     func vmConfigRoundTrip() throws {
-        let config = VMConfiguration(cpuCount: 8, memorySizeGB: 16, diskSizeGB: 120)
+        let config = VMConfiguration(
+            cpuCount: 8,
+            memorySizeGB: 16,
+            diskSizeGB: 120,
+            runnerCompletionTimeoutSeconds: 7_200
+        )
         let data = try JSONEncoder().encode(config)
         let decoded = try JSONDecoder().decode(VMConfiguration.self, from: data)
 
         #expect(decoded.cpuCount == 8)
         #expect(decoded.memorySizeGB == 16)
         #expect(decoded.diskSizeGB == 120)
+        #expect(decoded.runnerCompletionTimeoutSeconds == 7_200)
+    }
+
+    @Test("VMConfiguration decodes legacy payloads")
+    func vmConfigLegacyDecode() throws {
+        let data = #"{"cpuCount":8,"memorySizeGB":16,"diskSizeGB":120}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(VMConfiguration.self, from: data)
+
+        #expect(decoded.cpuCount == 8)
+        #expect(decoded.memorySizeGB == 16)
+        #expect(decoded.diskSizeGB == 120)
+        #expect(decoded.runnerCompletionTimeoutSeconds == 3_600)
     }
 
     @Test("VMConfiguration memorySize computed property")

@@ -289,6 +289,45 @@ final class VMEngine: VMManagerProtocol {
         }
     }
 
+    func waitForJobCompletion(
+        jobId: Int64,
+        timeoutSeconds: Int,
+        pollIntervalSeconds: TimeInterval = 2
+    ) async throws -> JobResult {
+        let sharedDirectory = storage.jobsDirectory.appendingPathComponent("\(jobId)", isDirectory: true)
+        let markerURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName)
+        let exitCodeURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.exitCodeFileName)
+        let timeout = max(1, timeoutSeconds)
+        let pollMilliseconds = max(100, Int(pollIntervalSeconds * 1_000))
+        let deadline = Date().addingTimeInterval(TimeInterval(timeout))
+
+        appendHostLifecycle(
+            "Waiting up to \(timeout)s for runner completion marker \(GuestBootstrapContract.completionMarkerFileName)",
+            jobId: jobId,
+            sharedDirectory: sharedDirectory
+        )
+
+        while Date() < deadline {
+            try Task.checkCancellation()
+
+            if FileManager.default.fileExists(atPath: markerURL.path) {
+                let result = readCompletionResult(exitCodeURL: exitCodeURL)
+                appendHostLifecycle(
+                    "Runner completion marker observed with \(result.logDescription)",
+                    jobId: jobId,
+                    sharedDirectory: sharedDirectory
+                )
+                return result
+            }
+
+            try await Task.sleep(for: .milliseconds(pollMilliseconds))
+        }
+
+        let reason = "Timed out after \(timeout)s waiting for runner completion marker"
+        appendHostLifecycle(reason, jobId: jobId, sharedDirectory: sharedDirectory)
+        return .failure(reason)
+    }
+
     func teardown(outcome: JobDiagnosticsOutcome = .unknown()) async throws {
         let diskPath = currentInstance?.diskImagePath
         let jobId = currentInstance?.jobId
@@ -452,6 +491,23 @@ final class VMEngine: VMManagerProtocol {
         } catch {
             Log.vm.error("Failed to preserve diagnostics for job \(jobId): \(error.localizedDescription)")
         }
+    }
+
+    private func readCompletionResult(exitCodeURL: URL) -> JobResult {
+        guard let contents = try? String(contentsOf: exitCodeURL, encoding: .utf8) else {
+            return .failure("Runner completion marker was written without an exit code")
+        }
+
+        let rawExitCode = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let exitCode = Int(rawExitCode) else {
+            return .failure("Runner wrote an invalid exit code: \(rawExitCode)")
+        }
+
+        if exitCode == 0 {
+            return .success
+        }
+
+        return .failure("Runner exited with code \(exitCode)")
     }
 }
 

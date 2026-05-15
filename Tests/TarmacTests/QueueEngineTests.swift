@@ -143,6 +143,24 @@ struct QueueEngineTests {
         #expect(job?.status == .failed)
     }
 
+    @Test("guest completion marks job and reports guest source")
+    func guestCompletionMarksJob() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg()
+        let sourceHolder = CompletionSourceHolder()
+        await engine.setOnJobCompleted { _, _, source in
+            await sourceHolder.set(source)
+        }
+
+        await engine.handleMessages([jobAvailableMessage(jobId: 30)], org: org)
+        await engine.completeJobFromGuest(jobId: 30, result: .failure("Runner exited with code 1"))
+
+        let job = await store.job(byId: 30)
+        #expect(job?.status == .failed)
+        #expect(job?.failureReason == "Runner exited with code 1")
+        #expect(await sourceHolder.source == .guest)
+    }
+
     @Test("start filters to enabled orgs with scaleSetId")
     func startFiltersOrgs() async throws {
         let (engine, _, _) = try makeEngine()
@@ -286,5 +304,13 @@ struct QueueEngineTests {
         let jobs = await store.jobs
         #expect(jobs.count == 1)
         #expect(jobs.first?.id == 55)
+    }
+}
+
+private actor CompletionSourceHolder {
+    private(set) var source: JobCompletionSource?
+
+    func set(_ source: JobCompletionSource) {
+        self.source = source
     }
 }
