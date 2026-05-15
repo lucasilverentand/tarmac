@@ -97,6 +97,23 @@ struct JobStoreTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    @Test("Diagnostics path persists for completed history")
+    func diagnosticsPathPersists() async {
+        let suiteName = "test-jobstore-\(UUID().uuidString)"
+        nonisolated(unsafe) let defaults = UserDefaults(suiteName: suiteName)!
+
+        let store1 = JobStore(defaults: defaults)
+        await store1.addJob(makeJob(id: 200, status: .pending))
+        await store1.updateJob(id: 200, status: .completed)
+        await store1.updateDiagnosticsBundle(jobId: 200, path: "/tmp/tarmac/diagnostics/job-200")
+
+        let store2 = JobStore(defaults: defaults)
+        let job = await store2.job(byId: 200)
+        #expect(job?.diagnosticsBundlePath == "/tmp/tarmac/diagnostics/job-200")
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("Corrupted UserDefaults data is handled gracefully")
     func corruptedDataGracefulRecovery() async {
         let suiteName = "test-jobstore-\(UUID().uuidString)"

@@ -61,6 +61,33 @@ struct CacheSettingsView: View {
                     }
                 }
             }
+
+            Section("Diagnostics") {
+                Toggle(
+                    "Keep full logs for successful jobs",
+                    isOn: $viewModel.diagnosticsRetentionConfig.keepSuccessfulJobLogs
+                )
+
+                Stepper(
+                    "Max bundles: \(viewModel.diagnosticsRetentionConfig.maxBundleCount)",
+                    value: $viewModel.diagnosticsRetentionConfig.maxBundleCount,
+                    in: 10...500,
+                    step: 10
+                )
+
+                Stepper(
+                    "Retention: \(viewModel.diagnosticsRetentionConfig.maxAgeDays) days",
+                    value: $viewModel.diagnosticsRetentionConfig.maxAgeDays,
+                    in: 1...90
+                )
+
+                Stepper(
+                    "Max size: \(viewModel.diagnosticsRetentionConfig.maxSizeMB) MB",
+                    value: $viewModel.diagnosticsRetentionConfig.maxSizeMB,
+                    in: 64...4096,
+                    step: 64
+                )
+            }
         }
         .formStyle(.grouped)
         .padding()

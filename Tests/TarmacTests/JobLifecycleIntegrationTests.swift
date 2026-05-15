@@ -84,6 +84,7 @@ struct JobLifecycleIntegrationTests {
         let jobs = await store.jobs
         #expect(jobs.count == 1)
         #expect(await dispatchedJobHolder.job?.id == 42)
+        #expect(jobs.first?.runnerRequestId == 1)
 
         // 2. Job completed
         await engine.handleMessages([jobCompletedMessage(jobId: 42)], org: org)

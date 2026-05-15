@@ -29,6 +29,13 @@ struct JobRowView: View {
 
             Spacer()
 
+            if job.diagnosticsBundlePath != nil {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(job.status == .failed ? .red : .secondary)
+                    .help("Diagnostics available")
+            }
+
             Text(trailingText)
                 .font(.caption)
                 .foregroundStyle(.secondary)

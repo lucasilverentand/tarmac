@@ -14,7 +14,8 @@ final class AppState {
     private var syncTask: Task<Void, Never>?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
-    private let vmEngineFactory: (String, String, String, CacheConfiguration) -> VMEngine
+    private let vmEngineFactory:
+        (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine
 
     init() {
         let configStore = ConfigStore()
@@ -23,12 +24,13 @@ final class AppState {
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = { GitHubClient() }
-        self.vmEngineFactory = { cachePath, basePath, platformPath, cacheConfig in
+        self.vmEngineFactory = { cachePath, basePath, platformPath, cacheConfig, diagnosticsRetention in
             VMEngine(
                 cacheDirectoryPath: cachePath,
                 baseImagePath: basePath,
                 platformDirectoryPath: platformPath,
-                cacheConfig: cacheConfig
+                cacheConfig: cacheConfig,
+                diagnosticsRetention: diagnosticsRetention
             )
         }
         self.vmStatusViewModel.storageHealth = settingsViewModel.storageHealth
@@ -37,18 +39,21 @@ final class AppState {
     init(
         configStore: ConfigStore,
         githubClientFactory: @escaping () -> any GitHubClientProtocol = { GitHubClient() },
-        vmEngineFactory: @escaping (String, String, String, CacheConfiguration) -> VMEngine = {
-            cachePath,
-            basePath,
-            platformPath,
-            cacheConfig in
-            VMEngine(
-                cacheDirectoryPath: cachePath,
-                baseImagePath: basePath,
-                platformDirectoryPath: platformPath,
-                cacheConfig: cacheConfig
-            )
-        }
+        vmEngineFactory:
+            @escaping (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine = {
+                cachePath,
+                basePath,
+                platformPath,
+                cacheConfig,
+                diagnosticsRetention in
+                VMEngine(
+                    cacheDirectoryPath: cachePath,
+                    baseImagePath: basePath,
+                    platformDirectoryPath: platformPath,
+                    cacheConfig: cacheConfig,
+                    diagnosticsRetention: diagnosticsRetention
+                )
+            }
     ) {
         self.configStore = configStore
         self.queueViewModel = QueueViewModel()
@@ -86,7 +91,8 @@ final class AppState {
             configStore.storageRootPath,
             configStore.resolvedBaseImagePath,
             configStore.platformDirectoryPath,
-            configStore.cacheConfig
+            configStore.cacheConfig,
+            configStore.diagnosticsRetentionConfig
         )
         self.vmEngine = vmEngine
         vmStatusViewModel.baseImageExists = vmEngine.baseImageExists
@@ -102,6 +108,10 @@ final class AppState {
         await queueEngine.setOnJobReady { [weak self] job in
             guard let self else { return }
             await self.handleJobReady(job)
+        }
+        await queueEngine.setOnJobCompleted { [weak self] job, result in
+            guard let self else { return }
+            await self.handleJobCompleted(job, result: result)
         }
 
         // Start polling
@@ -163,7 +173,9 @@ final class AppState {
 
             // Get runner binary + JIT config
             let runnerPath = try await githubEngine.ensureRunner(for: org)
-            let jitConfig = try await githubEngine.generateJITConfig(for: org, runnerName: "ephemeral-\(job.id)")
+            let runnerName = "ephemeral-\(job.id)"
+            let jitConfig = try await githubEngine.generateJITConfig(for: org, runnerName: runnerName)
+            await queueEngine.jobStore.updateRunnerLease(jobId: job.id, runnerName: runnerName)
 
             // Update job with JIT config in the store
             await queueEngine.jobStore.updateJob(id: job.id, status: .running)
@@ -171,12 +183,14 @@ final class AppState {
             // Provision and boot VM
             var runnableJob = job
             runnableJob.jitConfig = jitConfig
+            runnableJob.runnerName = runnerName
             runnableJob.status = .running
-            try await vmEngine.provisionAndRun(
+            let instance = try await vmEngine.provisionAndRun(
                 job: runnableJob,
                 config: configStore.vmConfiguration,
                 runnerPath: runnerPath
             )
+            await queueEngine.jobStore.updateVMInstance(jobId: job.id, vmInstanceId: instance.id)
 
             queueViewModel.updateJobStatus(id: job.id, status: .running)
             vmStatusViewModel.activeVM = vmEngine.currentInstance
@@ -186,14 +200,44 @@ final class AppState {
             Log.app.error("Failed to provision job \(job.id): \(error.localizedDescription)")
             await queueEngine.jobStore.updateJob(id: job.id, status: .failed)
             queueViewModel.updateJobStatus(id: job.id, status: .failed)
+            if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
+                await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
+            }
 
             // Teardown on failure
             if vmEngine.currentInstance != nil {
-                try? await vmEngine.teardown()
+                try? await vmEngine.teardown(outcome: .failed(reason: error.localizedDescription))
+                if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
+                    await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
+                }
                 vmStatusViewModel.activeVM = nil
             }
             await queueEngine.tryDispatch()
         }
+    }
+
+    private func handleJobCompleted(_ job: RunnerJob, result: JobResult) async {
+        guard let vmEngine, let queueEngine else { return }
+        guard vmEngine.currentInstance?.jobId == job.id else { return }
+
+        let outcome: JobDiagnosticsOutcome =
+            switch result {
+            case .success:
+                .succeeded
+            case .failure(let reason):
+                .failed(reason: reason)
+            }
+
+        do {
+            try await vmEngine.teardown(outcome: outcome)
+        } catch {
+            Log.app.error("Failed to teardown completed job \(job.id): \(error.localizedDescription)")
+        }
+
+        if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
+            await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
+        }
+        vmStatusViewModel.activeVM = nil
     }
 
     // MARK: - Job Store Sync

@@ -12,10 +12,14 @@ struct ModelCodableTests {
         let job = RunnerJob(
             id: 42,
             organizationName: "my-org",
+            runnerRequestId: 1001,
             status: .running,
             workflowName: "CI Pipeline",
             repositoryName: "my-repo",
             jitConfig: "encoded-config-data",
+            runnerName: "ephemeral-42",
+            vmInstanceId: UUID(uuidString: "11111111-1111-1111-1111-111111111111"),
+            diagnosticsBundlePath: "/tmp/diagnostics/job-42",
             queuedAt: Date(timeIntervalSince1970: 1_700_000_000),
             startedAt: Date(timeIntervalSince1970: 1_700_000_060),
             completedAt: nil,
@@ -28,9 +32,13 @@ struct ModelCodableTests {
         #expect(decoded.id == 42)
         #expect(decoded.organizationName == "my-org")
         #expect(decoded.status == .running)
+        #expect(decoded.runnerRequestId == 1001)
         #expect(decoded.workflowName == "CI Pipeline")
         #expect(decoded.repositoryName == "my-repo")
         #expect(decoded.jitConfig == "encoded-config-data")
+        #expect(decoded.runnerName == "ephemeral-42")
+        #expect(decoded.vmInstanceId?.uuidString == "11111111-1111-1111-1111-111111111111")
+        #expect(decoded.diagnosticsBundlePath == "/tmp/diagnostics/job-42")
         #expect(decoded.startedAt != nil)
         #expect(decoded.completedAt == nil)
         #expect(decoded.failureReason == nil)
@@ -52,6 +60,10 @@ struct ModelCodableTests {
         #expect(decoded.workflowName == nil)
         #expect(decoded.repositoryName == nil)
         #expect(decoded.jitConfig == nil)
+        #expect(decoded.runnerRequestId == nil)
+        #expect(decoded.runnerName == nil)
+        #expect(decoded.vmInstanceId == nil)
+        #expect(decoded.diagnosticsBundlePath == nil)
         #expect(decoded.startedAt == nil)
         #expect(decoded.completedAt == nil)
     }
@@ -166,6 +178,24 @@ struct ModelCodableTests {
     func cacheConfigStaticProperties() {
         #expect(CacheConfiguration.guestMountTag == "actions-cache")
         #expect(CacheConfiguration.guestMountPoint == "/Volumes/actions-cache")
+    }
+
+    @Test("DiagnosticsRetentionConfiguration round-trip")
+    func diagnosticsRetentionConfigRoundTrip() throws {
+        let config = DiagnosticsRetentionConfiguration(
+            maxBundleCount: 25,
+            maxAgeDays: 5,
+            maxSizeMB: 256,
+            keepSuccessfulJobLogs: true
+        )
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(DiagnosticsRetentionConfiguration.self, from: data)
+
+        #expect(decoded.maxBundleCount == 25)
+        #expect(decoded.maxAgeDays == 5)
+        #expect(decoded.maxSizeMB == 256)
+        #expect(decoded.maxSizeBytes == 256 * 1024 * 1024)
+        #expect(decoded.keepSuccessfulJobLogs)
     }
 
     // MARK: - TokenInfo

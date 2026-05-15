@@ -208,6 +208,7 @@ struct VMEngineTests {
 
         let runnerPath = tempDir.appendingPathComponent("runner")
         try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
 
         var job = TestFactories.makeJob(id: 123)
         job.jitConfig = "jit-config"
@@ -222,6 +223,77 @@ struct VMEngineTests {
 
         let sharedDir = tempDir.appendingPathComponent("jobs/123")
         #expect(!FileManager.default.fileExists(atPath: sharedDir.path))
+
+        let diagnosticsRoot = StorageManager(rootPath: tempDir.path).diagnosticsDirectory
+            .appendingPathComponent("jobs", isDirectory: true)
+        let bundles =
+            (try? FileManager.default.contentsOfDirectory(
+                at: diagnosticsRoot,
+                includingPropertiesForKeys: nil
+            )) ?? []
+        #expect(bundles.count == 1)
+        #expect(FileManager.default.fileExists(atPath: bundles[0].appendingPathComponent("host-lifecycle.log").path))
+    }
+
+    @Test("teardown preserves guest diagnostics before deleting shared directory")
+    @MainActor
+    func teardownPreservesDiagnostics() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerPath = tempDir.appendingPathComponent("runner")
+        try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
+
+        var job = TestFactories.makeJob(id: 321)
+        job.jitConfig = "jit-config"
+        job.runnerRequestId = 9001
+        job.runnerName = "ephemeral-321"
+
+        _ = try await engine.provisionAndRun(
+            job: job,
+            config: VMConfiguration(),
+            runnerPath: runnerPath
+        )
+
+        let storage = StorageManager(rootPath: tempDir.path)
+        let sharedDir = storage.jobsDirectory.appendingPathComponent("321", isDirectory: true)
+        try "guest log".write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.bootstrapLogFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "runner failed".write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.runnerLogFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "1".write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.exitCodeFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try await engine.teardown(outcome: .failed(reason: "runner failed"))
+
+        #expect(!FileManager.default.fileExists(atPath: sharedDir.path))
+        let bundleURL = try #require(engine.diagnosticsBundlePath(for: 321))
+        #expect(FileManager.default.fileExists(atPath: bundleURL.appendingPathComponent("host-lifecycle.log").path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundleURL.appendingPathComponent(GuestBootstrapContract.bootstrapLogFileName).path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundleURL.appendingPathComponent(GuestBootstrapContract.runnerLogFileName).path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundleURL.appendingPathComponent(GuestBootstrapContract.exitCodeFileName).path
+            )
+        )
     }
 
     @Test("cacheSizeBytes delegates to CacheManager")

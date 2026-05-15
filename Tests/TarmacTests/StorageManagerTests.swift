@@ -18,6 +18,7 @@ struct StorageManagerTests {
         #expect(storage.runnerDirectory.path == root.appendingPathComponent("runner").path)
         #expect(storage.jobsDirectory.path == root.appendingPathComponent("jobs").path)
         #expect(storage.disksDirectory.path == root.appendingPathComponent("disks").path)
+        #expect(storage.diagnosticsDirectory.path == root.appendingPathComponent("diagnostics").path)
         #expect(storage.actionsCacheDirectory.path == root.appendingPathComponent("actions-cache").path)
         #expect(storage.tmpDirectory.path == root.appendingPathComponent("tmp").path)
     }
@@ -33,6 +34,7 @@ struct StorageManagerTests {
         #expect(FileManager.default.fileExists(atPath: storage.platformDirectory.path))
         #expect(FileManager.default.fileExists(atPath: storage.jobsDirectory.path))
         #expect(FileManager.default.fileExists(atPath: storage.disksDirectory.path))
+        #expect(FileManager.default.fileExists(atPath: storage.diagnosticsDirectory.path))
         #expect(FileManager.default.fileExists(atPath: storage.actionsCacheDirectory.path))
         #expect(FileManager.default.fileExists(atPath: storage.tmpDirectory.path))
     }

@@ -9,6 +9,7 @@ final class ConfigStore {
     private(set) var organizations: [Organization] = []
     var vmConfiguration: VMConfiguration = VMConfiguration()
     var cacheConfig: CacheConfiguration = CacheConfiguration()
+    var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration = DiagnosticsRetentionConfiguration()
     var storageDirectoryPath: String = ""
     var baseImagePath: String = ""
     var hasCompletedStorageSetup: Bool = false
@@ -128,6 +129,9 @@ final class ConfigStore {
         if let data = try? JSONEncoder().encode(cacheConfig) {
             defaults.set(data, forKey: "cacheConfiguration")
         }
+        if let data = try? JSONEncoder().encode(diagnosticsRetentionConfig) {
+            defaults.set(data, forKey: "diagnosticsRetentionConfiguration")
+        }
         defaults.set(storageDirectoryPath, forKey: "storageDirectoryPath")
         defaults.set(baseImagePath, forKey: "baseImagePath")
         defaults.set(cacheDirectoryPath, forKey: "cacheDirectoryPath")
@@ -152,6 +156,11 @@ final class ConfigStore {
             let config = try? JSONDecoder().decode(CacheConfiguration.self, from: data)
         {
             cacheConfig = config
+        }
+        if let data = defaults.data(forKey: "diagnosticsRetentionConfiguration"),
+            let config = try? JSONDecoder().decode(DiagnosticsRetentionConfiguration.self, from: data)
+        {
+            diagnosticsRetentionConfig = config
         }
         storageDirectoryPath = defaults.string(forKey: "storageDirectoryPath") ?? ""
         baseImagePath = defaults.string(forKey: "baseImagePath") ?? ""
