@@ -55,10 +55,36 @@ private struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let warning = viewModel.storageWarning {
-                Label(warning, systemImage: "exclamationmark.triangle")
+            Section("Storage Health") {
+                LabeledContent("Status") {
+                    Label(viewModel.storageHealth.status.displayName, systemImage: storageStatusImage)
+                        .font(.caption)
+                        .foregroundStyle(storageStatusColor)
+                }
+
+                LabeledContent("Volume") {
+                    pathText(viewModel.storageHealth.volume?.formatDisplayName ?? "Unknown")
+                }
+
+                LabeledContent("Clone path") {
+                    pathText(viewModel.storageHealth.cloneBehavior.displayName)
+                }
+
+                if let mountPoint = viewModel.storageHealth.volume?.mountPoint {
+                    LabeledContent("Mount") {
+                        pathText(mountPoint)
+                    }
+                }
+
+                ForEach(viewModel.storageHealth.issues) { issue in
+                    Label(
+                        issue.message,
+                        systemImage: issue.severity == .blocking
+                            ? "xmark.octagon.fill" : "exclamationmark.triangle.fill"
+                    )
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(issue.severity == .blocking ? .red : .orange)
+                }
             }
 
             Button("Clean Up Storage") {
@@ -88,6 +114,25 @@ private struct GeneralSettingsTab: View {
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear {
+            viewModel.refreshStorageHealth()
+        }
+    }
+
+    private var storageStatusImage: String {
+        switch viewModel.storageHealth.status {
+        case .fast: "checkmark.circle.fill"
+        case .degraded: "exclamationmark.triangle.fill"
+        case .blocked: "xmark.octagon.fill"
+        }
+    }
+
+    private var storageStatusColor: Color {
+        switch viewModel.storageHealth.status {
+        case .fast: .green
+        case .degraded: .orange
+        case .blocked: .red
+        }
     }
 
     private func pathText(_ path: String) -> some View {

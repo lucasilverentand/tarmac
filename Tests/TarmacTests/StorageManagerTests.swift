@@ -37,6 +37,33 @@ struct StorageManagerTests {
         #expect(FileManager.default.fileExists(atPath: storage.tmpDirectory.path))
     }
 
+    @Test("evaluateHealth reports volume and clone behavior for reachable storage")
+    func evaluateHealthReportsVolumeAndCloneBehavior() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+
+        let health = storage.evaluateHealth(minimumFreeBytes: nil)
+
+        #expect(health.isReachable)
+        #expect(health.volume != nil)
+        #expect(!health.cloneBehavior.displayName.isEmpty)
+    }
+
+    @Test("evaluateHealth blocks unreachable storage root")
+    func evaluateHealthBlocksUnreachableRoot() throws {
+        let root = try TestFactories.makeTempDir()
+        let missing = root.appendingPathComponent("missing")
+        defer { TestFactories.cleanup(root) }
+
+        let health = StorageManager(rootDirectory: missing).evaluateHealth(minimumFreeBytes: nil)
+
+        #expect(health.status == .blocked)
+        #expect(health.blockingIssues.contains { $0.message.contains("not reachable") })
+    }
+
     @Test("migrateManagedData moves old root artifacts into new root")
     func migrateMovesOldRootArtifacts() throws {
         let oldRoot = try TestFactories.makeTempDir()

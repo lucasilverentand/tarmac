@@ -50,11 +50,15 @@ struct DiskImageManagerTests {
         let content = Data(repeating: 0x42, count: 4096)
         try content.write(to: source)
 
-        try manager.cloneDisk(from: source, to: dest)
+        let result = try manager.cloneDisk(from: source, to: dest)
 
         #expect(FileManager.default.fileExists(atPath: dest.path))
         let clonedContent = try Data(contentsOf: dest)
         #expect(clonedContent == content)
+        #expect(result.source == source)
+        #expect(result.destination == dest)
+        #expect(result.duration >= 0)
+        #expect(result.sourceLogicalSizeBytes == Int64(content.count))
     }
 
     @Test("deleteDisk removes file")

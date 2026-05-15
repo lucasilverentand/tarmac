@@ -110,7 +110,8 @@ final class ConfigStore {
 
     func configureStorage(at directory: URL) throws {
         let root = directory.standardizedFileURL
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let storage = StorageManager(rootDirectory: root)
+        try storage.validateForSetup()
 
         storageRootPath = root.path
         hasCompletedStorageSetup = true

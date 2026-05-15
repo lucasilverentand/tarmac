@@ -133,6 +133,25 @@ struct SettingsViewModelTests {
         #expect(issues.contains { $0.contains("disabled") })
     }
 
+    @Test("validateConfiguration surfaces blocked storage health")
+    func validateBlockedStorageHealth() throws {
+        let (vm, store, keychain) = makeVM()
+        let root = try TestFactories.makeTempDir()
+        let missing = root.appendingPathComponent("missing")
+        defer { TestFactories.cleanup(root) }
+
+        store.storageRootPath = missing.path
+        store.hasCompletedStorageSetup = true
+
+        let org = TestFactories.makeOrg()
+        vm.addOrganization(org)
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+
+        let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
+
+        #expect(issues.contains { $0.contains("Storage") && $0.contains("not reachable") })
+    }
+
     @Test("validateConfiguration surfaces unsupported host issues")
     func validateUnsupportedHostSurfacesIssues() {
         let (vm, _, keychain) = makeVM()
