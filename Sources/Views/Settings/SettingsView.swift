@@ -21,7 +21,7 @@ struct SettingsView: View {
                 CacheSettingsView(viewModel: settingsViewModel)
             }
         }
-        .frame(width: 520, height: 480)
+        .frame(width: 560, height: 620)
     }
 }
 
@@ -31,6 +31,8 @@ private struct GeneralSettingsTab: View {
     @State private var storageError: String?
 
     var body: some View {
+        let report = viewModel.storageReport
+
         Form {
             Toggle("Launch at login", isOn: $viewModel.launchAtLogin)
 
@@ -47,12 +49,6 @@ private struct GeneralSettingsTab: View {
                     }
                     .controlSize(.small)
                 }
-            }
-
-            LabeledContent("Storage use") {
-                Text(viewModel.storageUsageDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Toggle("Keep installer after verification", isOn: $viewModel.keepInstallerAfterVerification)
@@ -95,8 +91,39 @@ private struct GeneralSettingsTab: View {
                 }
             }
 
-            Button("Clean Up Storage") {
-                viewModel.cleanupStorage()
+            Section("Storage Use") {
+                LabeledContent("Total managed", value: viewModel.formatStorageBytes(report.totalManagedBytes))
+                LabeledContent("Base image", value: viewModel.formatStorageBytes(report.baseImageBytes))
+                LabeledContent("Platform data", value: viewModel.formatStorageBytes(report.platformDataBytes))
+                LabeledContent(
+                    "Installer artifacts",
+                    value: viewModel.formatStorageBytes(report.installerArtifactBytes)
+                )
+                LabeledContent("Job scratch and disks", value: viewModel.formatStorageBytes(report.transientBytes))
+                LabeledContent("Diagnostics", value: viewModel.formatStorageBytes(report.diagnosticsBytes))
+                LabeledContent("Actions cache", value: viewModel.formatStorageBytes(report.cacheBytes))
+                if let freeBytes = report.freeBytes {
+                    LabeledContent("Free space", value: viewModel.formatStorageBytes(freeBytes))
+                }
+            }
+
+            Section("Cleanup") {
+                Button("Clear Actions Cache", role: .destructive) {
+                    viewModel.clearCache()
+                }
+
+                Button("Remove Installer Artifacts", role: .destructive) {
+                    viewModel.cleanupInstallerArtifacts()
+                }
+                .disabled(report.installerArtifactBytes == 0)
+
+                Button("Remove Stale Job Scratch", role: .destructive) {
+                    viewModel.cleanupJobScratch()
+                }
+
+                Button("Remove Stale Cloned Disks", role: .destructive) {
+                    viewModel.cleanupDebugDisks()
+                }
             }
 
             if let storageError {

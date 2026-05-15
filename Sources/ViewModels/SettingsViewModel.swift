@@ -151,13 +151,17 @@ final class SettingsViewModel {
     }
 
     var storageUsageDescription: String {
-        let storage = StorageManager(rootPath: configStore.storageRootPath)
-        let used = (try? storage.totalManagedSizeBytes()) ?? 0
-        let free = storageHealth.volume?.availableCapacityBytes ?? storage.availableCapacityBytes()
+        let report = storageReport
+        let used = report.totalManagedBytes
+        let free = report.freeBytes
         if let free {
             return "\(formatBytes(used)) used, \(formatBytes(free)) available"
         }
         return "\(formatBytes(used)) used"
+    }
+
+    var storageReport: StorageReport {
+        StorageManager(rootPath: configStore.storageRootPath).storageReport()
     }
 
     var retainedInstallerDescription: String? {
@@ -189,6 +193,10 @@ final class SettingsViewModel {
         Log.config.info("Storage directory changed to \(url.path)")
     }
 
+    func formatStorageBytes(_ bytes: Int64) -> String {
+        formatBytes(bytes)
+    }
+
     func clearCache() {
         let manager = CacheManager(storage: StorageManager(rootPath: configStore.storageRootPath))
         do {
@@ -208,6 +216,39 @@ final class SettingsViewModel {
             Log.cache.info("Storage cleanup completed from settings")
         } catch {
             Log.cache.error("Failed to clean storage: \(error.localizedDescription)")
+        }
+    }
+
+    func cleanupJobScratch() {
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        do {
+            try storage.cleanupJobScratch()
+            refreshStorageHealth()
+            Log.cache.info("Stale job scratch cleanup completed from settings")
+        } catch {
+            Log.cache.error("Failed to clean stale job scratch data: \(error.localizedDescription)")
+        }
+    }
+
+    func cleanupDebugDisks() {
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        do {
+            try storage.cleanupDebugDisks()
+            refreshStorageHealth()
+            Log.cache.info("Stale cloned disk cleanup completed from settings")
+        } catch {
+            Log.cache.error("Failed to clean stale cloned disks: \(error.localizedDescription)")
+        }
+    }
+
+    func cleanupInstallerArtifacts() {
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        do {
+            try storage.cleanupInstallerArtifacts()
+            refreshStorageHealth()
+            Log.cache.info("Installer artifacts removed from settings")
+        } catch {
+            Log.cache.error("Failed to remove installer artifacts: \(error.localizedDescription)")
         }
     }
 
