@@ -52,7 +52,7 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
         let platform = VZMacPlatformConfiguration()
         platform.hardwareModel = hardwareModel
         platform.machineIdentifier = machineIdentifier
-        platform.auxiliaryStorage = try VZMacAuxiliaryStorage(
+        platform.auxiliaryStorage = VZMacAuxiliaryStorage(
             url: platformStore.auxiliaryStoragePath
         )
 
@@ -111,21 +111,26 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
     func boot(configuration: VZVirtualMachineConfiguration) async throws -> VZVirtualMachine {
         let virtualMachine = VZVirtualMachine(configuration: configuration)
         virtualMachine.delegate = self
-        self.vm = virtualMachine
+        do {
+            self.vm = virtualMachine
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            virtualMachine.start { result in
-                switch result {
-                case .success:
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                virtualMachine.start { result in
+                    switch result {
+                    case .success:
+                        continuation.resume()
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
-        }
 
-        Log.vm.info("VM booted successfully")
-        return virtualMachine
+            Log.vm.info("VM booted successfully")
+            return virtualMachine
+        } catch {
+            self.vm = nil
+            throw error
+        }
     }
 
     func stop(vm: VZVirtualMachine) async throws {
