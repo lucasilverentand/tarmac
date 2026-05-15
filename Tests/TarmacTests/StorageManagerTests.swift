@@ -147,4 +147,51 @@ struct StorageManagerTests {
         #expect(!FileManager.default.fileExists(atPath: staleDisk.path))
         #expect(FileManager.default.fileExists(atPath: freshDisk.path))
     }
+
+    @Test("cleanupInstallerArtifactsAfterVerification removes restore image by default")
+    func cleanupInstallerArtifactsAfterVerificationRemovesRestoreImageByDefault() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.restoreIPSWURL)
+        try Data([0x03]).write(to: storage.ipswResumeDataURL)
+        try Data([0x04]).write(to: storage.partialIPSWURL)
+        let tempIPSW = storage.tmpDirectory.appendingPathComponent("ipsw-\(UUID().uuidString).ipsw")
+        try Data([0x05]).write(to: tempIPSW)
+
+        let result = try storage.cleanupInstallerArtifactsAfterVerification(keepRestoreImage: false)
+
+        #expect(result.removedItems == 4)
+        #expect(!FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.ipswResumeDataURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.partialIPSWURL.path))
+        #expect(!FileManager.default.fileExists(atPath: tempIPSW.path))
+        #expect(FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+    }
+
+    @Test("cleanupInstallerArtifactsAfterVerification can retain restore image")
+    func cleanupInstallerArtifactsAfterVerificationCanRetainRestoreImage() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.restoreIPSWURL)
+        try Data([0x03]).write(to: storage.ipswResumeDataURL)
+        try Data([0x04]).write(to: storage.partialIPSWURL)
+
+        let result = try storage.cleanupInstallerArtifactsAfterVerification(keepRestoreImage: true)
+        let health = storage.evaluateHealth(minimumFreeBytes: nil)
+
+        #expect(result.removedItems == 2)
+        #expect(FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+        #expect(FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.ipswResumeDataURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.partialIPSWURL.path))
+        #expect(health.installerArtifactSizeBytes > 0)
+    }
 }

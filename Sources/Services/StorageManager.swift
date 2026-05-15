@@ -100,6 +100,25 @@ struct StorageManager: Sendable {
         try removeContents(in: tmpDirectory, olderThan: cutoff)
     }
 
+    func installerArtifactSizeBytes() throws -> Int64 {
+        try sizeOfItems(installerArtifactURLs(includeRestoreImage: true))
+    }
+
+    @discardableResult
+    func cleanupInstallerArtifactsAfterVerification(keepRestoreImage: Bool) throws -> InstallerArtifactCleanupResult {
+        var result = InstallerArtifactCleanupResult()
+        let urls = installerArtifactURLs(includeRestoreImage: !keepRestoreImage)
+
+        for url in urls {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            result.removedBytes += try itemSize(at: url)
+            try FileManager.default.removeItem(at: url)
+            result.removedItems += 1
+        }
+
+        return result
+    }
+
     @discardableResult
     func migrateManagedData(from oldRoot: URL?, explicitBaseImageURL: URL?) throws -> StorageMigrationResult {
         try prepareBaseDirectories()
@@ -240,12 +259,41 @@ struct StorageManager: Sendable {
         }
         return total
     }
+
+    private func installerArtifactURLs(includeRestoreImage: Bool) -> [URL] {
+        var urls: [URL] = [
+            ipswResumeDataURL,
+            partialIPSWURL,
+        ]
+
+        if includeRestoreImage {
+            urls.append(restoreIPSWURL)
+        }
+
+        if let tmpContents = try? FileManager.default.contentsOfDirectory(
+            at: tmpDirectory,
+            includingPropertiesForKeys: nil
+        ) {
+            urls.append(
+                contentsOf: tmpContents.filter {
+                    $0.lastPathComponent.hasPrefix("ipsw-") && $0.pathExtension == "ipsw"
+                }
+            )
+        }
+
+        return urls
+    }
 }
 
 struct StorageMigrationResult: Sendable {
     var movedItems: Int = 0
     var skippedExistingDestination: Int = 0
     var movedBaseImage: Bool = false
+}
+
+struct InstallerArtifactCleanupResult: Equatable, Sendable {
+    var removedItems: Int = 0
+    var removedBytes: Int64 = 0
 }
 
 struct BaseImageVerificationMarker: Codable, Sendable {

@@ -10,6 +10,7 @@ final class ConfigStore {
     var vmConfiguration: VMConfiguration = VMConfiguration()
     var cacheConfig: CacheConfiguration = CacheConfiguration()
     var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration = DiagnosticsRetentionConfiguration()
+    var keepInstallerAfterVerification: Bool = false
     var storageDirectoryPath: String = ""
     var baseImagePath: String = ""
     var hasCompletedStorageSetup: Bool = false
@@ -132,6 +133,7 @@ final class ConfigStore {
         if let data = try? JSONEncoder().encode(diagnosticsRetentionConfig) {
             defaults.set(data, forKey: "diagnosticsRetentionConfiguration")
         }
+        defaults.set(keepInstallerAfterVerification, forKey: "keepInstallerAfterVerification")
         defaults.set(storageDirectoryPath, forKey: "storageDirectoryPath")
         defaults.set(baseImagePath, forKey: "baseImagePath")
         defaults.set(cacheDirectoryPath, forKey: "cacheDirectoryPath")
@@ -162,6 +164,7 @@ final class ConfigStore {
         {
             diagnosticsRetentionConfig = config
         }
+        keepInstallerAfterVerification = defaults.bool(forKey: "keepInstallerAfterVerification")
         storageDirectoryPath = defaults.string(forKey: "storageDirectoryPath") ?? ""
         baseImagePath = defaults.string(forKey: "baseImagePath") ?? ""
         let legacyStorageRootPath = defaults.string(forKey: "storageRootPath")

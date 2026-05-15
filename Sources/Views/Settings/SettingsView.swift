@@ -55,6 +55,8 @@ private struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Toggle("Keep installer after verification", isOn: $viewModel.keepInstallerAfterVerification)
+
             Section("Storage Health") {
                 LabeledContent("Status") {
                     Label(viewModel.storageHealth.status.displayName, systemImage: storageStatusImage)
@@ -73,6 +75,12 @@ private struct GeneralSettingsTab: View {
                 if let mountPoint = viewModel.storageHealth.volume?.mountPoint {
                     LabeledContent("Mount") {
                         pathText(mountPoint)
+                    }
+                }
+
+                if let retainedInstallerDescription = viewModel.retainedInstallerDescription {
+                    LabeledContent("Retained installer") {
+                        pathText(retainedInstallerDescription)
                     }
                 }
 
