@@ -100,12 +100,14 @@ final class VMEngine: VMManagerProtocol {
 
         try storage.prepareBaseDirectories()
         verificationState = .verifying
+        _ = try ensureStorageReadyForBoot(config: config, context: "base image verification")
 
         let clonePath = storage.disksDirectory
             .appendingPathComponent("verify-\(UUID().uuidString).img")
 
         do {
-            try diskManager.cloneDisk(from: baseImageURL, to: clonePath)
+            let cloneMetrics = try diskManager.cloneDisk(from: baseImageURL, to: clonePath)
+            logCloneFallbackIfNeeded(cloneMetrics, context: "base image verification")
         } catch {
             verificationState = .failed(message: "Could not clone base image: \(error.localizedDescription)")
             throw VMEngineError.verificationFailed(reason: error.localizedDescription)
@@ -159,16 +161,14 @@ final class VMEngine: VMManagerProtocol {
     ) async throws -> VMInstance {
         try storage.prepareBaseDirectories()
         try storage.cleanupTransientFiles()
-
-        if let warning = storage.storageWarning(minimumFreeBytes: Int64(config.diskSizeGB) * 1024 * 1024 * 1024 / 2) {
-            Log.vm.warning("\(warning)")
-        }
+        _ = try ensureStorageReadyForBoot(config: config, context: "job \(jobId) boot")
 
         let instanceId = UUID()
         let clonedDiskPath = storage.disksDirectory
             .appendingPathComponent("\(instanceId.uuidString).img")
 
-        try diskManager.cloneDisk(from: baseImageURL, to: clonedDiskPath)
+        let cloneMetrics = try diskManager.cloneDisk(from: baseImageURL, to: clonedDiskPath)
+        logCloneFallbackIfNeeded(cloneMetrics, context: "job \(jobId) boot")
 
         // Prepare cache directory and evict stale entries
         var cacheDirectoryURL: URL? = nil
@@ -274,12 +274,63 @@ final class VMEngine: VMManagerProtocol {
     func cacheSizeBytes() throws -> Int64 {
         try cacheManager.currentSizeBytes()
     }
+
+    // MARK: - Storage Readiness
+
+    private func ensureStorageReadyForBoot(config: VMConfiguration, context: String) throws -> StorageHealth {
+        let health = storage.evaluateHealth(minimumFreeBytes: nil)
+        let requiredFreeBytes = requiredFreeBytes(for: config, cloneBehavior: health.cloneBehavior)
+        let volume = health.volume?.formatDisplayName ?? "unknown"
+        let mountPoint = health.volume?.mountPoint ?? "unknown"
+        let available = formatBytes(health.volume?.availableCapacityBytes)
+        let required = formatBytes(requiredFreeBytes)
+
+        Log.vm.info(
+            "Storage before \(context, privacy: .public): root=\(health.rootDirectory.path, privacy: .public), volume=\(volume, privacy: .public), mount=\(mountPoint, privacy: .public), clone=\(health.cloneBehavior.displayName, privacy: .public), available=\(available, privacy: .public), required=\(required, privacy: .public)"
+        )
+
+        if !health.blockingIssues.isEmpty {
+            throw VMEngineError.unsuitableStorage(reason: health.summary)
+        }
+
+        if let available = health.volume?.availableCapacityBytes, available < requiredFreeBytes {
+            throw VMEngineError.unsuitableStorage(
+                reason:
+                    "Storage volume has \(formatBytes(available)) available; \(formatBytes(requiredFreeBytes)) required before \(context)."
+            )
+        }
+
+        if health.status == .degraded {
+            Log.vm.warning(
+                "Storage is degraded before \(context, privacy: .public): \(health.summary, privacy: .public)"
+            )
+        }
+
+        return health
+    }
+
+    private func requiredFreeBytes(for config: VMConfiguration, cloneBehavior: StorageCloneBehavior) -> Int64 {
+        let gib: Int64 = 1024 * 1024 * 1024
+        if cloneBehavior.isFastPath {
+            return max(10 * gib, Int64(config.diskSizeGB) * gib / 10)
+        }
+        return Int64(config.diskSizeGB) * gib
+    }
+
+    private func logCloneFallbackIfNeeded(_ metrics: DiskCloneResult, context: String) {
+        if case .fullCopyFallback(let errno) = metrics.method {
+            Log.vm.warning(
+                "Disk clone for \(context, privacy: .public) used full-copy fallback after clonefile errno \(errno); duration=\(formatDuration(metrics.duration), privacy: .public), allocated=\(formatBytes(metrics.destinationAllocatedSizeBytes), privacy: .public)"
+            )
+        }
+    }
 }
 
 enum VMEngineError: LocalizedError {
     case missingJITConfig
     case baseImageMissing
     case verificationFailed(reason: String)
+    case unsuitableStorage(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -289,6 +340,8 @@ enum VMEngineError: LocalizedError {
             "Base image does not exist on disk"
         case .verificationFailed(let reason):
             "Base image verification failed: \(reason)"
+        case .unsuitableStorage(let reason):
+            "Storage is not suitable for VM work: \(reason)"
         }
     }
 }
@@ -298,4 +351,16 @@ enum BaseImageVerificationState: Equatable, Sendable {
     case verifying
     case verified
     case failed(message: String)
+}
+
+private func formatBytes(_ bytes: Int64?) -> String {
+    guard let bytes else { return "unknown" }
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+    return formatter.string(fromByteCount: bytes)
+}
+
+private func formatDuration(_ duration: TimeInterval) -> String {
+    String(format: "%.3fs", duration)
 }

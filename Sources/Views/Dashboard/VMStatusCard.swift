@@ -28,6 +28,7 @@ struct VMStatusCard: View {
             header
             heroStatus
             baseImageSection
+            storageSection
             activeVMSection
             configurationSection
             Spacer(minLength: 0)
@@ -58,7 +59,7 @@ struct VMStatusCard: View {
                 Text(vmStatusViewModel.activeVM == nil ? "Idle" : "Running")
                     .font(.headline)
 
-                Text(vmStatusViewModel.baseImageExists ? "Ready to accept jobs" : "Base image setup required")
+                Text(readinessSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -74,11 +75,19 @@ struct VMStatusCard: View {
         InspectorSection(title: "Base Image") {
             VStack(alignment: .leading, spacing: 10) {
                 if vmStatusViewModel.baseImageExists {
-                    StatusLine(
-                        title: "Base image ready",
-                        systemImage: "checkmark.circle.fill",
-                        tint: .green
-                    )
+                    if vmStatusViewModel.baseImageVerified {
+                        StatusLine(
+                            title: "Base image verified",
+                            systemImage: "checkmark.circle.fill",
+                            tint: .green
+                        )
+                    } else {
+                        StatusLine(
+                            title: "Base image needs verification",
+                            systemImage: "exclamationmark.triangle.fill",
+                            tint: .orange
+                        )
+                    }
                 } else {
                     StatusLine(
                         title: "Base image missing",
@@ -98,6 +107,26 @@ struct VMStatusCard: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var storageSection: some View {
+        InspectorSection(title: "Storage") {
+            VStack(alignment: .leading, spacing: 10) {
+                if let health = vmStatusViewModel.storageHealth {
+                    StatusLine(
+                        title: "\(health.status.displayName) storage",
+                        systemImage: storageStatusImage(for: health),
+                        tint: storageStatusColor(for: health)
+                    )
+                    DetailRow(title: "Volume", value: health.volume?.formatDisplayName ?? "Unknown")
+                    DetailRow(title: "Clone", value: health.cloneBehavior.displayName)
+                    DetailRow(title: "Free", value: formatBytes(health.volume?.availableCapacityBytes))
+                } else {
+                    StatusLine(title: "Storage unchecked", systemImage: "questionmark.circle", tint: .secondary)
                 }
             }
         }
@@ -153,7 +182,39 @@ struct VMStatusCard: View {
         if vmStatusViewModel.activeVM != nil {
             return .green
         }
-        return vmStatusViewModel.baseImageExists ? .blue : .orange
+        return vmStatusViewModel.readyForJobs ? .blue : .orange
+    }
+
+    private var readinessSubtitle: String {
+        if vmStatusViewModel.readyForJobs {
+            return "Ready to accept jobs"
+        }
+        if !vmStatusViewModel.baseImageExists {
+            return "Base image setup required"
+        }
+        if !vmStatusViewModel.baseImageVerified {
+            return "Base image verification required"
+        }
+        if vmStatusViewModel.storageHealth?.status == .blocked {
+            return "Storage setup required"
+        }
+        return "Setup checks need attention"
+    }
+
+    private func storageStatusImage(for health: StorageHealth) -> String {
+        switch health.status {
+        case .fast: "checkmark.circle.fill"
+        case .degraded: "exclamationmark.triangle.fill"
+        case .blocked: "xmark.octagon.fill"
+        }
+    }
+
+    private func storageStatusColor(for health: StorageHealth) -> Color {
+        switch health.status {
+        case .fast: .green
+        case .degraded: .orange
+        case .blocked: .red
+        }
     }
 }
 
@@ -201,4 +262,12 @@ private struct DetailRow: View {
         }
         .font(.caption)
     }
+}
+
+private func formatBytes(_ bytes: Int64?) -> String {
+    guard let bytes else { return "Unknown" }
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+    return formatter.string(fromByteCount: bytes)
 }

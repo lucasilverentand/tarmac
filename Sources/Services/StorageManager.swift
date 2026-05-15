@@ -68,8 +68,8 @@ struct StorageManager: Sendable {
     }
 
     func storageWarning(minimumFreeBytes: Int64) -> String? {
-        guard let freeBytes = availableCapacityBytes(), freeBytes < minimumFreeBytes else { return nil }
-        return "Storage folder is low on free space."
+        let health = evaluateHealth(minimumFreeBytes: minimumFreeBytes)
+        return health.issues.first?.message
     }
 
     func isBaseImageVerified() -> Bool {

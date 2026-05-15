@@ -4,9 +4,11 @@ import Foundation
 @MainActor
 final class SettingsViewModel {
     let configStore: ConfigStore
+    private(set) var storageHealth: StorageHealth
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
+        self.storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth()
     }
 
     // MARK: - Organizations
@@ -118,6 +120,7 @@ final class SettingsViewModel {
                 return
             }
             configStore.save()
+            refreshStorageHealth()
         }
     }
 
@@ -133,7 +136,7 @@ final class SettingsViewModel {
     var storageUsageDescription: String {
         let storage = StorageManager(rootPath: configStore.storageRootPath)
         let used = (try? storage.totalManagedSizeBytes()) ?? 0
-        let free = storage.availableCapacityBytes()
+        let free = storageHealth.volume?.availableCapacityBytes ?? storage.availableCapacityBytes()
         if let free {
             return "\(formatBytes(used)) used, \(formatBytes(free)) available"
         }
@@ -141,8 +144,7 @@ final class SettingsViewModel {
     }
 
     var storageWarning: String? {
-        StorageManager(rootPath: configStore.storageRootPath)
-            .storageWarning(minimumFreeBytes: 25 * 1024 * 1024 * 1024)
+        storageHealth.issues.first?.message
     }
 
     var baseImagePath: String {
@@ -161,6 +163,7 @@ final class SettingsViewModel {
 
     func configureStorage(at url: URL) throws {
         try configStore.configureStorage(at: url)
+        refreshStorageHealth()
         Log.config.info("Storage directory changed to \(url.path)")
     }
 
@@ -179,10 +182,15 @@ final class SettingsViewModel {
         do {
             try storage.cleanupTransientFiles()
             try CacheManager(storage: storage).enforceMaxSize(maxSizeGB: configStore.cacheConfig.maxSizeGB)
+            refreshStorageHealth()
             Log.cache.info("Storage cleanup completed from settings")
         } catch {
             Log.cache.error("Failed to clean storage: \(error.localizedDescription)")
         }
+    }
+
+    func refreshStorageHealth() {
+        storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth()
     }
 
     // MARK: - Validation
@@ -190,12 +198,17 @@ final class SettingsViewModel {
     func validateConfiguration(
         hostCapability: HostCapability = .current()
     ) -> [String] {
+        refreshStorageHealth()
         var issues: [String] = hostCapability.issues
         if configStore.organizations.isEmpty {
             issues.append("No organizations configured")
         }
         if !configStore.hasCompletedStorageSetup {
             issues.append("Storage location is not configured")
+        } else {
+            for issue in storageHealth.blockingIssues {
+                issues.append("Storage: \(issue.message)")
+            }
         }
         let enabled = configStore.organizations.filter(\.isEnabled)
         if enabled.isEmpty && !configStore.organizations.isEmpty {
