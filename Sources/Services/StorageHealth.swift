@@ -83,6 +83,7 @@ struct StorageHealth: Equatable, Sendable {
     let isCloudSyncedPath: Bool
     let volume: StorageVolumeInfo?
     let cloneBehavior: StorageCloneBehavior
+    let installerArtifactSizeBytes: Int64
     let issues: [StorageHealthIssue]
 
     var status: StorageHealthStatus {
@@ -204,6 +205,7 @@ extension StorageManager {
             isCloudSyncedPath: cloudSynced,
             volume: volume,
             cloneBehavior: cloneBehavior,
+            installerArtifactSizeBytes: (try? installerArtifactSizeBytes()) ?? 0,
             issues: issues
         )
     }

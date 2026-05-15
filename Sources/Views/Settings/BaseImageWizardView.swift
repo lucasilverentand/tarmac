@@ -510,7 +510,6 @@ struct BaseImageWizardView: View {
 
                 configStore.baseImagePath = baseImagePath
                 configStore.save()
-                try? FileManager.default.removeItem(at: ipsw)
                 // A fresh install invalidates any previous verification marker.
                 try? storage.clearBaseImageVerified()
 
@@ -541,9 +540,17 @@ struct BaseImageWizardView: View {
                     baseImagePath: baseImagePath
                 )
                 try await engine.verifyBaseImage(config: vmConfig)
+                let cleanupResult = try storage.cleanupInstallerArtifactsAfterVerification(
+                    keepRestoreImage: configStore.keepInstallerAfterVerification
+                )
 
                 verificationStatus = .success
                 currentStep = 3
+                if cleanupResult.removedItems > 0 {
+                    Log.image.info(
+                        "Cleaned \(cleanupResult.removedItems) installer artifact(s) after base image verification"
+                    )
+                }
                 Log.vm.info("Base image verification completed")
             } catch {
                 verificationStatus = .failed(message: error.localizedDescription)

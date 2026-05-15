@@ -62,6 +62,7 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.diskSizeGB == 80)
         #expect(store.diagnosticsRetentionConfig.maxBundleCount == 100)
         #expect(store.diagnosticsRetentionConfig.maxAgeDays == 14)
+        #expect(!store.keepInstallerAfterVerification)
         #expect(!store.storageDirectoryPath.isEmpty)
         #expect(store.storageRootPath == store.storageDirectoryPath)
         #expect(store.cacheDirectoryPath == StorageManager(rootPath: store.storageRootPath).actionsCacheDirectory.path)
@@ -90,6 +91,22 @@ struct ConfigStoreTests {
         #expect(store2.diagnosticsRetentionConfig.maxAgeDays == 7)
         #expect(store2.diagnosticsRetentionConfig.maxSizeMB == 128)
         #expect(store2.diagnosticsRetentionConfig.keepSuccessfulJobLogs)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("Save and load installer retention round-trip")
+    func installerRetentionRoundTrip() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+
+        let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
+        store1.keepInstallerAfterVerification = true
+        store1.save()
+
+        let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
+        #expect(store2.keepInstallerAfterVerification)
 
         defaults.removePersistentDomain(forName: suiteName)
     }

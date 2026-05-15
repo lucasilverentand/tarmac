@@ -85,6 +85,15 @@ final class SettingsViewModel {
         }
     }
 
+    var keepInstallerAfterVerification: Bool {
+        get { configStore.keepInstallerAfterVerification }
+        set {
+            configStore.keepInstallerAfterVerification = newValue
+            configStore.save()
+            refreshStorageHealth()
+        }
+    }
+
     // MARK: - General
 
     var launchAtLogin: Bool {
@@ -149,6 +158,11 @@ final class SettingsViewModel {
             return "\(formatBytes(used)) used, \(formatBytes(free)) available"
         }
         return "\(formatBytes(used)) used"
+    }
+
+    var retainedInstallerDescription: String? {
+        guard keepInstallerAfterVerification, storageHealth.installerArtifactSizeBytes > 0 else { return nil }
+        return formatBytes(storageHealth.installerArtifactSizeBytes)
     }
 
     var storageWarning: String? {
