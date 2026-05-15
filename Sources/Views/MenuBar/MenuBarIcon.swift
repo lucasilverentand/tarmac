@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarIcon: View {
     let queueViewModel: QueueViewModel
+    let vmStatusViewModel: VMStatusViewModel
 
     var body: some View {
         Image(systemName: iconName)
@@ -13,6 +14,9 @@ struct MenuBarIcon: View {
         }
         if queueViewModel.activeJob != nil {
             return "play.circle.fill"
+        }
+        if !vmStatusViewModel.readyForJobs {
+            return "exclamationmark.triangle.fill"
         }
         return "server.rack"
     }

@@ -18,10 +18,13 @@ struct TarmacApp: App {
                     }
                 }
         } label: {
-            MenuBarIcon(queueViewModel: appState.queueViewModel)
-                .task {
-                    await appState.start()
-                }
+            MenuBarIcon(
+                queueViewModel: appState.queueViewModel,
+                vmStatusViewModel: appState.vmStatusViewModel
+            )
+            .task {
+                await appState.start()
+            }
         }
         .menuBarExtraStyle(.window)
 

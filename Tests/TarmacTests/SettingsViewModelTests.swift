@@ -79,6 +79,7 @@ struct SettingsViewModelTests {
         let (vm, _, keychain) = makeVM()
         let storage = try TestFactories.makeTempDir()
         try vm.configureStorage(at: storage)
+        try TestFactories.prepareReadyRunnerHostStorage(for: vm.configStore)
 
         let org = TestFactories.makeOrg()
         vm.addOrganization(org)
@@ -94,8 +95,9 @@ struct SettingsViewModelTests {
         let (vm, _, _) = makeVM()
 
         let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
-        #expect(issues.contains { $0.contains("No organizations") })
-        #expect(issues.contains { $0.contains("Storage location") })
+        #expect(issues.contains { $0.contains("GitHub organization") })
+        #expect(issues.contains { $0.contains("storage location") })
+        #expect(issues.contains { $0.contains("base image") })
     }
 
     @Test("validateConfiguration detects missing credentials per org")
@@ -118,7 +120,7 @@ struct SettingsViewModelTests {
         vm.addOrganization(org)
         _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
 
-        let issues = vm.validateConfiguration()
+        let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
         #expect(issues.contains { $0.contains("my-org") && $0.contains("Scale set ID") })
     }
 
@@ -130,7 +132,7 @@ struct SettingsViewModelTests {
         vm.addOrganization(org)
 
         let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
-        #expect(issues.contains { $0.contains("disabled") })
+        #expect(issues.contains { $0.contains("Enable at least one") })
     }
 
     @Test("validateConfiguration surfaces blocked storage health")

@@ -9,12 +9,16 @@ struct AppStateTests {
     private func makeAppState(
         orgs: [Organization] = [],
         withPrivateKeys: Bool = false,
+        hasReadyVM: Bool = true,
         lifecycle: MockVMLifecycle? = nil
     ) throws -> (AppState, RecordingGitHubClient) {
         let (configStore, _) = TestFactories.makeConfigStore()
         let tempDir = try TestFactories.makeTempDir()
 
         try configStore.configureStorage(at: tempDir)
+        if hasReadyVM {
+            try TestFactories.prepareReadyRunnerHostStorage(for: configStore)
+        }
 
         // Add orgs with valid config
         for org in orgs {
@@ -125,16 +129,30 @@ struct AppStateTests {
         #expect(!appState.queueViewModel.isPolling)
     }
 
+    @Test("start with missing VM setup does not poll")
+    @MainActor
+    func startMissingVMSetup() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: true, hasReadyVM: false)
+
+        await appState.start()
+
+        #expect(!appState.queueViewModel.isPolling)
+        #expect(appState.vmStatusViewModel.readiness.nextIssue?.category == .vm)
+    }
+
     @Test("resolvedBaseImagePath defaults to configured storage root")
     @MainActor
     func resolvedBaseImagePathDefault() throws {
         let (configStore, _) = TestFactories.makeConfigStore()
-        // baseImagePath is empty by default
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        configStore.storageRootPath = tempDir.path
         let appState = AppState(configStore: configStore)
 
-        // The private method resolvedBaseImagePath is called in start(),
-        // but we can verify the ViewModel starts clean
         #expect(appState.vmStatusViewModel.activeVM == nil)
         #expect(appState.vmStatusViewModel.baseImageExists == false)
+        #expect(appState.vmStatusViewModel.readyForJobs == false)
     }
 }

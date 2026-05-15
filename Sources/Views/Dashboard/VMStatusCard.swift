@@ -27,6 +27,7 @@ struct VMStatusCard: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             heroStatus
+            readinessSection
             baseImageSection
             storageSection
             activeVMSection
@@ -68,6 +69,25 @@ struct VMStatusCard: View {
         }
         .padding(14)
         .dashboardGlassSurface(tint: statusTint.opacity(0.12))
+    }
+
+    @ViewBuilder
+    private var readinessSection: some View {
+        InspectorSection(title: "Readiness") {
+            VStack(alignment: .leading, spacing: 10) {
+                if vmStatusViewModel.readyForJobs {
+                    StatusLine(title: "Ready to accept jobs", systemImage: "checkmark.circle.fill", tint: .green)
+                } else {
+                    ForEach(vmStatusViewModel.readiness.issues) { issue in
+                        StatusLine(
+                            title: "\(issue.category.displayName): \(issue.message)",
+                            systemImage: readinessImage(for: issue.category),
+                            tint: readinessTint(for: issue.category)
+                        )
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -186,19 +206,23 @@ struct VMStatusCard: View {
     }
 
     private var readinessSubtitle: String {
-        if vmStatusViewModel.readyForJobs {
-            return "Ready to accept jobs"
+        vmStatusViewModel.readinessStatusText
+    }
+
+    private func readinessImage(for category: RunnerHostReadinessCategory) -> String {
+        switch category {
+        case .host: "desktopcomputer.trianglebadge.exclamationmark"
+        case .storage: "externaldrive.badge.exclamationmark"
+        case .vm: "desktopcomputer"
+        case .github: "key.horizontal"
         }
-        if !vmStatusViewModel.baseImageExists {
-            return "Base image setup required"
+    }
+
+    private func readinessTint(for category: RunnerHostReadinessCategory) -> Color {
+        switch category {
+        case .host, .storage: .red
+        case .vm, .github: .orange
         }
-        if !vmStatusViewModel.baseImageVerified {
-            return "Base image verification required"
-        }
-        if vmStatusViewModel.storageHealth?.status == .blocked {
-            return "Storage setup required"
-        }
-        return "Setup checks need attention"
     }
 
     private func storageStatusImage(for health: StorageHealth) -> String {

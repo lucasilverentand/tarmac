@@ -33,7 +33,7 @@ final class AppState {
                 diagnosticsRetention: diagnosticsRetention
             )
         }
-        self.vmStatusViewModel.storageHealth = settingsViewModel.storageHealth
+        refreshReadiness()
     }
 
     init(
@@ -61,7 +61,7 @@ final class AppState {
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = githubClientFactory
         self.vmEngineFactory = vmEngineFactory
-        self.vmStatusViewModel.storageHealth = settingsViewModel.storageHealth
+        refreshReadiness()
     }
 
     // MARK: - Engine Lifecycle
@@ -72,10 +72,9 @@ final class AppState {
             return
         }
 
-        let issues = settingsViewModel.validateConfiguration()
-        vmStatusViewModel.storageHealth = settingsViewModel.storageHealth
-        guard issues.isEmpty else {
-            Log.app.warning("Cannot start: \(issues.joined(separator: ", "))")
+        refreshReadiness()
+        guard vmStatusViewModel.readyForJobs else {
+            Log.app.warning("Cannot start: \(self.vmStatusViewModel.readinessStatusText)")
             return
         }
 
@@ -97,6 +96,7 @@ final class AppState {
         self.vmEngine = vmEngine
         vmStatusViewModel.baseImageExists = vmEngine.baseImageExists
         vmStatusViewModel.baseImageVerified = vmEngine.baseImageVerified
+        refreshReadiness()
 
         let queueEngine = QueueEngine(
             github: githubEngine,
@@ -255,12 +255,23 @@ final class AppState {
                     self.vmStatusViewModel.activeVM = vmEngine.currentInstance
                     self.vmStatusViewModel.baseImageExists = vmEngine.baseImageExists
                     self.vmStatusViewModel.baseImageVerified = vmEngine.baseImageVerified
-                    self.settingsViewModel.refreshStorageHealth()
-                    self.vmStatusViewModel.storageHealth = self.settingsViewModel.storageHealth
                 }
+                self.refreshReadiness()
 
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    private func refreshReadiness() {
+        settingsViewModel.refreshStorageHealth()
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        vmStatusViewModel.storageHealth = settingsViewModel.storageHealth
+        vmStatusViewModel.baseImageExists = FileManager.default.fileExists(atPath: configStore.resolvedBaseImagePath)
+        vmStatusViewModel.baseImageVerified = storage.isBaseImageVerified()
+        vmStatusViewModel.readiness = RunnerHostReadiness.evaluate(
+            configStore: configStore,
+            storageHealth: settingsViewModel.storageHealth
+        )
     }
 }

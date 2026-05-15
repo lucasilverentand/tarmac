@@ -86,6 +86,19 @@ enum TestFactories {
         return dir
     }
 
+    @MainActor
+    static func prepareReadyRunnerHostStorage(for store: ConfigStore) throws {
+        let storage = StorageManager(rootPath: store.storageRootPath)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try storage.markBaseImageVerified()
+
+        let platformStore = PlatformDataStore(storage: storage)
+        try platformStore.saveHardwareModel(Data([0x02]))
+        try platformStore.saveMachineIdentifier(Data([0x03]))
+        try Data([0x04]).write(to: platformStore.auxiliaryStoragePath)
+    }
+
     static func cleanup(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
