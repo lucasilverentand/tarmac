@@ -221,33 +221,13 @@ final class SettingsViewModel {
         hostCapability: HostCapability = .current()
     ) -> [String] {
         refreshStorageHealth()
-        var issues: [String] = hostCapability.issues
-        if configStore.organizations.isEmpty {
-            issues.append("No organizations configured")
-        }
-        if !configStore.hasCompletedStorageSetup {
-            issues.append("Storage location is not configured")
-        } else {
-            for issue in storageHealth.blockingIssues {
-                issues.append("Storage: \(issue.message)")
-            }
-        }
-        let enabled = configStore.organizations.filter(\.isEnabled)
-        if enabled.isEmpty && !configStore.organizations.isEmpty {
-            issues.append("All organizations are disabled")
-        }
-        for org in enabled {
-            if org.appId.isEmpty {
-                issues.append("\(org.name): GitHub App ID is not configured")
-            }
-            if org.scaleSetId == nil {
-                issues.append("\(org.name): Scale set ID is not configured")
-            }
-            if !configStore.hasPrivateKey(for: org) {
-                issues.append("\(org.name): Private key is not imported")
-            }
-        }
-        return issues
+        return RunnerHostReadiness.evaluate(
+            configStore: configStore,
+            storageHealth: storageHealth,
+            hostCapability: hostCapability
+        )
+        .issues
+        .map(\.message)
     }
 }
 

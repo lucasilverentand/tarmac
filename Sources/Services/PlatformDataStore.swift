@@ -40,5 +40,6 @@ struct PlatformDataStore: Sendable {
     var hasExistingPlatform: Bool {
         FileManager.default.fileExists(atPath: hardwareModelPath.path)
             && FileManager.default.fileExists(atPath: machineIdentifierPath.path)
+            && FileManager.default.fileExists(atPath: auxiliaryStoragePath.path)
     }
 }

@@ -49,7 +49,7 @@ struct PlatformDataStoreTests {
         #expect(store.loadMachineIdentifier() == nil)
     }
 
-    @Test("hasExistingPlatform true when both files present")
+    @Test("hasExistingPlatform true when all files present")
     func hasExistingPlatformTrue() throws {
         let tempDir = try TestFactories.makeTempDir()
         defer { TestFactories.cleanup(tempDir) }
@@ -57,6 +57,7 @@ struct PlatformDataStoreTests {
         let store = PlatformDataStore(directory: tempDir)
         try store.saveHardwareModel(Data([0x01]))
         try store.saveMachineIdentifier(Data([0x02]))
+        try Data([0x03]).write(to: store.auxiliaryStoragePath)
 
         #expect(store.hasExistingPlatform)
     }

@@ -41,7 +41,7 @@ struct MenuBarView: View {
                     .foregroundStyle(.green)
                     .font(.caption2)
             }
-        } else {
+        } else if appState.vmStatusViewModel.readyForJobs {
             Label {
                 Text("Idle — waiting for jobs")
                     .font(.subheadline)
@@ -49,6 +49,16 @@ struct MenuBarView: View {
             } icon: {
                 Image(systemName: "circle.fill")
                     .foregroundStyle(.tertiary)
+                    .font(.caption2)
+            }
+        } else {
+            Label {
+                Text(appState.vmStatusViewModel.readinessStatusText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
                     .font(.caption2)
             }
         }

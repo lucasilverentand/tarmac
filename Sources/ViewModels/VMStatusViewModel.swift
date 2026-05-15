@@ -7,10 +7,15 @@ final class VMStatusViewModel {
     var baseImageExists: Bool = false
     var baseImageVerified: Bool = false
     var storageHealth: StorageHealth?
+    var readiness: RunnerHostReadiness = .unchecked
     var installProgress: Double = 0
     var isInstalling: Bool = false
 
     var readyForJobs: Bool {
-        baseImageExists && baseImageVerified && (storageHealth?.isReadyForJobs ?? false)
+        readiness.isReady
+    }
+
+    var readinessStatusText: String {
+        readiness.statusText
     }
 }
