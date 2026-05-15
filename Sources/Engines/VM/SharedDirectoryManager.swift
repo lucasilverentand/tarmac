@@ -17,17 +17,20 @@ struct SharedDirectoryManager: Sendable {
         let jobDir = jobDirectory(for: jobId)
         let fm = FileManager.default
 
+        try validateRunner(at: runnerPath, fileManager: fm)
+        guard !jitConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SharedDirectoryError.emptyJITConfig
+        }
+
+        if fm.fileExists(atPath: jobDir.path) {
+            try fm.removeItem(at: jobDir)
+        }
         try fm.createDirectory(at: jobDir, withIntermediateDirectories: true)
 
-        // Symlink the runner into the job directory
-        let runnerLink = jobDir.appendingPathComponent("runner")
-        if fm.fileExists(atPath: runnerLink.path) {
-            try fm.removeItem(at: runnerLink)
-        }
-        try fm.createSymbolicLink(at: runnerLink, withDestinationURL: runnerPath)
+        let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
+        try fm.copyItem(at: runnerPath, to: runnerDestination)
 
-        // Write the JIT config
-        let jitConfigPath = jobDir.appendingPathComponent("jitconfig")
+        let jitConfigPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
         try jitConfig.write(to: jitConfigPath, atomically: true, encoding: .utf8)
 
         try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
@@ -55,5 +58,40 @@ struct SharedDirectoryManager: Sendable {
 
     var cacheDirectory: URL {
         storage.actionsCacheDirectory
+    }
+
+    private func validateRunner(at runnerPath: URL, fileManager fm: FileManager) throws {
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: runnerPath.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw SharedDirectoryError.missingRunnerPackage(runnerPath)
+        }
+
+        let runScript = runnerPath.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
+        guard fm.fileExists(atPath: runScript.path) else {
+            throw SharedDirectoryError.missingRunnerEntrypoint(runScript)
+        }
+        guard fm.isExecutableFile(atPath: runScript.path) else {
+            throw SharedDirectoryError.runnerEntrypointNotExecutable(runScript)
+        }
+    }
+}
+
+enum SharedDirectoryError: LocalizedError {
+    case missingRunnerPackage(URL)
+    case missingRunnerEntrypoint(URL)
+    case runnerEntrypointNotExecutable(URL)
+    case emptyJITConfig
+
+    var errorDescription: String? {
+        switch self {
+        case .missingRunnerPackage(let url):
+            "Runner package is missing at \(url.path)"
+        case .missingRunnerEntrypoint(let url):
+            "Runner package is missing \(url.lastPathComponent) at \(url.path)"
+        case .runnerEntrypointNotExecutable(let url):
+            "Runner entrypoint is not executable at \(url.path)"
+        case .emptyJITConfig:
+            "JIT configuration is empty"
+        }
     }
 }
