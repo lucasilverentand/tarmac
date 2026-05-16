@@ -342,12 +342,14 @@ struct ModelCodableTests {
                 "swiftpm",
                 "xcode-derived-data",
                 "cocoapods",
+                "pub-cache",
                 "npm",
                 "yarn",
                 "pnpm-store",
                 "bun-install-cache",
             ]
         )
+        #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("PUB_CACHE"))
         #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("NPM_CONFIG_CACHE"))
         #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("YARN_CACHE_FOLDER"))
         #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("PNPM_STORE_PATH"))

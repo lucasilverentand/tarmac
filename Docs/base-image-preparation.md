@@ -53,5 +53,7 @@ Expo CLI and EAS CLI.
 
 For unsigned native iOS, watchOS, tvOS, visionOS, and Swift Package Manager
 workflow examples, see [Apple SDK Validation Workflows](apple-sdk-validation-workflows.md).
+For Flutter-specific readiness and cache behavior, see
+[Flutter iOS Runner Profile](flutter-ios-runner-profile.md).
 For React Native-specific readiness and cache behavior, see
 [React Native iOS Runner Profile](react-native-ios-runner-profile.md).

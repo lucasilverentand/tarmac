@@ -156,6 +156,31 @@ struct RunnerImageProfileTests {
         #expect(profile.advertisedLabels == ["expo-ios"])
     }
 
+    @Test("complete Flutter iOS toolchain advertises Flutter label")
+    func completeFlutterToolchainAdvertisesLabel() {
+        let profile = RunnerImageProfile(
+            name: "Flutter image",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
+            simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
+            capabilities: [.flutterIOS],
+            preparation: BaseImagePreparation(
+                inventory: ToolchainInventory(
+                    xcodeLicenseAccepted: true,
+                    flutterVersion: "3.32",
+                    dartVersion: "3.8",
+                    cocoaPodsVersion: "1.16"
+                )
+            )
+        )
+
+        #expect(profile.isReady)
+        #expect(profile.advertisedLabels == ["flutter-ios"])
+    }
+
     @Test("organization runner labels merge static and profile labels")
     func organizationRunnerLabelsMergeProfileLabels() {
         let profile = RunnerImageProfile(
@@ -199,7 +224,17 @@ struct RunnerImageProfileTests {
         #expect(AppleBuildCapability.tvOS.unsignedValidationWorkflow?.sdk == "appletvsimulator")
         #expect(AppleBuildCapability.visionOS.unsignedValidationWorkflow?.sdk == "xrsimulator")
         #expect(AppleBuildCapability.spm.unsignedValidationWorkflow?.command == "swift test")
-        #expect(AppleBuildCapability.flutterIOS.unsignedValidationWorkflow == nil)
+        #expect(
+            AppleBuildCapability.flutterIOS.unsignedValidationWorkflow
+                == AppleBuildValidationWorkflow(
+                    runnerLabel: "flutter-ios",
+                    sdk: nil,
+                    destination: nil,
+                    command: "flutter build ios --simulator --debug --no-codesign",
+                    buildSettings: [],
+                    requiresSigningCredentials: false
+                )
+        )
         #expect(
             AppleBuildCapability.reactNativeIOS.unsignedValidationWorkflow
                 == AppleBuildValidationWorkflow(
