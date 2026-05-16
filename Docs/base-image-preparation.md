@@ -46,3 +46,6 @@ Flutter iOS profiles need Flutter, Dart, CocoaPods, Xcode, and the iOS SDK.
 React Native iOS profiles need Node, at least one JavaScript package manager,
 CocoaPods, Xcode, and the iOS SDK. Expo iOS profiles additionally need Expo CLI
 and EAS CLI.
+
+For unsigned native iOS, watchOS, tvOS, visionOS, and Swift Package Manager
+workflow examples, see [Apple SDK Validation Workflows](apple-sdk-validation-workflows.md).

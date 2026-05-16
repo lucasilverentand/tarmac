@@ -92,7 +92,9 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
             issues.append(
                 .init(
                     capability: capability,
-                    message: "\(displayName): \(platform.displayName) SDK is missing for \(capability.displayName)."
+                    message:
+                        "\(displayName): \(platform.displayName) SDK is missing for \(capability.displayName). "
+                        + "Run `xcodebuild -showsdks` in the guest and record the matching simulator SDK before advertising `\(capability.label)`."
                 )
             )
         }
@@ -102,7 +104,8 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
                 .init(
                     capability: capability,
                     message:
-                        "\(displayName): \(platform.displayName) simulator runtime is missing for \(capability.displayName)."
+                        "\(displayName): \(platform.displayName) simulator runtime is missing for \(capability.displayName). "
+                        + "Run `xcrun simctl list runtimes` in the guest and install an available runtime before advertising `\(capability.label)`."
                 )
             )
         }
@@ -146,6 +149,15 @@ struct AppleSimulatorRuntime: Codable, Hashable, Sendable {
     var platform: ApplePlatform
     var version: String
     var isAvailable: Bool = true
+}
+
+struct AppleBuildValidationWorkflow: Equatable, Hashable, Sendable {
+    var runnerLabel: String
+    var sdk: String?
+    var destination: String?
+    var command: String
+    var buildSettings: [String]
+    var requiresSigningCredentials: Bool
 }
 
 struct BaseImagePreparation: Codable, Hashable, Sendable {
@@ -354,6 +366,60 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
             [.node, .packageManager, .cocoaPods, .expoCLI, .easCLI]
         case .xcode, .iOS, .watchOS, .tvOS, .visionOS, .spm:
             []
+        }
+    }
+
+    var unsignedValidationWorkflow: AppleBuildValidationWorkflow? {
+        let unsignedSimulatorSettings = ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO"]
+
+        switch self {
+        case .iOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "iphonesimulator",
+                destination: "generic/platform=iOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .watchOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "watchsimulator",
+                destination: "generic/platform=watchOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .tvOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "appletvsimulator",
+                destination: "generic/platform=tvOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .visionOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "xrsimulator",
+                destination: "generic/platform=visionOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .spm:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: nil,
+                destination: nil,
+                command: "swift test",
+                buildSettings: [],
+                requiresSigningCredentials: false
+            )
+        case .xcode, .flutterIOS, .reactNativeIOS, .expoIOS:
+            return nil
         }
     }
 }

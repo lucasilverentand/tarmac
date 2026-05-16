@@ -53,7 +53,9 @@ struct RunnerImageProfileTests {
         #expect(profile.readinessIssues.contains { $0.message.contains("Xcode version") })
         #expect(profile.readinessIssues.contains { $0.message.contains("Xcode license") })
         #expect(profile.readinessIssues.contains { $0.message.contains("iOS SDK") })
+        #expect(profile.readinessIssues.contains { $0.message.contains("xcodebuild -showsdks") })
         #expect(profile.readinessIssues.contains { $0.message.contains("iOS simulator runtime") })
+        #expect(profile.readinessIssues.contains { $0.message.contains("xcrun simctl list runtimes") })
     }
 
     @Test("optional Apple toolchains block specialized profile labels")
@@ -129,5 +131,45 @@ struct RunnerImageProfileTests {
         )
 
         #expect(org.runnerLabels == ["self-hosted", "macOS", "xcode", "spm"])
+    }
+
+    @Test("Apple platform capabilities expose unsigned validation workflows")
+    func applePlatformCapabilitiesExposeUnsignedValidationWorkflows() {
+        #expect(
+            AppleBuildCapability.iOS.unsignedValidationWorkflow
+                == AppleBuildValidationWorkflow(
+                    runnerLabel: "ios",
+                    sdk: "iphonesimulator",
+                    destination: "generic/platform=iOS Simulator",
+                    command: "xcodebuild build",
+                    buildSettings: ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO"],
+                    requiresSigningCredentials: false
+                )
+        )
+        #expect(AppleBuildCapability.watchOS.unsignedValidationWorkflow?.sdk == "watchsimulator")
+        #expect(AppleBuildCapability.tvOS.unsignedValidationWorkflow?.sdk == "appletvsimulator")
+        #expect(AppleBuildCapability.visionOS.unsignedValidationWorkflow?.sdk == "xrsimulator")
+        #expect(AppleBuildCapability.spm.unsignedValidationWorkflow?.command == "swift test")
+        #expect(AppleBuildCapability.flutterIOS.unsignedValidationWorkflow == nil)
+    }
+
+    @Test("unavailable simulator runtimes do not satisfy readiness")
+    func unavailableSimulatorRuntimesDoNotSatisfyReadiness() {
+        let profile = RunnerImageProfile(
+            name: "iOS image",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
+            simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0", isAvailable: false)],
+            capabilities: [.iOS],
+            preparation: BaseImagePreparation(
+                inventory: ToolchainInventory(xcodeLicenseAccepted: true)
+            )
+        )
+
+        #expect(!profile.isReady)
+        #expect(profile.readinessIssues.contains { $0.message.contains("iOS simulator runtime") })
     }
 }
