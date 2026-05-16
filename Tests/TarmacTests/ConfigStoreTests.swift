@@ -34,6 +34,54 @@ struct ConfigStoreTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    @Test("Save and load runner image preparation inventory")
+    func runnerImagePreparationInventoryRoundTrip() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+
+        let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
+        let profile = RunnerImageProfile(
+            name: "Xcode 17",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
+            simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
+            capabilities: [.iOS],
+            preparation: BaseImagePreparation(
+                baseImageIdentifier: "base-image-2026-05-16",
+                steps: [
+                    BaseImagePreparationStep(id: .installXcode, status: .completed),
+                    BaseImagePreparationStep(id: .acceptXcodeLicense, status: .completed),
+                    BaseImagePreparationStep(id: .installSimulatorRuntimes, status: .blocked),
+                ],
+                inventory: ToolchainInventory(
+                    commandLineToolsVersion: "17.0",
+                    xcodeLicenseAccepted: true,
+                    nodeVersion: "24.0",
+                    packageManagers: [PackageManagerInventory(manager: .bun, version: "1.2")]
+                )
+            )
+        )
+        store1.addOrganization(
+            Organization(name: "test-org", appId: "APP1", installationId: 12345, imageProfile: profile)
+        )
+
+        let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
+        let loadedPreparation = store2.organizations.first?.imageProfile?.preparation
+
+        #expect(loadedPreparation?.baseImageIdentifier == "base-image-2026-05-16")
+        #expect(loadedPreparation?.completedStepCount == 2)
+        #expect(loadedPreparation?.inventory.xcodeLicenseAccepted == true)
+        #expect(
+            loadedPreparation?.inventory.packageManagers == [PackageManagerInventory(manager: .bun, version: "1.2")]
+        )
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("Save and load VM config round-trip")
     func vmConfigRoundTrip() {
         let suiteName = "test-config-\(UUID().uuidString)"

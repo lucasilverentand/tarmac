@@ -155,7 +155,21 @@ struct ModelCodableTests {
                 commandLineToolsInstalled: true,
                 sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
                 simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
-                capabilities: [.xcode, .iOS]
+                capabilities: [.xcode, .iOS],
+                preparation: BaseImagePreparation(
+                    baseImageIdentifier: "base-image-2026-05-16",
+                    steps: [
+                        BaseImagePreparationStep(id: .installXcode, status: .completed),
+                        BaseImagePreparationStep(id: .acceptXcodeLicense, status: .completed),
+                    ],
+                    inventory: ToolchainInventory(
+                        commandLineToolsVersion: "17.0",
+                        xcodeLicenseAccepted: true,
+                        nodeVersion: "24.0",
+                        packageManagers: [PackageManagerInventory(manager: .npm, version: "10.8")],
+                        cocoaPodsVersion: "1.16"
+                    )
+                )
             ),
             isEnabled: false,
             filterMode: .include,
@@ -173,6 +187,10 @@ struct ModelCodableTests {
         #expect(decoded.imageProfile?.name == "Xcode 17")
         #expect(decoded.imageProfile?.sdks == [ApplePlatformSDK(platform: .iOS, version: "19.0")])
         #expect(decoded.imageProfile?.capabilities == [.xcode, .iOS])
+        #expect(decoded.imageProfile?.preparation?.baseImageIdentifier == "base-image-2026-05-16")
+        #expect(decoded.imageProfile?.preparation?.completedStepCount == 2)
+        #expect(decoded.imageProfile?.preparation?.inventory.xcodeLicenseAccepted == true)
+        #expect(decoded.imageProfile?.preparation?.inventory.packageManagers.first?.manager == .npm)
         #expect(decoded.isEnabled == false)
         #expect(decoded.filterMode == .include)
         #expect(decoded.filteredRepositories == ["my-repo", "other-repo"])
