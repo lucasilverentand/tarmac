@@ -142,6 +142,117 @@ struct DiagnosticsBundleStoreTests {
         #expect(metadata.contains("runner.log"))
     }
 
+    @Test("failed bundle preserves Apple diagnostics and excludes distributables and signing material")
+    func failedBundleCapturesAppleDiagnostics() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        let store = DiagnosticsBundleStore(
+            storage: storage,
+            retention: DiagnosticsRetentionConfiguration(maxBundleCount: 10, maxAgeDays: 30, maxSizeMB: 64)
+        )
+        let sharedDirectory = storage.jobsDirectory.appendingPathComponent("111", isDirectory: true)
+        let buildLogs = sharedDirectory.appendingPathComponent("build-logs", isDirectory: true)
+        let resultBundle = sharedDirectory.appendingPathComponent("DerivedData/TestRun.xcresult", isDirectory: true)
+        let appBundle = sharedDirectory.appendingPathComponent("Products/App.app", isDirectory: true)
+        let signingDirectory = sharedDirectory.appendingPathComponent("signing", isDirectory: true)
+
+        try FileManager.default.createDirectory(at: buildLogs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: resultBundle, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: appBundle, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: signingDirectory, withIntermediateDirectories: true)
+
+        try "notary failed".write(
+            to: buildLogs.appendingPathComponent("notarization.log"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "xcresult metadata".write(
+            to: resultBundle.appendingPathComponent("Info.plist"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "binary".write(
+            to: appBundle.appendingPathComponent("App"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data([0x01]).write(to: signingDirectory.appendingPathComponent("distribution.p12"))
+        try Data([0x02]).write(to: signingDirectory.appendingPathComponent("app.mobileprovision"))
+
+        let bundle = try store.createBundle(
+            context: JobDiagnosticsContext(jobId: 111),
+            sharedDirectory: sharedDirectory,
+            outcome: .failed(reason: "xcodebuild failed")
+        )
+
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent("apple-artifacts/build-logs/notarization.log").path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent("apple-artifacts/DerivedData/TestRun.xcresult").path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent("apple-artifacts/Products/App.app").path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent("apple-artifacts/signing/distribution.p12").path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent("apple-artifacts/signing/app.mobileprovision").path
+            )
+        )
+
+        let metadata = try String(contentsOf: bundle.url.appendingPathComponent("metadata.json"), encoding: .utf8)
+        #expect(metadata.contains("notarization.log"))
+        #expect(metadata.contains("TestRun.xcresult"))
+        #expect(metadata.contains("left for GitHub Actions artifacts"))
+        #expect(metadata.contains("excluded: signing material"))
+    }
+
+    @Test("Apple diagnostic capture respects artifact budget")
+    func appleDiagnosticCaptureRespectsBudget() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        let store = DiagnosticsBundleStore(
+            storage: storage,
+            retention: DiagnosticsRetentionConfiguration(maxBundleCount: 10, maxAgeDays: 30, maxSizeMB: 1)
+        )
+        let sharedDirectory = storage.jobsDirectory.appendingPathComponent("112", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+        try Data(repeating: 0x61, count: 2 * 1024 * 1024).write(
+            to: sharedDirectory.appendingPathComponent("xcodebuild.log")
+        )
+
+        let bundle = try store.createBundle(
+            context: JobDiagnosticsContext(jobId: 112),
+            sharedDirectory: sharedDirectory,
+            outcome: .failed(reason: "xcodebuild failed")
+        )
+
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent("apple-artifacts/xcodebuild.log").path
+            )
+        )
+
+        let metadata = try String(contentsOf: bundle.url.appendingPathComponent("metadata.json"), encoding: .utf8)
+        #expect(metadata.contains("xcodebuild.log"))
+        #expect(metadata.contains("exceeds diagnostics artifact budget"))
+    }
+
     @Test("retention enforces maximum bundle count")
     func retentionEnforcesCount() throws {
         let root = try TestFactories.makeTempDir()

@@ -13,7 +13,12 @@ struct SharedDirectoryManager: Sendable {
         self.baseDirectory = storage.rootDirectory
     }
 
-    func prepareForJob(jobId: Int64, runnerPath: URL, jitConfig: String) throws -> URL {
+    func prepareForJob(
+        jobId: Int64,
+        runnerPath: URL,
+        jitConfig: String,
+        signingInjection: AppleSigningInjection? = nil
+    ) throws -> URL {
         let jobDir = jobDirectory(for: jobId)
         let fm = FileManager.default
 
@@ -32,6 +37,10 @@ struct SharedDirectoryManager: Sendable {
 
         let jitConfigPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
         try jitConfig.write(to: jitConfigPath, atomically: true, encoding: .utf8)
+
+        if let signingInjection {
+            try writeSigningInjection(signingInjection, in: jobDir, fileManager: fm)
+        }
 
         try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
 
@@ -74,6 +83,132 @@ struct SharedDirectoryManager: Sendable {
             throw SharedDirectoryError.runnerEntrypointNotExecutable(runScript)
         }
     }
+
+    private func writeSigningInjection(
+        _ injection: AppleSigningInjection,
+        in jobDir: URL,
+        fileManager fm: FileManager
+    ) throws {
+        guard !injection.certificateData.isEmpty else {
+            throw SharedDirectoryError.emptySigningCertificate
+        }
+        guard !injection.certificatePassphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SharedDirectoryError.emptySigningPassphrase
+        }
+        guard !injection.provisioningProfileData.isEmpty else {
+            throw SharedDirectoryError.emptyProvisioningProfile
+        }
+
+        let signingDir = jobDir.appendingPathComponent(
+            GuestBootstrapContract.appleSigningDirectoryName,
+            isDirectory: true
+        )
+        try fm.createDirectory(at: signingDir, withIntermediateDirectories: true)
+
+        let certificateURL = signingDir.appendingPathComponent(
+            GuestBootstrapContract.appleSigningCertificateFileName
+        )
+        let profileURL = signingDir.appendingPathComponent(
+            GuestBootstrapContract.appleSigningProvisioningProfileFileName
+        )
+        let environmentURL = signingDir.appendingPathComponent(
+            GuestBootstrapContract.appleSigningEnvironmentFileName
+        )
+        let scriptURL = signingDir.appendingPathComponent(
+            GuestBootstrapContract.appleSigningImportScriptFileName
+        )
+
+        try injection.certificateData.write(to: certificateURL, options: .atomic)
+        try injection.provisioningProfileData.write(to: profileURL, options: .atomic)
+        try signingEnvironment(for: injection).write(to: environmentURL, atomically: true, encoding: .utf8)
+        try signingImportScript().write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        for url in [certificateURL, profileURL, environmentURL] {
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+    }
+
+    private func signingEnvironment(for injection: AppleSigningInjection) -> String {
+        let asset = injection.asset
+        let profileInstallName =
+            asset.provisioningProfileUUID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "\(asset.id.uuidString).mobileprovision"
+            : "\(asset.provisioningProfileUUID).mobileprovision"
+        let signingDir = [
+            GuestBootstrapContract.sharedMountPoint,
+            GuestBootstrapContract.appleSigningDirectoryName,
+        ].joined(separator: "/")
+        let certificatePath = "\(signingDir)/\(GuestBootstrapContract.appleSigningCertificateFileName)"
+        let profilePath =
+            "\(signingDir)/\(GuestBootstrapContract.appleSigningProvisioningProfileFileName)"
+        let profileInstallPath = "/var/root/Library/MobileDevice/Provisioning Profiles/\(profileInstallName)"
+
+        return """
+            export TARMAC_APPLE_SIGNING_DIR=\(shellQuoted(signingDir))
+            export TARMAC_APPLE_CERTIFICATE_PATH=\(shellQuoted(certificatePath))
+            export TARMAC_APPLE_PROVISIONING_PROFILE_PATH=\(shellQuoted(profilePath))
+            export TARMAC_APPLE_CERTIFICATE_PASSPHRASE=\(shellQuoted(injection.certificatePassphrase))
+            export TARMAC_APPLE_KEYCHAIN_PASSWORD=\(shellQuoted(UUID().uuidString))
+            export TARMAC_APPLE_KEYCHAIN_PATH=\(shellQuoted("/tmp/tarmac-apple-signing-\(asset.id.uuidString).keychain-db"))
+            export TARMAC_APPLE_TEAM_ID=\(shellQuoted(asset.teamId))
+            export TARMAC_APPLE_BUNDLE_IDENTIFIER_PATTERN=\(shellQuoted(asset.bundleIdentifierPattern))
+            export TARMAC_APPLE_CERTIFICATE_COMMON_NAME=\(shellQuoted(asset.certificateCommonName))
+            export TARMAC_APPLE_PROVISIONING_PROFILE_UUID=\(shellQuoted(asset.provisioningProfileUUID))
+            export TARMAC_APPLE_PROVISIONING_PROFILE_INSTALL_PATH=\(shellQuoted(profileInstallPath))
+            """
+    }
+
+    private func signingImportScript() -> String {
+        """
+        #!/bin/bash
+        set -u -o pipefail
+
+        : "${TARMAC_APPLE_SIGNING_DIR:=\(GuestBootstrapContract.sharedMountPoint)/\(GuestBootstrapContract.appleSigningDirectoryName)}"
+
+        if [[ -f "${TARMAC_APPLE_SIGNING_DIR}/\(GuestBootstrapContract.appleSigningEnvironmentFileName)" ]]; then
+            # shellcheck disable=SC1090
+            . "${TARMAC_APPLE_SIGNING_DIR}/\(GuestBootstrapContract.appleSigningEnvironmentFileName)"
+        fi
+
+        cleanup_apple_signing() {
+            if [[ -n "${TARMAC_APPLE_PROVISIONING_PROFILE_INSTALL_PATH:-}" ]]; then
+                /bin/rm -f "${TARMAC_APPLE_PROVISIONING_PROFILE_INSTALL_PATH}" >/dev/null 2>&1 || true
+            fi
+            if [[ -n "${TARMAC_APPLE_KEYCHAIN_PATH:-}" ]]; then
+                /usr/bin/security delete-keychain "${TARMAC_APPLE_KEYCHAIN_PATH}" >/dev/null 2>&1 || true
+            fi
+            if [[ -n "${TARMAC_APPLE_SIGNING_DIR:-}" ]]; then
+                /bin/rm -rf "${TARMAC_APPLE_SIGNING_DIR}" >/dev/null 2>&1 || true
+            fi
+        }
+
+        trap cleanup_apple_signing EXIT HUP INT TERM
+
+        /usr/bin/security create-keychain -p "${TARMAC_APPLE_KEYCHAIN_PASSWORD}" "${TARMAC_APPLE_KEYCHAIN_PATH}"
+        /usr/bin/security unlock-keychain -p "${TARMAC_APPLE_KEYCHAIN_PASSWORD}" "${TARMAC_APPLE_KEYCHAIN_PATH}"
+        /usr/bin/security set-keychain-settings -lut 21600 "${TARMAC_APPLE_KEYCHAIN_PATH}"
+        /usr/bin/security import "${TARMAC_APPLE_CERTIFICATE_PATH}" \\
+            -k "${TARMAC_APPLE_KEYCHAIN_PATH}" \\
+            -P "${TARMAC_APPLE_CERTIFICATE_PASSPHRASE}" \\
+            -T /usr/bin/codesign \\
+            -T /usr/bin/security
+        /usr/bin/security set-key-partition-list \\
+            -S apple-tool:,apple:,codesign: \\
+            -s \\
+            -k "${TARMAC_APPLE_KEYCHAIN_PASSWORD}" \\
+            "${TARMAC_APPLE_KEYCHAIN_PATH}"
+
+        /bin/mkdir -p "$(/usr/bin/dirname "${TARMAC_APPLE_PROVISIONING_PROFILE_INSTALL_PATH}")"
+        /bin/cp "${TARMAC_APPLE_PROVISIONING_PROFILE_PATH}" "${TARMAC_APPLE_PROVISIONING_PROFILE_INSTALL_PATH}"
+
+        export TARMAC_APPLE_SIGNING_CONFIGURED=1
+        """
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
 }
 
 enum SharedDirectoryError: LocalizedError {
@@ -81,6 +216,9 @@ enum SharedDirectoryError: LocalizedError {
     case missingRunnerEntrypoint(URL)
     case runnerEntrypointNotExecutable(URL)
     case emptyJITConfig
+    case emptySigningCertificate
+    case emptySigningPassphrase
+    case emptyProvisioningProfile
 
     var errorDescription: String? {
         switch self {
@@ -92,6 +230,12 @@ enum SharedDirectoryError: LocalizedError {
             "Runner entrypoint is not executable at \(url.path)"
         case .emptyJITConfig:
             "JIT configuration is empty"
+        case .emptySigningCertificate:
+            "Apple signing certificate is empty"
+        case .emptySigningPassphrase:
+            "Apple signing certificate passphrase is empty"
+        case .emptyProvisioningProfile:
+            "Apple provisioning profile is empty"
         }
     }
 }
