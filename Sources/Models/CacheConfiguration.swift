@@ -17,6 +17,9 @@ struct CacheConfiguration: Codable, Sendable {
     static let xcodeDerivedDataDirectoryName = "xcode-derived-data"
     static let cocoaPodsDirectoryName = "cocoapods"
     static let npmDirectoryName = "npm"
+    static let yarnDirectoryName = "yarn"
+    static let pnpmDirectoryName = "pnpm-store"
+    static let bunDirectoryName = "bun-install-cache"
 
     static var guestCacheTargets: [GuestCacheTarget] {
         [
@@ -43,6 +46,24 @@ struct CacheConfiguration: Codable, Sendable {
                 directoryName: npmDirectoryName,
                 guestPath: "\(guestMountPoint)/\(npmDirectoryName)",
                 environmentVariable: "NPM_CONFIG_CACHE"
+            ),
+            GuestCacheTarget(
+                name: "Yarn",
+                directoryName: yarnDirectoryName,
+                guestPath: "\(guestMountPoint)/\(yarnDirectoryName)",
+                environmentVariable: "YARN_CACHE_FOLDER"
+            ),
+            GuestCacheTarget(
+                name: "pnpm",
+                directoryName: pnpmDirectoryName,
+                guestPath: "\(guestMountPoint)/\(pnpmDirectoryName)",
+                environmentVariable: "PNPM_STORE_PATH"
+            ),
+            GuestCacheTarget(
+                name: "Bun",
+                directoryName: bunDirectoryName,
+                guestPath: "\(guestMountPoint)/\(bunDirectoryName)",
+                environmentVariable: "BUN_INSTALL_CACHE_DIR"
             ),
         ]
     }

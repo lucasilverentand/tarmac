@@ -245,6 +245,15 @@ struct VMStatusCard: View {
                                         value: item.profile.distribution.installedToolNames.joined(separator: ", ")
                                     )
                                 }
+                                if let preparation = item.profile.preparation {
+                                    DetailRow(
+                                        title: "Prepared",
+                                        value: "\(preparation.completedStepCount)/\(preparation.steps.count) steps"
+                                    )
+                                    if !preparation.baseImageIdentifier.isEmpty {
+                                        DetailRow(title: "Image", value: preparation.baseImageIdentifier)
+                                    }
+                                }
                             } else if let issue = item.profile.readinessIssues.first {
                                 Text(issue.message)
                                     .font(.caption)
