@@ -149,6 +149,30 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
 ```
 
+## Flutter iOS
+
+Use the `flutter-ios` label when the runner profile records Flutter, Dart,
+CocoaPods, Xcode, an iOS SDK, and an available iOS simulator runtime.
+
+```yaml
+name: Flutter iOS
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64, flutter-ios]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Flutter toolchain
+        run: flutter doctor -v
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Build unsigned iOS simulator app
+        run: flutter build ios --simulator --debug --no-codesign
+```
+
 ## React Native iOS
 
 Use the `react-native-ios` label when the runner profile records Node, at least
@@ -198,5 +222,7 @@ then update the profile. Do not add signing material for these validation jobs;
 archive, export, notarization, and signed installable builds should use a
 separate workflow that explicitly injects signing credentials.
 
+For Flutter-specific cache and signing guidance, see
+[Flutter iOS Runner Profile](flutter-ios-runner-profile.md).
 For React Native-specific cache and signing guidance, see
 [React Native iOS Runner Profile](react-native-ios-runner-profile.md).

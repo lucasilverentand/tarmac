@@ -48,6 +48,8 @@ struct GuestBootstrapResourceTests {
         #expect(contents.contains("TARMAC_SWIFTPM_CACHE_PATH"))
         #expect(contents.contains("TARMAC_XCODE_DERIVED_DATA_PATH"))
         #expect(contents.contains("TARMAC_COCOAPODS_CACHE_PATH"))
+        #expect(contents.contains("TARMAC_FLUTTER_PUB_CACHE_PATH"))
+        #expect(contents.contains("PUB_CACHE"))
         #expect(contents.contains("NPM_CONFIG_CACHE"))
         #expect(contents.contains("TARMAC_YARN_CACHE_PATH"))
         #expect(contents.contains("TARMAC_PNPM_STORE_PATH"))

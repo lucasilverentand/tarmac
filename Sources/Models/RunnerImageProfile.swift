@@ -463,6 +463,15 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
                 buildSettings: [],
                 requiresSigningCredentials: false
             )
+        case .flutterIOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: nil,
+                destination: nil,
+                command: "flutter build ios --simulator --debug --no-codesign",
+                buildSettings: [],
+                requiresSigningCredentials: false
+            )
         case .reactNativeIOS:
             return AppleBuildValidationWorkflow(
                 runnerLabel: label,
@@ -472,7 +481,7 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
                 buildSettings: unsignedSimulatorSettings,
                 requiresSigningCredentials: false
             )
-        case .xcode, .flutterIOS, .expoIOS:
+        case .xcode, .expoIOS:
             return nil
         }
     }

@@ -16,6 +16,7 @@ struct CacheConfiguration: Codable, Sendable {
     static let swiftPMDirectoryName = "swiftpm"
     static let xcodeDerivedDataDirectoryName = "xcode-derived-data"
     static let cocoaPodsDirectoryName = "cocoapods"
+    static let pubCacheDirectoryName = "pub-cache"
     static let npmDirectoryName = "npm"
     static let yarnDirectoryName = "yarn"
     static let pnpmDirectoryName = "pnpm-store"
@@ -40,6 +41,12 @@ struct CacheConfiguration: Codable, Sendable {
                 directoryName: cocoaPodsDirectoryName,
                 guestPath: "\(guestMountPoint)/\(cocoaPodsDirectoryName)",
                 environmentVariable: "TARMAC_COCOAPODS_CACHE_PATH"
+            ),
+            GuestCacheTarget(
+                name: "Flutter pub",
+                directoryName: pubCacheDirectoryName,
+                guestPath: "\(guestMountPoint)/\(pubCacheDirectoryName)",
+                environmentVariable: "PUB_CACHE"
             ),
             GuestCacheTarget(
                 name: "npm",
