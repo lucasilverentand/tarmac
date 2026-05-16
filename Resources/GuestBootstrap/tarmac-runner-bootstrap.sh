@@ -14,6 +14,7 @@ RUNNER_LOG=""
 EXIT_CODE_FILE=""
 COMPLETION_MARKER_FILE=""
 CACHE_ENV_FILE=""
+SIGNING_IMPORT_SCRIPT_FILE=""
 
 log() {
     local message="$1"
@@ -101,6 +102,7 @@ prepare_shared_logging() {
     EXIT_CODE_FILE="${SHARED_MOUNT}/exit-code"
     COMPLETION_MARKER_FILE="${SHARED_MOUNT}/completion.json"
     CACHE_ENV_FILE="${SHARED_MOUNT}/cache-env"
+    SIGNING_IMPORT_SCRIPT_FILE="${SHARED_MOUNT}/apple-signing/import-signing-assets.sh"
 
     /usr/bin/touch "${BOOTSTRAP_LOG}" "${RUNNER_LOG}" "${EXIT_CODE_FILE}" 2>> "${LOCAL_LOG}" || {
         log "Cannot write bootstrap files into ${SHARED_MOUNT}"
@@ -165,6 +167,23 @@ EOF
     log "Configured actions cache environment at ${CACHE_ENV_FILE}"
 }
 
+configure_apple_signing() {
+    if [[ ! -x "${SIGNING_IMPORT_SCRIPT_FILE}" ]]; then
+        log "No Apple signing injection requested"
+        return 0
+    fi
+
+    log "Configuring ephemeral Apple signing assets"
+    # shellcheck disable=SC1090
+    if . "${SIGNING_IMPORT_SCRIPT_FILE}" >> "${LOCAL_LOG}" 2>&1; then
+        log "Ephemeral Apple signing assets are available for the runner"
+        return 0
+    fi
+
+    log "Failed to configure ephemeral Apple signing assets"
+    return 1
+}
+
 validate_job_payload() {
     local runner_dir="${SHARED_MOUNT}/runner"
     local run_script="${runner_dir}/run.sh"
@@ -215,6 +234,9 @@ main() {
 
     mount_optional_virtiofs "${CACHE_TAG}" "${CACHE_MOUNT}"
     configure_cache_paths
+    if ! configure_apple_signing; then
+        finish 13
+    fi
 
     if ! validate_job_payload; then
         finish 12

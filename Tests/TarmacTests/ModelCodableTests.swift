@@ -211,6 +211,46 @@ struct ModelCodableTests {
         #expect(org.acceptsRepository(nil))
     }
 
+    // MARK: - AppleSigningAsset
+
+    @Test("AppleSigningAsset round-trip preserves metadata")
+    func appleSigningAssetRoundTrip() throws {
+        let asset = AppleSigningAsset(
+            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
+            displayName: "iOS Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            certificateCommonName: "Apple Distribution",
+            provisioningProfileUUID: "profile-uuid",
+            certificateExpiresAt: Date(timeIntervalSince1970: 4_102_444_800),
+            provisioningProfileExpiresAt: Date(timeIntervalSince1970: 4_102_444_800),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+
+        let data = try JSONEncoder().encode(asset)
+        let decoded = try JSONDecoder().decode(AppleSigningAsset.self, from: data)
+
+        #expect(decoded == asset)
+        #expect(decoded.certificateKeychainKey == "apple-signing-certificate-p12-\(asset.id.uuidString)")
+        #expect(decoded.passphraseKeychainKey == "apple-signing-certificate-passphrase-\(asset.id.uuidString)")
+        #expect(decoded.provisioningProfileKeychainKey == "apple-signing-provisioning-profile-\(asset.id.uuidString)")
+    }
+
+    @Test("AppleSigningAsset bundle matching supports exact, wildcard, and prefix patterns")
+    func appleSigningAssetBundleMatching() {
+        let exact = AppleSigningAsset(displayName: "Exact", teamId: "TEAM", bundleIdentifierPattern: "com.example.app")
+        let wildcard = AppleSigningAsset(displayName: "Wildcard", teamId: "TEAM", bundleIdentifierPattern: "*")
+        let prefix = AppleSigningAsset(displayName: "Prefix", teamId: "TEAM", bundleIdentifierPattern: "com.example.*")
+
+        #expect(exact.matches(bundleIdentifier: "com.example.app"))
+        #expect(!exact.matches(bundleIdentifier: "com.example.other"))
+        #expect(wildcard.matches(bundleIdentifier: "anything"))
+        #expect(prefix.matches(bundleIdentifier: "com.example"))
+        #expect(prefix.matches(bundleIdentifier: "com.example.watchkitapp"))
+        #expect(!prefix.matches(bundleIdentifier: "com.examples.watchkitapp"))
+    }
+
     // MARK: - VMConfiguration
 
     @Test("VMConfiguration round-trip")

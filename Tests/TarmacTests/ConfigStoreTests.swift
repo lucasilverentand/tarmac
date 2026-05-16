@@ -191,4 +191,89 @@ struct ConfigStoreTests {
         store.updateOrganization(org)
         #expect(store.organizations.first?.name == "updated")
     }
+
+    @Test("Apple signing assets store metadata separately from keychain material")
+    func appleSigningAssetStorage() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let asset = AppleSigningAsset(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            certificateCommonName: "Developer ID Application",
+            provisioningProfileUUID: "profile-uuid",
+            certificateExpiresAt: Date(timeIntervalSince1970: 4_102_444_800),
+            provisioningProfileExpiresAt: Date(timeIntervalSince1970: 4_102_444_800)
+        )
+
+        let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
+        let saved = store1.saveAppleSigningAsset(
+            asset,
+            certificateData: Data([0x01, 0x02]),
+            certificatePassphrase: "secret",
+            provisioningProfileData: Data([0x03, 0x04])
+        )
+
+        #expect(saved)
+        #expect(store1.appleSigningAssets.count == 1)
+        #expect(store1.appleSigningAssets[0].certificateKeychainKey.hasPrefix("apple-signing-certificate-p12-"))
+        let githubKey = Organization(name: "org", appId: "1", installationId: 1).privateKeyKeychainKey
+        #expect(store1.appleSigningAssets[0].certificateKeychainKey != githubKey)
+
+        let validation = store1.validateAppleSigningAsset(
+            store1.appleSigningAssets[0],
+            bundleIdentifier: "com.example.app",
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        #expect(validation.isReady)
+
+        let injection = store1.loadAppleSigningInjection(for: store1.appleSigningAssets[0])
+        #expect(injection?.certificateData == Data([0x01, 0x02]))
+        #expect(injection?.certificatePassphrase == "secret")
+        #expect(injection?.provisioningProfileData == Data([0x03, 0x04]))
+
+        let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
+        #expect(store2.appleSigningAssets.count == 1)
+        #expect(store2.loadAppleSigningInjection(for: store2.appleSigningAssets[0]) != nil)
+
+        #expect(store2.deleteAppleSigningAsset(store2.appleSigningAssets[0]))
+        #expect(store2.appleSigningAssets.isEmpty)
+        #expect(keychain.load(key: asset.certificateKeychainKey) == nil)
+        #expect(keychain.load(key: asset.passphraseKeychainKey) == nil)
+        #expect(keychain.load(key: asset.provisioningProfileKeychainKey) == nil)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("Apple signing validation catches missing material, expiry, and bundle mismatch")
+    func appleSigningValidationIssues() {
+        let (store, defaults) = makeStore()
+        let expired = Date(timeIntervalSince1970: 1_000)
+        let asset = AppleSigningAsset(
+            displayName: "",
+            teamId: "",
+            bundleIdentifierPattern: "com.example.app",
+            certificateExpiresAt: expired,
+            provisioningProfileExpiresAt: expired
+        )
+
+        let validation = store.validateAppleSigningAsset(
+            asset,
+            bundleIdentifier: "com.other.app",
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+
+        #expect(validation.issues.contains(.missingDisplayName))
+        #expect(validation.issues.contains(.missingTeamId))
+        #expect(validation.issues.contains(.missingCertificate))
+        #expect(validation.issues.contains(.missingCertificatePassphrase))
+        #expect(validation.issues.contains(.missingProvisioningProfile))
+        #expect(validation.issues.contains(.expiredCertificate))
+        #expect(validation.issues.contains(.expiredProvisioningProfile))
+        #expect(validation.issues.contains(.bundleIdentifierMismatch))
+
+        defaults.removePersistentDomain(forName: "test-config")
+    }
 }
