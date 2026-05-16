@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct StorageManager: Sendable {
@@ -35,6 +36,22 @@ struct StorageManager: Sendable {
     var legacySharedCacheDirectory: URL { rootDirectory.appendingPathComponent("cache", isDirectory: true) }
     var tmpDirectory: URL { rootDirectory.appendingPathComponent("tmp", isDirectory: true) }
     var partialIPSWURL: URL { tmpDirectory.appendingPathComponent("restore.ipsw.download") }
+
+    func storageReport() -> StorageReport {
+        let health = evaluateHealth()
+        return StorageReport(
+            rootPath: rootDirectory.path,
+            totalManagedBytes: (try? totalManagedSizeBytes()) ?? 0,
+            baseImageBytes: (try? itemSize(at: baseImageURL)) ?? 0,
+            platformDataBytes: (try? itemSize(at: platformDirectory)) ?? 0,
+            installerArtifactBytes: health.installerArtifactSizeBytes,
+            transientBytes: transientSizeBytes(),
+            diagnosticsBytes: (try? itemSize(at: diagnosticsDirectory)) ?? 0,
+            cacheBytes: (try? itemSize(at: actionsCacheDirectory)) ?? 0,
+            freeBytes: health.volume?.availableCapacityBytes ?? availableCapacityBytes(),
+            health: health
+        )
+    }
 
     func prepareBaseDirectories() throws {
         let fm = FileManager.default
@@ -117,6 +134,21 @@ struct StorageManager: Sendable {
         }
 
         return result
+    }
+
+    func cleanupJobScratch(olderThan interval: TimeInterval = 24 * 60 * 60) throws {
+        let cutoff = Date().addingTimeInterval(-interval)
+        try removeContents(in: jobsDirectory, olderThan: cutoff)
+        try removeContents(in: tmpDirectory, olderThan: cutoff)
+    }
+
+    func cleanupDebugDisks(olderThan interval: TimeInterval = 24 * 60 * 60) throws {
+        let cutoff = Date().addingTimeInterval(-interval)
+        try removeContents(in: disksDirectory, olderThan: cutoff)
+    }
+
+    func cleanupInstallerArtifacts() throws {
+        try cleanupInstallerArtifactsAfterVerification(keepRestoreImage: false)
     }
 
     @discardableResult
@@ -283,6 +315,10 @@ struct StorageManager: Sendable {
 
         return urls
     }
+
+    private func transientSizeBytes() -> Int64 {
+        (try? sizeOfItems([jobsDirectory, disksDirectory, tmpDirectory])) ?? 0
+    }
 }
 
 struct StorageMigrationResult: Sendable {
@@ -294,6 +330,19 @@ struct StorageMigrationResult: Sendable {
 struct InstallerArtifactCleanupResult: Equatable, Sendable {
     var removedItems: Int = 0
     var removedBytes: Int64 = 0
+}
+
+struct StorageReport: Sendable {
+    var rootPath: String
+    var totalManagedBytes: Int64
+    var baseImageBytes: Int64
+    var platformDataBytes: Int64
+    var installerArtifactBytes: Int64
+    var transientBytes: Int64
+    var diagnosticsBytes: Int64
+    var cacheBytes: Int64
+    var freeBytes: Int64?
+    var health: StorageHealth
 }
 
 struct BaseImageVerificationMarker: Codable, Sendable {

@@ -194,4 +194,96 @@ struct StorageManagerTests {
         #expect(!FileManager.default.fileExists(atPath: storage.partialIPSWURL.path))
         #expect(health.installerArtifactSizeBytes > 0)
     }
+
+    @Test("storageReport breaks down managed storage")
+    func storageReportBreaksDownManagedStorage() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data(repeating: 0x01, count: 1024).write(to: storage.baseImageURL)
+        try Data(repeating: 0x02, count: 512).write(to: storage.restoreIPSWURL)
+        try Data(repeating: 0x03, count: 256).write(
+            to: storage.actionsCacheDirectory.appendingPathComponent("cache-entry")
+        )
+        try Data(repeating: 0x04, count: 128).write(to: storage.disksDirectory.appendingPathComponent("job.img"))
+        try Data(repeating: 0x05, count: 64).write(
+            to: storage.diagnosticsDirectory.appendingPathComponent("job.log")
+        )
+
+        let report = storage.storageReport()
+
+        #expect(report.baseImageBytes > 0)
+        #expect(report.installerArtifactBytes > 0)
+        #expect(report.cacheBytes > 0)
+        #expect(report.transientBytes > 0)
+        #expect(report.diagnosticsBytes > 0)
+        #expect(report.totalManagedBytes >= report.baseImageBytes)
+        #expect(report.health.isReachable)
+    }
+
+    @Test("storageReport blocks missing storage root")
+    func storageReportBlocksMissingRoot() throws {
+        let root = try TestFactories.makeTempDir().appendingPathComponent("missing-external-root")
+        defer { TestFactories.cleanup(root.deletingLastPathComponent()) }
+
+        let report = StorageManager(rootDirectory: root).storageReport()
+
+        #expect(!report.health.isReachable)
+        #expect(report.health.status == .blocked)
+    }
+
+    @Test("cleanupInstallerArtifacts removes only installer files")
+    func cleanupInstallerArtifacts() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.platformDirectory.appendingPathComponent("hardware-model"))
+        try Data([0x03]).write(to: storage.restoreIPSWURL)
+        try Data([0x04]).write(to: storage.ipswResumeDataURL)
+        try Data([0x05]).write(to: storage.partialIPSWURL)
+
+        try storage.cleanupInstallerArtifacts()
+
+        #expect(FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: storage.platformDirectory.appendingPathComponent("hardware-model").path
+            )
+        )
+        #expect(!FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.ipswResumeDataURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.partialIPSWURL.path))
+    }
+
+    @Test("cleanupDebugDisks leaves base image and platform data")
+    func cleanupDebugDisksLeavesBaseArtifacts() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        let staleDisk = storage.disksDirectory.appendingPathComponent("stale.img")
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.platformDirectory.appendingPathComponent("auxiliaryStorage.bin"))
+        try Data([0x03]).write(to: staleDisk)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-48 * 60 * 60)],
+            ofItemAtPath: staleDisk.path
+        )
+
+        try storage.cleanupDebugDisks()
+
+        #expect(FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: storage.platformDirectory.appendingPathComponent("auxiliaryStorage.bin").path
+            )
+        )
+        #expect(!FileManager.default.fileExists(atPath: staleDisk.path))
+    }
 }

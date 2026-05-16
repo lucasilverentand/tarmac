@@ -207,4 +207,38 @@ struct SettingsViewModelTests {
             FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
         )
     }
+
+    @Test("storageReport reflects configured storage root")
+    func storageReportReflectsConfiguredRoot() throws {
+        let (vm, store, _) = makeVM()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data(repeating: 0x01, count: 256).write(to: storage.restoreIPSWURL)
+        store.storageRootPath = root.path
+
+        let report = vm.storageReport
+
+        #expect(report.rootPath == root.path)
+        #expect(report.installerArtifactBytes > 0)
+        #expect(vm.storageUsageDescription.contains("used"))
+    }
+
+    @Test("cleanupInstallerArtifacts uses configured storage root")
+    func cleanupInstallerArtifactsUsesConfiguredRoot() throws {
+        let (vm, store, _) = makeVM()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.restoreIPSWURL)
+        store.storageRootPath = root.path
+
+        vm.cleanupInstallerArtifacts()
+
+        #expect(!FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+    }
 }
