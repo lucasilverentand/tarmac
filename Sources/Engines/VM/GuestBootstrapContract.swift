@@ -12,4 +12,5 @@ enum GuestBootstrapContract {
     static let runnerLogFileName = "runner.log"
     static let exitCodeFileName = "exit-code"
     static let completionMarkerFileName = "completion.json"
+    static let cacheEnvironmentFileName = "cache-env"
 }

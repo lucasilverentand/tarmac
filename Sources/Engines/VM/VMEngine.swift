@@ -211,7 +211,7 @@ final class VMEngine: VMManagerProtocol {
                 try cacheManager.enforceMaxSize(maxSizeGB: cacheConfig.maxSizeGB)
                 cacheDirectoryURL = cacheManager.baseDirectory
                 appendHostLifecycle(
-                    "Prepared actions cache at \(cacheManager.baseDirectory.path)",
+                    "Prepared actions cache at \(cacheManager.baseDirectory.path); guest tag \(CacheConfiguration.guestMountTag) mounts at \(CacheConfiguration.guestMountPoint)",
                     jobId: jobId,
                     sharedDirectory: sharedDirectory
                 )

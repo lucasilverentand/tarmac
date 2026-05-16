@@ -13,6 +13,7 @@ BOOTSTRAP_LOG=""
 RUNNER_LOG=""
 EXIT_CODE_FILE=""
 COMPLETION_MARKER_FILE=""
+CACHE_ENV_FILE=""
 
 log() {
     local message="$1"
@@ -99,6 +100,7 @@ prepare_shared_logging() {
     RUNNER_LOG="${SHARED_MOUNT}/runner.log"
     EXIT_CODE_FILE="${SHARED_MOUNT}/exit-code"
     COMPLETION_MARKER_FILE="${SHARED_MOUNT}/completion.json"
+    CACHE_ENV_FILE="${SHARED_MOUNT}/cache-env"
 
     /usr/bin/touch "${BOOTSTRAP_LOG}" "${RUNNER_LOG}" "${EXIT_CODE_FILE}" 2>> "${LOCAL_LOG}" || {
         log "Cannot write bootstrap files into ${SHARED_MOUNT}"
@@ -108,6 +110,59 @@ prepare_shared_logging() {
     if [[ -f "${LOCAL_LOG}" ]]; then
         /bin/cat "${LOCAL_LOG}" >> "${BOOTSTRAP_LOG}"
     fi
+}
+
+ensure_cache_link() {
+    local cache_path="$1"
+    local guest_path="$2"
+
+    /bin/mkdir -p "${cache_path}"
+    /bin/mkdir -p "$(/usr/bin/dirname "${guest_path}")"
+
+    if [[ -L "${guest_path}" ]]; then
+        local existing
+        existing="$(/bin/readlink "${guest_path}")"
+        if [[ "${existing}" == "${cache_path}" ]]; then
+            log "Cache link already configured: ${guest_path} -> ${cache_path}"
+            return 0
+        fi
+        /bin/rm "${guest_path}"
+    elif [[ -e "${guest_path}" ]]; then
+        log "Cache path ${guest_path} already exists and is not a symlink; leaving it untouched"
+        return 0
+    fi
+
+    /bin/ln -s "${cache_path}" "${guest_path}"
+    log "Configured cache link: ${guest_path} -> ${cache_path}"
+}
+
+configure_cache_paths() {
+    if ! is_mounted "${CACHE_MOUNT}"; then
+        log "Actions cache mount is unavailable; runner will use clone-local tool caches"
+        return 0
+    fi
+
+    local swiftpm_cache="${CACHE_MOUNT}/swiftpm"
+    local derived_data_cache="${CACHE_MOUNT}/xcode-derived-data"
+    local cocoapods_cache="${CACHE_MOUNT}/cocoapods"
+    local npm_cache="${CACHE_MOUNT}/npm"
+
+    /bin/mkdir -p "${swiftpm_cache}" "${derived_data_cache}" "${cocoapods_cache}" "${npm_cache}"
+    ensure_cache_link "${swiftpm_cache}" "/var/root/Library/Caches/org.swift.swiftpm"
+    ensure_cache_link "${derived_data_cache}" "/var/root/Library/Developer/Xcode/DerivedData"
+    ensure_cache_link "${cocoapods_cache}" "/var/root/.cocoapods"
+    ensure_cache_link "${npm_cache}" "/var/root/.npm"
+
+    /bin/cat > "${CACHE_ENV_FILE}" <<EOF
+export TARMAC_ACTIONS_CACHE="${CACHE_MOUNT}"
+export TARMAC_SWIFTPM_CACHE_PATH="${swiftpm_cache}"
+export TARMAC_XCODE_DERIVED_DATA_PATH="${derived_data_cache}"
+export TARMAC_COCOAPODS_CACHE_PATH="${cocoapods_cache}"
+export TARMAC_NPM_CACHE_PATH="${npm_cache}"
+export NPM_CONFIG_CACHE="${npm_cache}"
+EOF
+
+    log "Configured actions cache environment at ${CACHE_ENV_FILE}"
 }
 
 validate_job_payload() {
@@ -138,6 +193,10 @@ run_runner() {
     log "Starting GitHub Actions runner"
     (
         cd "${runner_dir}" || exit 127
+        if [[ -f "${CACHE_ENV_FILE}" ]]; then
+            # shellcheck disable=SC1090
+            . "${CACHE_ENV_FILE}"
+        fi
         ./run.sh --jitconfig "${jit_config}"
     ) >> "${RUNNER_LOG}" 2>&1
     return "$?"
@@ -155,6 +214,7 @@ main() {
     fi
 
     mount_optional_virtiofs "${CACHE_TAG}" "${CACHE_MOUNT}"
+    configure_cache_paths
 
     if ! validate_job_payload; then
         finish 12

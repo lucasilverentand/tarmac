@@ -264,6 +264,15 @@ struct ModelCodableTests {
     func cacheConfigStaticProperties() {
         #expect(CacheConfiguration.guestMountTag == "actions-cache")
         #expect(CacheConfiguration.guestMountPoint == "/Volumes/actions-cache")
+        #expect(
+            CacheConfiguration.guestCacheTargets.map(\.directoryName) == [
+                "swiftpm",
+                "xcode-derived-data",
+                "cocoapods",
+                "npm",
+            ]
+        )
+        #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("NPM_CONFIG_CACHE"))
     }
 
     @Test("DiagnosticsRetentionConfiguration round-trip")

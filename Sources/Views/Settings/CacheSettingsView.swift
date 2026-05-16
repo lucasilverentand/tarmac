@@ -34,6 +34,12 @@ struct CacheSettingsView: View {
                             .truncationMode(.middle)
                     }
 
+                    LabeledContent("Cache size") {
+                        Text(viewModel.cacheSizeDescription)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
                     LabeledContent("Storage folder") {
                         Text(viewModel.storageRootPath)
                             .font(.caption)
@@ -53,6 +59,16 @@ struct CacheSettingsView: View {
                     )
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                }
+
+                Section("Guest Paths") {
+                    ForEach(CacheConfiguration.guestCacheTargets, id: \.directoryName) { target in
+                        LabeledContent(target.name) {
+                            Text(target.guestPath)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 Section {
