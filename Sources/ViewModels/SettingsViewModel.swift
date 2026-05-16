@@ -152,6 +152,11 @@ final class SettingsViewModel {
         StorageManager(rootPath: configStore.storageRootPath).actionsCacheDirectory.path
     }
 
+    var cacheSizeDescription: String {
+        let manager = CacheManager(storage: StorageManager(rootPath: configStore.storageRootPath))
+        return formatBytes((try? manager.currentSizeBytes()) ?? 0)
+    }
+
     var storageUsageDescription: String {
         let report = storageReport
         let used = report.totalManagedBytes
@@ -203,6 +208,8 @@ final class SettingsViewModel {
         let manager = CacheManager(storage: StorageManager(rootPath: configStore.storageRootPath))
         do {
             try manager.clear()
+            try manager.prepare()
+            refreshStorageHealth()
             Log.cache.info("Cache cleared from settings")
         } catch {
             Log.cache.error("Failed to clear cache: \(error.localizedDescription)")

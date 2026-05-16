@@ -241,4 +241,30 @@ struct SettingsViewModelTests {
 
         #expect(!FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
     }
+
+    @Test("cache size description reflects cache contents and clear resets targets")
+    func cacheSizeDescriptionAndClear() throws {
+        let (vm, _, _) = makeVM()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        try vm.configureStorage(at: root)
+        let manager = CacheManager(storage: StorageManager(rootDirectory: root))
+        try manager.prepare()
+        try Data(repeating: 0xAB, count: 4096)
+            .write(to: manager.baseDirectory.appendingPathComponent("artifact.bin"))
+
+        #expect(vm.cacheSizeDescription != "Zero KB")
+
+        vm.clearCache()
+
+        #expect(vm.cacheSizeDescription == "Zero KB")
+        for target in CacheConfiguration.guestCacheTargets {
+            #expect(
+                FileManager.default.fileExists(
+                    atPath: manager.baseDirectory.appendingPathComponent(target.directoryName).path
+                )
+            )
+        }
+    }
 }

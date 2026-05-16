@@ -25,6 +25,13 @@ struct CacheManagerTests {
         try manager.prepare()
 
         #expect(FileManager.default.fileExists(atPath: manager.baseDirectory.path))
+        for target in CacheConfiguration.guestCacheTargets {
+            #expect(
+                FileManager.default.fileExists(
+                    atPath: manager.baseDirectory.appendingPathComponent(target.directoryName).path
+                )
+            )
+        }
     }
 
     @Test("clear removes all cache contents")
