@@ -41,6 +41,18 @@ struct GuestBootstrapResourceTests {
         #expect(contents.contains("SHARED_MOUNT=\"\(GuestBootstrapContract.sharedMountPoint)\""))
         #expect(contents.contains("CACHE_TAG=\"\(CacheConfiguration.guestMountTag)\""))
         #expect(contents.contains("CACHE_MOUNT=\"\(CacheConfiguration.guestMountPoint)\""))
+        #expect(
+            contents.contains("CACHE_ENV_FILE=\"${SHARED_MOUNT}/\(GuestBootstrapContract.cacheEnvironmentFileName)\"")
+        )
+        #expect(contents.contains("TARMAC_ACTIONS_CACHE"))
+        #expect(contents.contains("TARMAC_SWIFTPM_CACHE_PATH"))
+        #expect(contents.contains("TARMAC_XCODE_DERIVED_DATA_PATH"))
+        #expect(contents.contains("TARMAC_COCOAPODS_CACHE_PATH"))
+        #expect(contents.contains("NPM_CONFIG_CACHE"))
+        for target in CacheConfiguration.guestCacheTargets {
+            #expect(contents.contains(target.directoryName))
+            #expect(contents.contains(target.environmentVariable))
+        }
         #expect(contents.contains("/sbin/mount_virtiofs"))
         #expect(contents.contains("./run.sh --jitconfig"))
         #expect(contents.contains("bootstrap.log"))

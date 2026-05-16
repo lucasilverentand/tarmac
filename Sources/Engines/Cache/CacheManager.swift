@@ -15,6 +15,12 @@ struct CacheManager: Sendable {
     func prepare() throws {
         let fm = FileManager.default
         try fm.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        for target in CacheConfiguration.guestCacheTargets {
+            try fm.createDirectory(
+                at: baseDirectory.appendingPathComponent(target.directoryName, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
         Log.cache.info("Actions cache directory ready at \(baseDirectory.path)")
     }
 
@@ -116,6 +122,10 @@ struct CacheManager: Sendable {
     }
 
     private func itemSize(at url: URL) throws -> Int64 {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return 0
+        }
         let values = try url.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
         return Int64(values.totalFileAllocatedSize ?? 0)
     }

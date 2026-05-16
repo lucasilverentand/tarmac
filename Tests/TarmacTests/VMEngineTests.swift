@@ -321,6 +321,60 @@ struct VMEngineTests {
         // The config is used during bootVM when cache is enabled
     }
 
+    @Test("cache persists between clean job clones while job scratch is removed")
+    @MainActor
+    func cachePersistsBetweenCleanJobClones() async throws {
+        let (engine, mock, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerPath = tempDir.appendingPathComponent("runner")
+        try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
+
+        var firstJob = TestFactories.makeJob(id: 401)
+        firstJob.jitConfig = "jit-config-1"
+
+        try await engine.provisionAndRun(
+            job: firstJob,
+            config: VMConfiguration(),
+            runnerPath: runnerPath
+        )
+
+        let storage = StorageManager(rootPath: tempDir.path)
+        let cacheDir = try #require(mock.lastBootCacheDir)
+        #expect(cacheDir.path == storage.actionsCacheDirectory.path)
+
+        let swiftPMCache = cacheDir.appendingPathComponent(CacheConfiguration.swiftPMDirectoryName)
+        try FileManager.default.createDirectory(at: swiftPMCache, withIntermediateDirectories: true)
+        let cachedArtifact = swiftPMCache.appendingPathComponent("module-cache.bin")
+        try "warm cache".write(to: cachedArtifact, atomically: true, encoding: .utf8)
+
+        let firstSharedDir = storage.jobsDirectory.appendingPathComponent("401", isDirectory: true)
+        let firstDisk = try #require(engine.currentInstance?.diskImagePath)
+
+        try await engine.teardown(outcome: .succeeded)
+
+        #expect(FileManager.default.fileExists(atPath: cachedArtifact.path))
+        #expect(!FileManager.default.fileExists(atPath: firstSharedDir.path))
+        #expect(!FileManager.default.fileExists(atPath: firstDisk.path))
+
+        var secondJob = TestFactories.makeJob(id: 402)
+        secondJob.jitConfig = "jit-config-2"
+
+        try await engine.provisionAndRun(
+            job: secondJob,
+            config: VMConfiguration(),
+            runnerPath: runnerPath
+        )
+
+        #expect(mock.lastBootCacheDir?.path == cacheDir.path)
+        #expect(FileManager.default.fileExists(atPath: cachedArtifact.path))
+        #expect(!FileManager.default.fileExists(atPath: firstSharedDir.path))
+        #expect(FileManager.default.fileExists(atPath: storage.jobsDirectory.appendingPathComponent("402").path))
+
+        try await engine.teardown(outcome: .succeeded)
+    }
+
     // MARK: - Boot Verification
 
     @Test("verifyBaseImage writes marker and transitions to verified")
