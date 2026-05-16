@@ -481,7 +481,16 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
                 buildSettings: unsignedSimulatorSettings,
                 requiresSigningCredentials: false
             )
-        case .xcode, .expoIOS:
+        case .expoIOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: nil,
+                destination: nil,
+                command: "eas build --platform ios --local --profile simulator --non-interactive",
+                buildSettings: ["EXPO_NO_TELEMETRY=1"],
+                requiresSigningCredentials: false
+            )
+        case .xcode:
             return nil
         }
     }

@@ -57,3 +57,5 @@ For Flutter-specific readiness and cache behavior, see
 [Flutter iOS Runner Profile](flutter-ios-runner-profile.md).
 For React Native-specific readiness and cache behavior, see
 [React Native iOS Runner Profile](react-native-ios-runner-profile.md).
+For Expo/EAS-specific readiness and local build behavior, see
+[Expo/EAS iOS Runner Profile](expo-eas-ios-runner-profile.md).

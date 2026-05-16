@@ -207,6 +207,36 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
 ```
 
+## Expo/EAS iOS
+
+Use the `expo-ios` label when the runner profile records the React Native iOS
+toolchain plus Expo CLI and EAS CLI.
+
+```yaml
+name: Expo EAS iOS
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64, expo-ios]
+    env:
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Run local simulator build
+        run: eas build --platform ios --local --profile simulator --non-interactive
+```
+
+The matching `eas.json` profile should set `ios.simulator` to `true` for this
+unsigned smoke path. Signed device, archive, and submission workflows should use
+job-scoped Apple signing credentials instead of credentials baked into the base
+image.
+
 ## Readiness Failures
 
 Tarmac blocks a platform label until the profile has the matching SDK and an
@@ -226,3 +256,5 @@ For Flutter-specific cache and signing guidance, see
 [Flutter iOS Runner Profile](flutter-ios-runner-profile.md).
 For React Native-specific cache and signing guidance, see
 [React Native iOS Runner Profile](react-native-ios-runner-profile.md).
+For Expo/EAS-specific local build guidance, see
+[Expo/EAS iOS Runner Profile](expo-eas-ios-runner-profile.md).
