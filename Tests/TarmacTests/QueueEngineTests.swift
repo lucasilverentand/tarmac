@@ -68,6 +68,24 @@ struct QueueEngineTests {
         )
     }
 
+    private func makeLease(jobId: Int64, orgName: String = "test-org") -> RunnerLease {
+        let job = RunnerJob(
+            id: jobId,
+            organizationName: orgName,
+            runnerRequestId: jobId + 1,
+            status: .running,
+            workflowName: "CI",
+            repositoryName: "repo",
+            queuedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        return RunnerLease(
+            job: job,
+            runnerName: "ephemeral-\(jobId)",
+            labels: ["self-hosted", "macOS", "ARM64"],
+            createdAt: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+    }
+
     @Test("handleMessages with JobAvailable enqueues job in store")
     func handleJobAvailableEnqueues() async throws {
         let (engine, store, _) = try makeEngine()
@@ -286,5 +304,66 @@ struct QueueEngineTests {
         let jobs = await store.jobs
         #expect(jobs.count == 1)
         #expect(jobs.first?.id == 55)
+    }
+
+    @Test("reconcileInterruptedLeases removes cleaned stale leases")
+    func reconcileInterruptedLeasesRemovesCleanedLeases() async throws {
+        let org = TestFactories.makeOrg()
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_queue","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "actions/runners?per_page=100&page=1",
+            json: """
+                {
+                  "total_count": 1,
+                  "runners": [
+                    {
+                      "id": 777,
+                      "name": "ephemeral-77",
+                      "status": "offline",
+                      "busy": false,
+                      "labels": [
+                        {"name": "self-hosted"},
+                        {"name": "macOS"},
+                        {"name": "ARM64"}
+                      ]
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+
+        let keychain = PreviewKeychainService()
+        let keyData = try TestFactories.makeTestKeyData()
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: keyData)
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let github = GitHubEngine(client: client, keychainService: keychain, cacheDirectory: tempDir)
+
+        let suiteName = "test-lease-reconcile-\(UUID().uuidString)"
+        nonisolated(unsafe) let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let leaseStore = RunnerLeaseStore(defaults: defaults)
+        await leaseStore.upsert(makeLease(jobId: 77))
+
+        let engine = QueueEngine(
+            github: github,
+            client: client,
+            jobStore: TestFactories.makeJobStore(),
+            dispatcher: JobDispatcher(),
+            runnerLeaseStore: leaseStore
+        )
+
+        let report = await engine.reconcileInterruptedLeases(orgs: [org])
+
+        #expect(report.removedRunners.map(\.runnerId) == [777])
+        #expect(await leaseStore.activeLeases.isEmpty)
     }
 }
