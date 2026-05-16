@@ -107,6 +107,34 @@ struct RunnerImageProfileTests {
         #expect(profile.readinessIssues.contains { $0.message.contains("CocoaPods") })
     }
 
+    @Test("Expo iOS readiness requires React Native tools and Expo CLIs")
+    func expoReadinessRequiresReactNativeToolsAndExpoCLIs() {
+        let profile = RunnerImageProfile(
+            name: "Expo image",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
+            simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
+            capabilities: [.expoIOS],
+            preparation: BaseImagePreparation(
+                inventory: ToolchainInventory(
+                    xcodeLicenseAccepted: true,
+                    nodeVersion: "24.0",
+                    rubyVersion: "3.3",
+                    cocoaPodsVersion: "1.16",
+                    expoCLIVersion: "0.24"
+                )
+            )
+        )
+
+        #expect(!profile.isReady)
+        #expect(profile.advertisedLabels.isEmpty)
+        #expect(profile.readinessIssues.contains { $0.message.contains("JavaScript package manager") })
+        #expect(profile.readinessIssues.contains { $0.message.contains("EAS CLI") })
+    }
+
     @Test("toolchain inventory decodes older records without Ruby")
     func toolchainInventoryDecodesOlderRecordsWithoutRuby() throws {
         let data = Data(
@@ -126,6 +154,8 @@ struct RunnerImageProfileTests {
         #expect(inventory.nodeVersion == "24.0")
         #expect(inventory.packageManagers == [PackageManagerInventory(manager: .npm, version: "10.8")])
         #expect(inventory.rubyVersion == "")
+        #expect(inventory.expoCLIVersion == "")
+        #expect(inventory.easCLIVersion == "")
     }
 
     @Test("complete optional Apple toolchain advertises specialized profile label")
@@ -243,6 +273,17 @@ struct RunnerImageProfileTests {
                     destination: "generic/platform=iOS Simulator",
                     command: "bundle exec pod install && xcodebuild build",
                     buildSettings: ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO"],
+                    requiresSigningCredentials: false
+                )
+        )
+        #expect(
+            AppleBuildCapability.expoIOS.unsignedValidationWorkflow
+                == AppleBuildValidationWorkflow(
+                    runnerLabel: "expo-ios",
+                    sdk: nil,
+                    destination: nil,
+                    command: "eas build --platform ios --local --profile simulator --non-interactive",
+                    buildSettings: ["EXPO_NO_TELEMETRY=1"],
                     requiresSigningCredentials: false
                 )
         )
