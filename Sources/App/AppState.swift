@@ -175,7 +175,9 @@ final class AppState {
             let runnerPath = try await githubEngine.ensureRunner(for: org)
             let runnerName = "ephemeral-\(job.id)"
             let jitConfig = try await githubEngine.generateJITConfig(for: org, runnerName: runnerName)
-            await queueEngine.jobStore.updateRunnerLease(jobId: job.id, runnerName: runnerName)
+            var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.labels)
+            await queueEngine.runnerLeaseStore.upsert(lease)
+            await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
 
             // Update job with JIT config in the store
             await queueEngine.jobStore.updateJob(id: job.id, status: .running)
@@ -184,12 +186,26 @@ final class AppState {
             var runnableJob = job
             runnableJob.jitConfig = jitConfig
             runnableJob.runnerName = runnerName
+            runnableJob.runnerLease = lease
             runnableJob.status = .running
             let instance = try await vmEngine.provisionAndRun(
                 job: runnableJob,
                 config: configStore.vmConfiguration,
                 runnerPath: runnerPath
             )
+            let sharedDirectoryPath = StorageManager(rootPath: configStore.storageRootPath)
+                .jobsDirectory
+                .appendingPathComponent("\(job.id)", isDirectory: true)
+                .path
+            if let startedLease = await queueEngine.runnerLeaseStore.recordVMStarted(
+                jobId: job.id,
+                vmInstanceId: instance.id,
+                diskImagePath: instance.diskImagePath.path,
+                sharedDirectoryPath: sharedDirectoryPath
+            ) {
+                lease = startedLease
+                await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
+            }
             await queueEngine.jobStore.updateVMInstance(jobId: job.id, vmInstanceId: instance.id)
 
             queueViewModel.updateJobStatus(id: job.id, status: .running)
@@ -198,9 +214,18 @@ final class AppState {
             Log.app.info("Job \(job.id) is running in VM")
         } catch {
             Log.app.error("Failed to provision job \(job.id): \(error.localizedDescription)")
+            if let failedLease = await queueEngine.runnerLeaseStore.recordCleanupState(jobId: job.id, state: .failed) {
+                await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: failedLease)
+            }
             await queueEngine.jobStore.updateJob(id: job.id, status: .failed)
             queueViewModel.updateJobStatus(id: job.id, status: .failed)
             if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
+                if let lease = await queueEngine.runnerLeaseStore.recordDiagnosticsBundle(
+                    jobId: job.id,
+                    path: diagnosticsPath
+                ) {
+                    await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
+                }
                 await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
             }
 
@@ -208,6 +233,12 @@ final class AppState {
             if vmEngine.currentInstance != nil {
                 try? await vmEngine.teardown(outcome: .failed(reason: error.localizedDescription))
                 if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
+                    if let lease = await queueEngine.runnerLeaseStore.recordDiagnosticsBundle(
+                        jobId: job.id,
+                        path: diagnosticsPath
+                    ) {
+                        await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
+                    }
                     await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
                 }
                 vmStatusViewModel.activeVM = nil
@@ -234,7 +265,14 @@ final class AppState {
             Log.app.error("Failed to teardown completed job \(job.id): \(error.localizedDescription)")
         }
 
-        if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
+        let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path
+        if let completedLease = await queueEngine.runnerLeaseStore.completeAndRemove(
+            jobId: job.id,
+            diagnosticsPath: diagnosticsPath
+        ) {
+            await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: completedLease)
+        }
+        if let diagnosticsPath {
             await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
         }
         vmStatusViewModel.activeVM = nil

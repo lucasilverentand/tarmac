@@ -3,6 +3,7 @@ import Foundation
 actor QueueEngine {
     let jobStore: JobStore
     let dispatcher: JobDispatcher
+    let runnerLeaseStore: RunnerLeaseStore
     var onJobReady: (@Sendable (RunnerJob) async -> Void)?
     var onJobCompleted: (@Sendable (RunnerJob, JobResult) async -> Void)?
 
@@ -16,12 +17,14 @@ actor QueueEngine {
         github: GitHubEngine,
         client: any GitHubClientProtocol,
         jobStore: JobStore = JobStore(),
-        dispatcher: JobDispatcher = JobDispatcher()
+        dispatcher: JobDispatcher = JobDispatcher(),
+        runnerLeaseStore: RunnerLeaseStore = RunnerLeaseStore()
     ) {
         self.github = github
         self.client = client
         self.jobStore = jobStore
         self.dispatcher = dispatcher
+        self.runnerLeaseStore = runnerLeaseStore
     }
 
     func setOnJobReady(_ callback: @escaping @Sendable (RunnerJob) async -> Void) {
