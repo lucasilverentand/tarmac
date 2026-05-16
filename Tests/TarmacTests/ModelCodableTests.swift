@@ -9,6 +9,29 @@ struct ModelCodableTests {
 
     @Test("RunnerJob round-trip with all fields")
     func runnerJobFullRoundTrip() throws {
+        let queuedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        var lease = RunnerLease(
+            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            job: RunnerJob(
+                id: 42,
+                organizationName: "my-org",
+                runnerRequestId: 1001,
+                status: .running,
+                workflowName: "CI Pipeline",
+                repositoryName: "my-repo",
+                queuedAt: queuedAt
+            ),
+            runnerName: "ephemeral-42",
+            labels: ["self-hosted", "macOS"],
+            createdAt: queuedAt
+        )
+        lease.recordVMStarted(
+            vmInstanceId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            diskImagePath: "/tmp/tarmac/disks/job-42.img",
+            sharedDirectoryPath: "/tmp/tarmac/jobs/42",
+            now: Date(timeIntervalSince1970: 1_700_000_030)
+        )
+
         let job = RunnerJob(
             id: 42,
             organizationName: "my-org",
@@ -18,9 +41,10 @@ struct ModelCodableTests {
             repositoryName: "my-repo",
             jitConfig: "encoded-config-data",
             runnerName: "ephemeral-42",
+            runnerLease: lease,
             vmInstanceId: UUID(uuidString: "11111111-1111-1111-1111-111111111111"),
             diagnosticsBundlePath: "/tmp/diagnostics/job-42",
-            queuedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            queuedAt: queuedAt,
             startedAt: Date(timeIntervalSince1970: 1_700_000_060),
             completedAt: nil,
             failureReason: nil
@@ -37,6 +61,9 @@ struct ModelCodableTests {
         #expect(decoded.repositoryName == "my-repo")
         #expect(decoded.jitConfig == "encoded-config-data")
         #expect(decoded.runnerName == "ephemeral-42")
+        #expect(decoded.runnerLease?.runnerName == "ephemeral-42")
+        #expect(decoded.runnerLease?.runner.labels == ["self-hosted", "macOS"])
+        #expect(decoded.runnerLease?.executionAttempt?.sharedDirectoryPath == "/tmp/tarmac/jobs/42")
         #expect(decoded.vmInstanceId?.uuidString == "11111111-1111-1111-1111-111111111111")
         #expect(decoded.diagnosticsBundlePath == "/tmp/diagnostics/job-42")
         #expect(decoded.startedAt != nil)
@@ -62,10 +89,52 @@ struct ModelCodableTests {
         #expect(decoded.jitConfig == nil)
         #expect(decoded.runnerRequestId == nil)
         #expect(decoded.runnerName == nil)
+        #expect(decoded.runnerLease == nil)
         #expect(decoded.vmInstanceId == nil)
         #expect(decoded.diagnosticsBundlePath == nil)
         #expect(decoded.startedAt == nil)
         #expect(decoded.completedAt == nil)
+    }
+
+    @Test("RunnerLease round-trip preserves cleanup context")
+    func runnerLeaseRoundTrip() throws {
+        var job = RunnerJob(
+            id: 88,
+            organizationName: "org",
+            runnerRequestId: 44,
+            status: .running,
+            workflowName: "Release",
+            repositoryName: "repo",
+            queuedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        job.runnerName = "ephemeral-88"
+        var lease = RunnerLease(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            job: job,
+            runnerName: "ephemeral-88",
+            labels: ["self-hosted", "macOS"],
+            createdAt: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+        lease.recordVMStarted(
+            vmInstanceId: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            diskImagePath: "/tmp/disks/88.img",
+            sharedDirectoryPath: "/tmp/jobs/88",
+            now: Date(timeIntervalSince1970: 1_700_000_020)
+        )
+        lease.recordDiagnosticsBundle(path: "/tmp/diagnostics/88", now: Date(timeIntervalSince1970: 1_700_000_030))
+        lease.recordCleanupState(.completed, now: Date(timeIntervalSince1970: 1_700_000_040))
+
+        let data = try JSONEncoder().encode(lease)
+        let decoded = try JSONDecoder().decode(RunnerLease.self, from: data)
+
+        #expect(decoded.id == lease.id)
+        #expect(decoded.request.jobId == 88)
+        #expect(decoded.runner.provider == .github)
+        #expect(decoded.runner.runnerName == "ephemeral-88")
+        #expect(decoded.executionAttempt?.vmInstanceId.uuidString == "44444444-4444-4444-4444-444444444444")
+        #expect(decoded.executionAttempt?.completedAt != nil)
+        #expect(decoded.logBundle?.path == "/tmp/diagnostics/88")
+        #expect(decoded.cleanupState == .completed)
     }
 
     // MARK: - Organization

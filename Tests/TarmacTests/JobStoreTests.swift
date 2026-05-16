@@ -22,6 +22,15 @@ struct JobStoreTests {
         )
     }
 
+    private func makeLease(job: RunnerJob, runnerName: String = "ephemeral-1") -> RunnerLease {
+        RunnerLease(
+            job: job,
+            runnerName: runnerName,
+            labels: ["self-hosted", "macOS"],
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
     @Test("addJob increases count")
     func addJobIncreasesCount() async {
         let store = makeStore()
@@ -110,6 +119,26 @@ struct JobStoreTests {
         let store2 = JobStore(defaults: defaults)
         let job = await store2.job(byId: 200)
         #expect(job?.diagnosticsBundlePath == "/tmp/tarmac/diagnostics/job-200")
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("Runner lease persists in completed job history")
+    func runnerLeasePersistsInCompletedHistory() async {
+        let suiteName = "test-jobstore-\(UUID().uuidString)"
+        nonisolated(unsafe) let defaults = UserDefaults(suiteName: suiteName)!
+
+        let store1 = JobStore(defaults: defaults)
+        let job = makeJob(id: 300, status: .pending)
+        await store1.addJob(job)
+        await store1.updateRunnerLease(jobId: 300, lease: makeLease(job: job, runnerName: "ephemeral-300"))
+        await store1.updateJob(id: 300, status: .completed)
+
+        let store2 = JobStore(defaults: defaults)
+        let persisted = await store2.job(byId: 300)
+        #expect(persisted?.runnerName == "ephemeral-300")
+        #expect(persisted?.runnerLease?.runnerName == "ephemeral-300")
+        #expect(persisted?.runnerLease?.runner.labels == ["self-hosted", "macOS"])
 
         defaults.removePersistentDomain(forName: suiteName)
     }

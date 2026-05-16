@@ -9,6 +9,7 @@ struct RunnerJob: Identifiable, Codable, Sendable {
     var repositoryName: String? = nil
     var jitConfig: String? = nil
     var runnerName: String? = nil
+    var runnerLease: RunnerLease? = nil
     var vmInstanceId: UUID? = nil
     var diagnosticsBundlePath: String? = nil
     let queuedAt: Date

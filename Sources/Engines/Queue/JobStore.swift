@@ -67,13 +67,14 @@ actor JobStore {
         Log.queue.info("Job \(id) → \(status.rawValue)")
     }
 
-    func updateRunnerLease(jobId: Int64, runnerName: String) {
+    func updateRunnerLease(jobId: Int64, lease: RunnerLease) {
         guard let index = jobs.firstIndex(where: { $0.id == jobId }) else {
             Log.queue.warning("Job \(jobId) not found for runner lease update")
             return
         }
 
-        jobs[index].runnerName = runnerName
+        jobs[index].runnerName = lease.runnerName
+        jobs[index].runnerLease = lease
         persistIfTerminal(jobs[index])
     }
 
@@ -94,6 +95,10 @@ actor JobStore {
         }
 
         jobs[index].diagnosticsBundlePath = path
+        if var lease = jobs[index].runnerLease {
+            lease.recordDiagnosticsBundle(path: path)
+            jobs[index].runnerLease = lease
+        }
         persistIfTerminal(jobs[index])
     }
 

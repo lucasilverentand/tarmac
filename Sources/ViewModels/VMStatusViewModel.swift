@@ -8,6 +8,7 @@ final class VMStatusViewModel {
     var baseImageVerified: Bool = false
     var storageHealth: StorageHealth?
     var readiness: RunnerHostReadiness = .unchecked
+    var runnerReconciliation: RunnerReconciliationReport = .empty
     var installProgress: Double = 0
     var isInstalling: Bool = false
 

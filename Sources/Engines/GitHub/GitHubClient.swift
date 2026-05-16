@@ -43,7 +43,8 @@ struct GitHubClient: GitHubClientProtocol {
         headers: [String: String],
         timeoutInterval: TimeInterval = 30
     ) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        let url = URL(string: path, relativeTo: baseURL)?.absoluteURL ?? baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = timeoutInterval
 

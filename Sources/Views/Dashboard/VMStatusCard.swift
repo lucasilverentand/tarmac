@@ -31,6 +31,7 @@ struct VMStatusCard: View {
             baseImageSection
             storageSection
             activeVMSection
+            runnerCleanupSection
             configurationSection
             Spacer(minLength: 0)
         }
@@ -184,6 +185,30 @@ struct VMStatusCard: View {
                 }
             } else {
                 StatusLine(title: "No VM running", systemImage: "stop.circle", tint: .secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var runnerCleanupSection: some View {
+        let report = vmStatusViewModel.runnerReconciliation
+        if report.hasActivity {
+            InspectorSection(title: "Runner Cleanup") {
+                VStack(alignment: .leading, spacing: 10) {
+                    StatusLine(
+                        title: report.statusText,
+                        systemImage: report.failures.isEmpty
+                            ? "checkmark.circle.fill"
+                            : "exclamationmark.triangle.fill",
+                        tint: report.failures.isEmpty ? .green : .orange
+                    )
+                    DetailRow(title: "Scanned", value: "\(report.scannedRunnerCount)")
+                    DetailRow(title: "Matched", value: "\(report.matchedLeaseCount)")
+                    DetailRow(title: "Removed", value: "\(report.removedRunners.count)")
+                    if !report.failures.isEmpty {
+                        DetailRow(title: "Failures", value: "\(report.failures.count)")
+                    }
+                }
             }
         }
     }
