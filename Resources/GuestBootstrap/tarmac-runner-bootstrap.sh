@@ -146,12 +146,18 @@ configure_cache_paths() {
     local derived_data_cache="${CACHE_MOUNT}/xcode-derived-data"
     local cocoapods_cache="${CACHE_MOUNT}/cocoapods"
     local npm_cache="${CACHE_MOUNT}/npm"
+    local yarn_cache="${CACHE_MOUNT}/yarn"
+    local pnpm_store="${CACHE_MOUNT}/pnpm-store"
+    local bun_install_cache="${CACHE_MOUNT}/bun-install-cache"
 
-    /bin/mkdir -p "${swiftpm_cache}" "${derived_data_cache}" "${cocoapods_cache}" "${npm_cache}"
+    /bin/mkdir -p "${swiftpm_cache}" "${derived_data_cache}" "${cocoapods_cache}" "${npm_cache}" "${yarn_cache}" "${pnpm_store}" "${bun_install_cache}"
     ensure_cache_link "${swiftpm_cache}" "/var/root/Library/Caches/org.swift.swiftpm"
     ensure_cache_link "${derived_data_cache}" "/var/root/Library/Developer/Xcode/DerivedData"
     ensure_cache_link "${cocoapods_cache}" "/var/root/.cocoapods"
     ensure_cache_link "${npm_cache}" "/var/root/.npm"
+    ensure_cache_link "${yarn_cache}" "/var/root/.cache/yarn"
+    ensure_cache_link "${pnpm_store}" "/var/root/.pnpm-store"
+    ensure_cache_link "${bun_install_cache}" "/var/root/.bun/install/cache"
 
     /bin/cat > "${CACHE_ENV_FILE}" <<EOF
 export TARMAC_ACTIONS_CACHE="${CACHE_MOUNT}"
@@ -160,6 +166,12 @@ export TARMAC_XCODE_DERIVED_DATA_PATH="${derived_data_cache}"
 export TARMAC_COCOAPODS_CACHE_PATH="${cocoapods_cache}"
 export TARMAC_NPM_CACHE_PATH="${npm_cache}"
 export NPM_CONFIG_CACHE="${npm_cache}"
+export TARMAC_YARN_CACHE_PATH="${yarn_cache}"
+export YARN_CACHE_FOLDER="${yarn_cache}"
+export TARMAC_PNPM_STORE_PATH="${pnpm_store}"
+export PNPM_STORE_PATH="${pnpm_store}"
+export TARMAC_BUN_INSTALL_CACHE_PATH="${bun_install_cache}"
+export BUN_INSTALL_CACHE_DIR="${bun_install_cache}"
 EOF
 
     log "Configured actions cache environment at ${CACHE_ENV_FILE}"

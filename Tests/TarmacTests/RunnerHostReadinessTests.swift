@@ -97,4 +97,30 @@ struct RunnerHostReadinessTests {
         #expect(readiness.issues.contains { $0.category == .github && $0.message.contains("Scale set") })
         #expect(readiness.issues.contains { $0.category == .github && $0.message.contains("Private key") })
     }
+
+    @Test("image profile readiness failures block startup")
+    func imageProfileFailuresBlockStartup() throws {
+        let (store, _) = TestFactories.makeConfigStore()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        try store.configureStorage(at: root)
+        try TestFactories.prepareReadyRunnerHostStorage(for: store)
+        let profile = RunnerImageProfile(
+            name: "Incomplete image",
+            commandLineToolsInstalled: true,
+            capabilities: [.iOS]
+        )
+        let org = TestFactories.makeOrg(name: "example", imageProfile: profile)
+        store.addOrganization(org)
+        _ = store.savePrivateKey(Data([0x01]), for: org)
+
+        let readiness = RunnerHostReadiness.evaluate(
+            configStore: store,
+            hostCapability: Self.supportedHost
+        )
+
+        #expect(!readiness.isReady)
+        #expect(readiness.issues.contains { $0.category == .github && $0.message.contains("iOS SDK") })
+    }
 }

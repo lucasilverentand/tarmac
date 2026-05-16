@@ -47,7 +47,7 @@ actor GitHubEngine {
             token: token,
             org: org.name,
             name: runnerName,
-            labels: org.labels
+            labels: org.runnerLabels
         )
     }
 

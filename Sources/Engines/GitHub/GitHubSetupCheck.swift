@@ -39,6 +39,7 @@ enum GitHubSetupCheckIssueKind: String, Sendable {
     case missingAppId
     case missingPrivateKey
     case missingScaleSet
+    case imageProfileNotReady
     case labelMismatch
     case installationUnavailable
     case permissionMissing
@@ -51,7 +52,7 @@ extension GitHubEngine {
     func runSetupCheck(for org: Organization) async -> GitHubSetupCheckResult {
         var issues: [GitHubSetupCheckIssue] = []
         var runnerGroups: [String] = []
-        let labels = Self.normalizedLabels(org.labels)
+        let labels = Self.normalizedLabels(org.runnerLabels)
 
         if org.appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(
@@ -86,6 +87,15 @@ extension GitHubEngine {
                 )
             )
         }
+
+        issues.append(
+            contentsOf: org.imageProfileReadinessIssues.map { issue in
+                .init(
+                    kind: .imageProfileNotReady,
+                    message: "\(org.name): \(issue.message)"
+                )
+            }
+        )
 
         guard let keyData = keychainService.load(key: org.privateKeyKeychainKey) else {
             issues.append(

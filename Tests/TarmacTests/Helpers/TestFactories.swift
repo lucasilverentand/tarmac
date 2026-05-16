@@ -32,6 +32,7 @@ enum TestFactories {
         installationId: Int = 12345,
         scaleSetId: Int? = 42,
         labels: [String] = ["self-hosted", "macOS", "ARM64"],
+        imageProfile: RunnerImageProfile? = nil,
         isEnabled: Bool = true,
         filterMode: RepositoryFilterMode = .all,
         filteredRepositories: [String] = []
@@ -42,6 +43,7 @@ enum TestFactories {
             installationId: installationId,
             scaleSetId: scaleSetId,
             labels: labels,
+            imageProfile: imageProfile,
             isEnabled: isEnabled,
             filterMode: filterMode,
             filteredRepositories: filteredRepositories

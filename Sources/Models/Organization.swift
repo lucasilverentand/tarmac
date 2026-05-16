@@ -7,6 +7,7 @@ struct Organization: Identifiable, Codable, Hashable, Sendable {
     var installationId: Int
     var scaleSetId: Int?
     var labels: [String] = ["self-hosted", "macOS", "ARM64"]
+    var imageProfile: RunnerImageProfile?
     var isEnabled: Bool = true
     var filterMode: RepositoryFilterMode = .all
     var filteredRepositories: [String] = []
@@ -32,6 +33,14 @@ enum RepositoryFilterMode: String, Codable, Sendable, CaseIterable {
 }
 
 extension Organization {
+    var runnerLabels: [String] {
+        Self.normalizedLabels(labels + (imageProfile?.advertisedLabels ?? []))
+    }
+
+    var imageProfileReadinessIssues: [RunnerImageProfileReadinessIssue] {
+        imageProfile?.readinessIssues ?? []
+    }
+
     func acceptsRepository(_ repoName: String?) -> Bool {
         guard let repoName else { return true }
         switch filterMode {
@@ -45,5 +54,18 @@ extension Organization {
                 repoName.localizedCaseInsensitiveCompare($0) == .orderedSame
             })
         }
+    }
+
+    private static func normalizedLabels(_ labels: [String]) -> [String] {
+        var seen: Set<String> = []
+        var normalized: [String] = []
+        for label in labels {
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            normalized.append(trimmed)
+        }
+        return normalized
     }
 }

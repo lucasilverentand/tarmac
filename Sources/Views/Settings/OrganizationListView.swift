@@ -139,9 +139,9 @@ private struct OrganizationRow: View {
                 .foregroundStyle(.secondary)
 
                 // Labels
-                if !org.labels.isEmpty {
+                if !org.runnerLabels.isEmpty {
                     HStack(spacing: 4) {
-                        ForEach(org.labels, id: \.self) { label in
+                        ForEach(org.runnerLabels, id: \.self) { label in
                             Text(label)
                                 .font(.caption2)
                                 .padding(.horizontal, 5)
@@ -151,6 +151,7 @@ private struct OrganizationRow: View {
                     }
                 }
 
+                imageProfileStatus
                 setupCheckStatus
             }
 
@@ -185,6 +186,28 @@ private struct OrganizationRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var imageProfileStatus: some View {
+        if let profile = org.imageProfile {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(
+                    profile.isReady
+                        ? "\(profile.name) profile ready"
+                        : profile.readinessIssues.first?.message ?? "Profile unavailable",
+                    systemImage: profile.isReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(profile.isReady ? .green : .orange)
+
+                if !profile.advertisedLabels.isEmpty {
+                    Text("Profile labels: \(profile.advertisedLabels.joined(separator: ", "))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -238,6 +261,27 @@ private struct OrganizationFormSheet: View {
     @State private var installationId: String = ""
     @State private var scaleSetId: String = ""
     @State private var labels: String = "self-hosted, macOS, ARM64"
+    @State private var imageProfileEnabled = false
+    @State private var imageProfileName = "Apple Platform"
+    @State private var baseMacOSVersion = ""
+    @State private var xcodeVersion = ""
+    @State private var developerDirectory = ""
+    @State private var commandLineToolsInstalled = false
+    @State private var baseImageIdentifier = ""
+    @State private var preparationSteps = BaseImagePreparationStep.defaultSteps
+    @State private var commandLineToolsVersion = ""
+    @State private var xcodeLicenseAccepted = false
+    @State private var flutterVersion = ""
+    @State private var dartVersion = ""
+    @State private var nodeVersion = ""
+    @State private var packageManagerList = ""
+    @State private var rubyVersion = ""
+    @State private var cocoaPodsVersion = ""
+    @State private var expoCLIVersion = ""
+    @State private var easCLIVersion = ""
+    @State private var selectedCapabilities: Set<AppleBuildCapability> = []
+    @State private var sdkList = ""
+    @State private var simulatorRuntimeList = ""
     @State private var filterMode: RepositoryFilterMode = .all
     @State private var repositoryList: String = ""
     @State private var hasKey: Bool = false
@@ -309,6 +353,71 @@ private struct OrganizationFormSheet: View {
                             .help("e.g. self-hosted, macOS, ARM64")
                     }
 
+                    Section("Runner Image Profile") {
+                        Toggle("Advertise Apple build capabilities", isOn: $imageProfileEnabled)
+
+                        if imageProfileEnabled {
+                            TextField("Profile name", text: $imageProfileName)
+                            TextField("Base macOS version", text: $baseMacOSVersion)
+                                .help("The macOS version installed in the base image")
+                            TextField("Xcode version", text: $xcodeVersion)
+                            TextField("Developer directory", text: $developerDirectory)
+                                .help("Usually /Applications/Xcode.app/Contents/Developer")
+                            Toggle("Command-line tools installed", isOn: $commandLineToolsInstalled)
+
+                            preparationSection
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Capabilities")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], spacing: 8)
+                                {
+                                    ForEach(AppleBuildCapability.allCases) { capability in
+                                        Toggle(
+                                            capability.displayName,
+                                            isOn: Binding(
+                                                get: { selectedCapabilities.contains(capability) },
+                                                set: { enabled in
+                                                    if enabled {
+                                                        selectedCapabilities.insert(capability)
+                                                    } else {
+                                                        selectedCapabilities.remove(capability)
+                                                    }
+                                                }
+                                            )
+                                        )
+                                        .toggleStyle(.checkbox)
+                                    }
+                                }
+                            }
+
+                            TextField("SDKs", text: $sdkList)
+                                .help("Use platform=version entries, e.g. macos=15.0, ios=18.0")
+                            TextField("Simulator runtimes", text: $simulatorRuntimeList)
+                                .help("Use platform=version entries, e.g. ios=18.0, watchos=11.0")
+
+                            let previewProfile = currentImageProfile
+                            if !previewProfile.readinessIssues.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(previewProfile.readinessIssues, id: \.message) { issue in
+                                        Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                            } else if !previewProfile.advertisedLabels.isEmpty {
+                                Label(
+                                    "Adds \(previewProfile.advertisedLabels.joined(separator: ", ")) labels",
+                                    systemImage: "tag"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
                     Section("Repository Filter") {
                         Picker("Filter mode", selection: $filterMode) {
                             ForEach(RepositoryFilterMode.allCases, id: \.self) { mode in
@@ -372,6 +481,30 @@ private struct OrganizationFormSheet: View {
                 installationId = "\(org.installationId)"
                 scaleSetId = org.scaleSetId.map(String.init) ?? ""
                 labels = org.labels.joined(separator: ", ")
+                if let profile = org.imageProfile {
+                    imageProfileEnabled = true
+                    imageProfileName = profile.name
+                    baseMacOSVersion = profile.baseMacOSVersion
+                    xcodeVersion = profile.xcodeVersion
+                    developerDirectory = profile.developerDirectory
+                    commandLineToolsInstalled = profile.commandLineToolsInstalled
+                    let preparation = profile.preparation ?? BaseImagePreparation()
+                    baseImageIdentifier = preparation.baseImageIdentifier
+                    preparationSteps = preparation.steps
+                    commandLineToolsVersion = preparation.inventory.commandLineToolsVersion
+                    xcodeLicenseAccepted = preparation.inventory.xcodeLicenseAccepted
+                    flutterVersion = preparation.inventory.flutterVersion
+                    dartVersion = preparation.inventory.dartVersion
+                    nodeVersion = preparation.inventory.nodeVersion
+                    packageManagerList = formatPackageManagers(preparation.inventory.packageManagers)
+                    rubyVersion = preparation.inventory.rubyVersion
+                    cocoaPodsVersion = preparation.inventory.cocoaPodsVersion
+                    expoCLIVersion = preparation.inventory.expoCLIVersion
+                    easCLIVersion = preparation.inventory.easCLIVersion
+                    selectedCapabilities = Set(profile.capabilities)
+                    sdkList = formatSDKs(profile.sdks)
+                    simulatorRuntimeList = formatSimulatorRuntimes(profile.simulatorRuntimes)
+                }
                 filterMode = org.filterMode
                 repositoryList = org.filteredRepositories.joined(separator: "\n")
                 hasKey = viewModel.hasPrivateKey(for: org)
@@ -426,6 +559,7 @@ private struct OrganizationFormSheet: View {
         let parsedLabels = labels.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         guard let parsedInstallationId = Int(installationId) else { return }
         let parsedScaleSetId = Int(scaleSetId)
+        let parsedImageProfile = imageProfileEnabled ? currentImageProfile : nil
         let parsedRepos =
             repositoryList
             .split(separator: "\n")
@@ -438,6 +572,7 @@ private struct OrganizationFormSheet: View {
             org.installationId = parsedInstallationId
             org.scaleSetId = parsedScaleSetId
             org.labels = parsedLabels
+            org.imageProfile = parsedImageProfile
             org.filterMode = filterMode
             org.filteredRepositories = parsedRepos
             viewModel.updateOrganization(org)
@@ -449,6 +584,7 @@ private struct OrganizationFormSheet: View {
                 labels: parsedLabels
             )
             org.scaleSetId = parsedScaleSetId
+            org.imageProfile = parsedImageProfile
             org.filterMode = filterMode
             org.filteredRepositories = parsedRepos
             viewModel.addOrganization(org)
@@ -459,5 +595,152 @@ private struct OrganizationFormSheet: View {
             }
         }
         dismiss()
+    }
+
+    private var currentImageProfile: RunnerImageProfile {
+        RunnerImageProfile(
+            name: imageProfileName,
+            baseMacOSVersion: baseMacOSVersion,
+            xcodeVersion: xcodeVersion,
+            developerDirectory: developerDirectory,
+            commandLineToolsInstalled: commandLineToolsInstalled,
+            sdks: parsePlatformVersions(sdkList).map {
+                ApplePlatformSDK(platform: $0.platform, version: $0.version)
+            },
+            simulatorRuntimes: parsePlatformVersions(simulatorRuntimeList).map {
+                AppleSimulatorRuntime(platform: $0.platform, version: $0.version)
+            },
+            capabilities: AppleBuildCapability.allCases.filter { selectedCapabilities.contains($0) },
+            preparation: currentPreparation
+        )
+    }
+
+    private var currentPreparation: BaseImagePreparation {
+        BaseImagePreparation(
+            baseImageIdentifier: baseImageIdentifier,
+            steps: preparationSteps,
+            inventory: ToolchainInventory(
+                capturedAt: Date(),
+                commandLineToolsVersion: commandLineToolsVersion,
+                xcodeLicenseAccepted: xcodeLicenseAccepted,
+                flutterVersion: flutterVersion,
+                dartVersion: dartVersion,
+                nodeVersion: nodeVersion,
+                packageManagers: parsePackageManagers(packageManagerList),
+                rubyVersion: rubyVersion,
+                cocoaPodsVersion: cocoaPodsVersion,
+                expoCLIVersion: expoCLIVersion,
+                easCLIVersion: easCLIVersion
+            ),
+            updatedAt: Date()
+        )
+    }
+
+    @ViewBuilder
+    private var preparationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Base image preparation")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Base image identifier", text: $baseImageIdentifier)
+                .help("Use a stable image build, disk, or snapshot identifier so stale inventory is visible.")
+            TextField("Command-line tools version", text: $commandLineToolsVersion)
+            Toggle("Xcode license accepted", isOn: $xcodeLicenseAccepted)
+
+            ForEach(preparationSteps.indices, id: \.self) { index in
+                HStack {
+                    Text(preparationSteps[index].id.displayName)
+                    Spacer()
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { preparationSteps[index].status },
+                            set: { status in
+                                preparationSteps[index].status = status
+                                preparationSteps[index].updatedAt = Date()
+                            }
+                        )
+                    ) {
+                        ForEach(PreparationStepStatus.allCases) { status in
+                            Text(status.displayName).tag(status)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                }
+            }
+
+            DisclosureGroup("Optional tool inventory") {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Flutter version", text: $flutterVersion)
+                    TextField("Dart version", text: $dartVersion)
+                    TextField("Node version", text: $nodeVersion)
+                    TextField("Package managers", text: $packageManagerList)
+                        .help("Use manager=version entries, e.g. npm=10.8, yarn=1.22")
+                    TextField("Ruby version", text: $rubyVersion)
+                    TextField("CocoaPods version", text: $cocoaPodsVersion)
+                    TextField("Expo CLI version", text: $expoCLIVersion)
+                    TextField("EAS CLI version", text: $easCLIVersion)
+                }
+                .padding(.top, 6)
+            }
+        }
+    }
+
+    private func parsePlatformVersions(_ text: String) -> [(platform: ApplePlatform, version: String)] {
+        text
+            .split { $0 == "," || $0 == "\n" }
+            .compactMap { rawEntry in
+                let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !entry.isEmpty else { return nil }
+
+                let parts = entry.split(separator: "=", maxSplits: 1).map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                guard parts.count == 2,
+                    let platform = ApplePlatform(rawValue: parts[0].lowercased()),
+                    !parts[1].isEmpty
+                else {
+                    return nil
+                }
+                return (platform, parts[1])
+            }
+    }
+
+    private func formatSDKs(_ sdks: [ApplePlatformSDK]) -> String {
+        sdks.map { "\($0.platform.rawValue)=\($0.version)" }.joined(separator: ", ")
+    }
+
+    private func formatSimulatorRuntimes(_ runtimes: [AppleSimulatorRuntime]) -> String {
+        runtimes
+            .filter(\.isAvailable)
+            .map { "\($0.platform.rawValue)=\($0.version)" }
+            .joined(separator: ", ")
+    }
+
+    private func parsePackageManagers(_ text: String) -> [PackageManagerInventory] {
+        text
+            .split { $0 == "," || $0 == "\n" }
+            .compactMap { rawEntry in
+                let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !entry.isEmpty else { return nil }
+                let parts = entry.split(separator: "=", maxSplits: 1).map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                guard parts.count == 2,
+                    let manager = JavaScriptPackageManager(rawValue: parts[0].lowercased()),
+                    !parts[1].isEmpty
+                else {
+                    return nil
+                }
+                return PackageManagerInventory(manager: manager, version: parts[1])
+            }
+    }
+
+    private func formatPackageManagers(_ packageManagers: [PackageManagerInventory]) -> String {
+        packageManagers
+            .map { "\($0.manager.rawValue)=\($0.version)" }
+            .joined(separator: ", ")
     }
 }

@@ -32,6 +32,7 @@ struct VMStatusCard: View {
             storageSection
             activeVMSection
             runnerCleanupSection
+            imageProfileSection
             configurationSection
             Spacer(minLength: 0)
         }
@@ -207,6 +208,52 @@ struct VMStatusCard: View {
                     DetailRow(title: "Removed", value: "\(report.removedRunners.count)")
                     if !report.failures.isEmpty {
                         DetailRow(title: "Failures", value: "\(report.failures.count)")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var imageProfileSection: some View {
+        let profiles = configStore.organizations.compactMap {
+            org -> (organization: Organization, profile: RunnerImageProfile)? in
+            guard let profile = org.imageProfile else { return nil }
+            return (org, profile)
+        }
+
+        if !profiles.isEmpty {
+            InspectorSection(title: "Runner Profiles") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(profiles, id: \.organization.id) { item in
+                        VStack(alignment: .leading, spacing: 5) {
+                            StatusLine(
+                                title: "\(item.organization.name): \(item.profile.name)",
+                                systemImage: item.profile.isReady
+                                    ? "checkmark.seal.fill" : "exclamationmark.triangle.fill",
+                                tint: item.profile.isReady ? .green : .orange
+                            )
+
+                            if item.profile.isReady {
+                                DetailRow(
+                                    title: "Labels",
+                                    value: item.profile.advertisedLabels.joined(separator: ", ")
+                                )
+                                if let preparation = item.profile.preparation {
+                                    DetailRow(
+                                        title: "Prepared",
+                                        value: "\(preparation.completedStepCount)/\(preparation.steps.count) steps"
+                                    )
+                                    if !preparation.baseImageIdentifier.isEmpty {
+                                        DetailRow(title: "Image", value: preparation.baseImageIdentifier)
+                                    }
+                                }
+                            } else if let issue = item.profile.readinessIssues.first {
+                                Text(issue.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }
