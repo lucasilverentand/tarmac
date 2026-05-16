@@ -39,7 +39,10 @@ struct GitHubSetupCheckTests {
             commandLineToolsInstalled: true,
             sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
             simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
-            capabilities: [.xcode, .iOS]
+            capabilities: [.xcode, .iOS],
+            preparation: BaseImagePreparation(
+                inventory: ToolchainInventory(xcodeLicenseAccepted: true)
+            )
         )
         let org = TestFactories.makeOrg(name: "setup-org", scaleSetId: 42, imageProfile: profile)
         let (engine, _) = try await makeEngine(org: org)

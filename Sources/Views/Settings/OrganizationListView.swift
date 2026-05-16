@@ -267,6 +267,18 @@ private struct OrganizationFormSheet: View {
     @State private var xcodeVersion = ""
     @State private var developerDirectory = ""
     @State private var commandLineToolsInstalled = false
+    @State private var baseImageIdentifier = ""
+    @State private var preparationSteps = BaseImagePreparationStep.defaultSteps
+    @State private var commandLineToolsVersion = ""
+    @State private var xcodeLicenseAccepted = false
+    @State private var flutterVersion = ""
+    @State private var dartVersion = ""
+    @State private var nodeVersion = ""
+    @State private var packageManagerList = ""
+    @State private var rubyVersion = ""
+    @State private var cocoaPodsVersion = ""
+    @State private var expoCLIVersion = ""
+    @State private var easCLIVersion = ""
     @State private var selectedCapabilities: Set<AppleBuildCapability> = []
     @State private var sdkList = ""
     @State private var simulatorRuntimeList = ""
@@ -352,6 +364,8 @@ private struct OrganizationFormSheet: View {
                             TextField("Developer directory", text: $developerDirectory)
                                 .help("Usually /Applications/Xcode.app/Contents/Developer")
                             Toggle("Command-line tools installed", isOn: $commandLineToolsInstalled)
+
+                            preparationSection
 
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Capabilities")
@@ -474,6 +488,19 @@ private struct OrganizationFormSheet: View {
                     xcodeVersion = profile.xcodeVersion
                     developerDirectory = profile.developerDirectory
                     commandLineToolsInstalled = profile.commandLineToolsInstalled
+                    let preparation = profile.preparation ?? BaseImagePreparation()
+                    baseImageIdentifier = preparation.baseImageIdentifier
+                    preparationSteps = preparation.steps
+                    commandLineToolsVersion = preparation.inventory.commandLineToolsVersion
+                    xcodeLicenseAccepted = preparation.inventory.xcodeLicenseAccepted
+                    flutterVersion = preparation.inventory.flutterVersion
+                    dartVersion = preparation.inventory.dartVersion
+                    nodeVersion = preparation.inventory.nodeVersion
+                    packageManagerList = formatPackageManagers(preparation.inventory.packageManagers)
+                    rubyVersion = preparation.inventory.rubyVersion
+                    cocoaPodsVersion = preparation.inventory.cocoaPodsVersion
+                    expoCLIVersion = preparation.inventory.expoCLIVersion
+                    easCLIVersion = preparation.inventory.easCLIVersion
                     selectedCapabilities = Set(profile.capabilities)
                     sdkList = formatSDKs(profile.sdks)
                     simulatorRuntimeList = formatSimulatorRuntimes(profile.simulatorRuntimes)
@@ -583,8 +610,82 @@ private struct OrganizationFormSheet: View {
             simulatorRuntimes: parsePlatformVersions(simulatorRuntimeList).map {
                 AppleSimulatorRuntime(platform: $0.platform, version: $0.version)
             },
-            capabilities: AppleBuildCapability.allCases.filter { selectedCapabilities.contains($0) }
+            capabilities: AppleBuildCapability.allCases.filter { selectedCapabilities.contains($0) },
+            preparation: currentPreparation
         )
+    }
+
+    private var currentPreparation: BaseImagePreparation {
+        BaseImagePreparation(
+            baseImageIdentifier: baseImageIdentifier,
+            steps: preparationSteps,
+            inventory: ToolchainInventory(
+                capturedAt: Date(),
+                commandLineToolsVersion: commandLineToolsVersion,
+                xcodeLicenseAccepted: xcodeLicenseAccepted,
+                flutterVersion: flutterVersion,
+                dartVersion: dartVersion,
+                nodeVersion: nodeVersion,
+                packageManagers: parsePackageManagers(packageManagerList),
+                rubyVersion: rubyVersion,
+                cocoaPodsVersion: cocoaPodsVersion,
+                expoCLIVersion: expoCLIVersion,
+                easCLIVersion: easCLIVersion
+            ),
+            updatedAt: Date()
+        )
+    }
+
+    @ViewBuilder
+    private var preparationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Base image preparation")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Base image identifier", text: $baseImageIdentifier)
+                .help("Use a stable image build, disk, or snapshot identifier so stale inventory is visible.")
+            TextField("Command-line tools version", text: $commandLineToolsVersion)
+            Toggle("Xcode license accepted", isOn: $xcodeLicenseAccepted)
+
+            ForEach(preparationSteps.indices, id: \.self) { index in
+                HStack {
+                    Text(preparationSteps[index].id.displayName)
+                    Spacer()
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { preparationSteps[index].status },
+                            set: { status in
+                                preparationSteps[index].status = status
+                                preparationSteps[index].updatedAt = Date()
+                            }
+                        )
+                    ) {
+                        ForEach(PreparationStepStatus.allCases) { status in
+                            Text(status.displayName).tag(status)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                }
+            }
+
+            DisclosureGroup("Optional tool inventory") {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Flutter version", text: $flutterVersion)
+                    TextField("Dart version", text: $dartVersion)
+                    TextField("Node version", text: $nodeVersion)
+                    TextField("Package managers", text: $packageManagerList)
+                        .help("Use manager=version entries, e.g. npm=10.8, yarn=1.22")
+                    TextField("Ruby version", text: $rubyVersion)
+                    TextField("CocoaPods version", text: $cocoaPodsVersion)
+                    TextField("Expo CLI version", text: $expoCLIVersion)
+                    TextField("EAS CLI version", text: $easCLIVersion)
+                }
+                .padding(.top, 6)
+            }
+        }
     }
 
     private func parsePlatformVersions(_ text: String) -> [(platform: ApplePlatform, version: String)] {
@@ -615,6 +716,31 @@ private struct OrganizationFormSheet: View {
         runtimes
             .filter(\.isAvailable)
             .map { "\($0.platform.rawValue)=\($0.version)" }
+            .joined(separator: ", ")
+    }
+
+    private func parsePackageManagers(_ text: String) -> [PackageManagerInventory] {
+        text
+            .split { $0 == "," || $0 == "\n" }
+            .compactMap { rawEntry in
+                let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !entry.isEmpty else { return nil }
+                let parts = entry.split(separator: "=", maxSplits: 1).map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                guard parts.count == 2,
+                    let manager = JavaScriptPackageManager(rawValue: parts[0].lowercased()),
+                    !parts[1].isEmpty
+                else {
+                    return nil
+                }
+                return PackageManagerInventory(manager: manager, version: parts[1])
+            }
+    }
+
+    private func formatPackageManagers(_ packageManagers: [PackageManagerInventory]) -> String {
+        packageManagers
+            .map { "\($0.manager.rawValue)=\($0.version)" }
             .joined(separator: ", ")
     }
 }
