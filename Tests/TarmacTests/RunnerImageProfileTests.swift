@@ -69,4 +69,60 @@ struct RunnerImageProfileTests {
 
         #expect(org.runnerLabels == ["self-hosted", "macOS", "xcode", "spm"])
     }
+
+    @Test("macOS distribution requires packaging tools signing identities and notarization credentials")
+    func macOSDistributionReadinessRequiresDistributionInputs() {
+        let profile = RunnerImageProfile(
+            name: "Release image",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .macOS, version: "26.0")],
+            capabilities: [.macOSDistribution],
+            distribution: AppleDistributionToolchain(
+                notarytoolInstalled: true,
+                productbuildInstalled: true,
+                pkgbuildInstalled: false,
+                hdiutilInstalled: true,
+                staplerInstalled: false,
+                developerIDApplicationIdentity: "",
+                developerIDInstallerIdentity: "Developer ID Installer: Example",
+                notarizationCredentialsConfigured: false
+            )
+        )
+
+        #expect(!profile.isReady)
+        #expect(profile.advertisedLabels.isEmpty)
+        #expect(profile.readinessIssues.contains { $0.message.contains("pkgbuild") })
+        #expect(profile.readinessIssues.contains { $0.message.contains("stapler") })
+        #expect(profile.readinessIssues.contains { $0.message.contains("Developer ID Application") })
+        #expect(profile.readinessIssues.contains { $0.message.contains("Notarization credentials") })
+    }
+
+    @Test("ready macOS distribution profile advertises distribution label")
+    func readyMacOSDistributionAdvertisesLabel() {
+        let profile = RunnerImageProfile(
+            name: "Release image",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .macOS, version: "26.0")],
+            capabilities: [.macOSDistribution],
+            distribution: AppleDistributionToolchain(
+                notarytoolInstalled: true,
+                productbuildInstalled: true,
+                pkgbuildInstalled: true,
+                hdiutilInstalled: true,
+                staplerInstalled: true,
+                developerIDApplicationIdentity: "Developer ID Application: Example",
+                developerIDInstallerIdentity: "Developer ID Installer: Example",
+                notarizationCredentialsConfigured: true
+            )
+        )
+
+        #expect(profile.isReady)
+        #expect(profile.advertisedLabels == ["macos-distribution"])
+    }
 }

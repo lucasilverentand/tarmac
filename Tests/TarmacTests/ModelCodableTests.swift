@@ -155,7 +155,18 @@ struct ModelCodableTests {
                 commandLineToolsInstalled: true,
                 sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
                 simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
-                capabilities: [.xcode, .iOS]
+                capabilities: [.xcode, .iOS, .macOSDistribution],
+                distribution: AppleDistributionToolchain(
+                    notarytoolInstalled: true,
+                    productbuildInstalled: true,
+                    pkgbuildInstalled: true,
+                    hdiutilInstalled: true,
+                    staplerInstalled: true,
+                    developerIDApplicationIdentity: "Developer ID Application: Example",
+                    developerIDInstallerIdentity: "Developer ID Installer: Example",
+                    notarizationCredentialSource: .appStoreConnectAPIKey,
+                    notarizationCredentialsConfigured: true
+                )
             ),
             isEnabled: false,
             filterMode: .include,
@@ -172,7 +183,9 @@ struct ModelCodableTests {
         #expect(decoded.labels == ["self-hosted", "macOS"])
         #expect(decoded.imageProfile?.name == "Xcode 17")
         #expect(decoded.imageProfile?.sdks == [ApplePlatformSDK(platform: .iOS, version: "19.0")])
-        #expect(decoded.imageProfile?.capabilities == [.xcode, .iOS])
+        #expect(decoded.imageProfile?.capabilities == [.xcode, .iOS, .macOSDistribution])
+        #expect(decoded.imageProfile?.distribution.notarytoolInstalled == true)
+        #expect(decoded.imageProfile?.distribution.notarizationCredentialSource == .appStoreConnectAPIKey)
         #expect(decoded.isEnabled == false)
         #expect(decoded.filterMode == .include)
         #expect(decoded.filteredRepositories == ["my-repo", "other-repo"])

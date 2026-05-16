@@ -239,6 +239,12 @@ struct VMStatusCard: View {
                                     title: "Labels",
                                     value: item.profile.advertisedLabels.joined(separator: ", ")
                                 )
+                                if item.profile.capabilities.contains(.macOSDistribution) {
+                                    DetailRow(
+                                        title: "Distribution tools",
+                                        value: item.profile.distribution.installedToolNames.joined(separator: ", ")
+                                    )
+                                }
                             } else if let issue = item.profile.readinessIssues.first {
                                 Text(issue.message)
                                     .font(.caption)

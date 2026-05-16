@@ -84,6 +84,13 @@ struct DiagnosticsBundleStore: Sendable {
             } else if FileManager.default.fileExists(atPath: runnerLog.path) {
                 omittedFiles.append(GuestBootstrapContract.runnerLogFileName)
             }
+
+            copyAppleDistributionDiagnostics(
+                from: sharedDirectory,
+                to: bundleURL,
+                retainedFiles: &retainedFiles,
+                omittedFiles: &omittedFiles
+            )
         }
 
         let metadata = JobDiagnosticsMetadata(
@@ -159,6 +166,107 @@ struct DiagnosticsBundleStore: Sendable {
         } catch {
             Log.vm.warning("Could not copy diagnostic file \(source.lastPathComponent): \(error.localizedDescription)")
         }
+    }
+
+    private func copyAppleDistributionDiagnostics(
+        from sharedDirectory: URL,
+        to bundleURL: URL,
+        retainedFiles: inout [String],
+        omittedFiles: inout [String]
+    ) {
+        let sourceRoot = sharedDirectory.appendingPathComponent("apple-distribution-diagnostics", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourceRoot.path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else {
+            return
+        }
+
+        let destinationRoot = bundleURL.appendingPathComponent("apple-distribution-diagnostics", isDirectory: true)
+        let enumerator = FileManager.default.enumerator(
+            at: sourceRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        let sourcePath = sourceRoot.standardizedFileURL.path
+
+        while let fileURL = enumerator?.nextObject() as? URL {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
+                !isDirectory.boolValue
+            else {
+                continue
+            }
+
+            let filePath = fileURL.standardizedFileURL.path
+            guard filePath.hasPrefix(sourcePath + "/") else { continue }
+            let relativePath = String(filePath.dropFirst(sourcePath.count + 1))
+            let bundleRelativePath = "apple-distribution-diagnostics/\(relativePath)"
+
+            if Self.shouldOmitAppleDistributionDiagnostic(fileURL) {
+                omittedFiles.append(bundleRelativePath)
+                continue
+            }
+
+            do {
+                let destination = destinationRoot.appendingPathComponent(relativePath)
+                try FileManager.default.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+
+                if let contents = try String(data: Data(contentsOf: fileURL), encoding: .utf8) {
+                    try Self.redactAppleCredentialValues(in: contents)
+                        .write(to: destination, atomically: true, encoding: .utf8)
+                } else {
+                    try FileManager.default.copyItem(at: fileURL, to: destination)
+                }
+                retainedFiles.append(bundleRelativePath)
+            } catch {
+                Log.vm.warning(
+                    "Could not copy Apple distribution diagnostic \(relativePath): \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private static func shouldOmitAppleDistributionDiagnostic(_ url: URL) -> Bool {
+        let filename = url.lastPathComponent.lowercased()
+        let sensitiveSuffixes = [
+            ".p12",
+            ".pem",
+            ".p8",
+            ".mobileprovision",
+            ".provisionprofile",
+            ".keychain",
+            ".keychain-db",
+            ".cer",
+            ".crt",
+            ".certsigningrequest",
+        ]
+        return sensitiveSuffixes.contains { filename.hasSuffix($0) }
+    }
+
+    private static func redactAppleCredentialValues(in contents: String) -> String {
+        let keys = [
+            "apple[_-]?id",
+            "asc[_-]?issuer[_-]?id",
+            "asc[_-]?key[_-]?id",
+            "notarytool[_-]?password",
+            "app[_-]?specific[_-]?password",
+            "api[_-]?key",
+            "private[_-]?key",
+            "password",
+            "token",
+        ]
+        let pattern = #"(?i)(["']?(?:\#(keys.joined(separator: "|")))["']?\s*[:=]\s*)["']?[^"',\n]+["']?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return contents }
+        let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
+        return regex.stringByReplacingMatches(
+            in: contents,
+            range: range,
+            withTemplate: "$1\"<redacted>\""
+        )
     }
 
     private func writeMetadata(_ metadata: JobDiagnosticsMetadata, to url: URL) throws {

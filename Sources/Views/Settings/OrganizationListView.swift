@@ -270,6 +270,15 @@ private struct OrganizationFormSheet: View {
     @State private var selectedCapabilities: Set<AppleBuildCapability> = []
     @State private var sdkList = ""
     @State private var simulatorRuntimeList = ""
+    @State private var distributionNotarytoolInstalled = false
+    @State private var distributionProductbuildInstalled = false
+    @State private var distributionPkgbuildInstalled = false
+    @State private var distributionHdiutilInstalled = false
+    @State private var distributionStaplerInstalled = false
+    @State private var distributionDeveloperIDApplicationIdentity = ""
+    @State private var distributionDeveloperIDInstallerIdentity = ""
+    @State private var distributionCredentialSource: AppleNotarizationCredentialSource = .jobEnvironment
+    @State private var distributionCredentialsConfigured = false
     @State private var filterMode: RepositoryFilterMode = .all
     @State private var repositoryList: String = ""
     @State private var hasKey: Bool = false
@@ -384,6 +393,51 @@ private struct OrganizationFormSheet: View {
                             TextField("Simulator runtimes", text: $simulatorRuntimeList)
                                 .help("Use platform=version entries, e.g. ios=18.0, watchos=11.0")
 
+                            if selectedCapabilities.contains(.macOSDistribution) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Divider()
+                                    Text("macOS Distribution")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Packaging and notarization tools")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+
+                                        LazyVGrid(
+                                            columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
+                                            spacing: 8
+                                        ) {
+                                            Toggle("notarytool", isOn: $distributionNotarytoolInstalled)
+                                            Toggle("productbuild", isOn: $distributionProductbuildInstalled)
+                                            Toggle("pkgbuild", isOn: $distributionPkgbuildInstalled)
+                                            Toggle("hdiutil", isOn: $distributionHdiutilInstalled)
+                                            Toggle("stapler", isOn: $distributionStaplerInstalled)
+                                        }
+                                        .toggleStyle(.checkbox)
+                                    }
+
+                                    TextField(
+                                        "Developer ID Application identity",
+                                        text: $distributionDeveloperIDApplicationIdentity
+                                    )
+                                    TextField(
+                                        "Developer ID Installer identity",
+                                        text: $distributionDeveloperIDInstallerIdentity
+                                    )
+                                    Picker("Notarization credential source", selection: $distributionCredentialSource) {
+                                        ForEach(AppleNotarizationCredentialSource.allCases) { source in
+                                            Text(source.displayName).tag(source)
+                                        }
+                                    }
+                                    Toggle(
+                                        "Notarization credentials supplied outside the base image",
+                                        isOn: $distributionCredentialsConfigured
+                                    )
+                                }
+                            }
+
                             let previewProfile = currentImageProfile
                             if !previewProfile.readinessIssues.isEmpty {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -477,6 +531,15 @@ private struct OrganizationFormSheet: View {
                     selectedCapabilities = Set(profile.capabilities)
                     sdkList = formatSDKs(profile.sdks)
                     simulatorRuntimeList = formatSimulatorRuntimes(profile.simulatorRuntimes)
+                    distributionNotarytoolInstalled = profile.distribution.notarytoolInstalled
+                    distributionProductbuildInstalled = profile.distribution.productbuildInstalled
+                    distributionPkgbuildInstalled = profile.distribution.pkgbuildInstalled
+                    distributionHdiutilInstalled = profile.distribution.hdiutilInstalled
+                    distributionStaplerInstalled = profile.distribution.staplerInstalled
+                    distributionDeveloperIDApplicationIdentity = profile.distribution.developerIDApplicationIdentity
+                    distributionDeveloperIDInstallerIdentity = profile.distribution.developerIDInstallerIdentity
+                    distributionCredentialSource = profile.distribution.notarizationCredentialSource
+                    distributionCredentialsConfigured = profile.distribution.notarizationCredentialsConfigured
                 }
                 filterMode = org.filterMode
                 repositoryList = org.filteredRepositories.joined(separator: "\n")
@@ -583,7 +646,18 @@ private struct OrganizationFormSheet: View {
             simulatorRuntimes: parsePlatformVersions(simulatorRuntimeList).map {
                 AppleSimulatorRuntime(platform: $0.platform, version: $0.version)
             },
-            capabilities: AppleBuildCapability.allCases.filter { selectedCapabilities.contains($0) }
+            capabilities: AppleBuildCapability.allCases.filter { selectedCapabilities.contains($0) },
+            distribution: AppleDistributionToolchain(
+                notarytoolInstalled: distributionNotarytoolInstalled,
+                productbuildInstalled: distributionProductbuildInstalled,
+                pkgbuildInstalled: distributionPkgbuildInstalled,
+                hdiutilInstalled: distributionHdiutilInstalled,
+                staplerInstalled: distributionStaplerInstalled,
+                developerIDApplicationIdentity: distributionDeveloperIDApplicationIdentity,
+                developerIDInstallerIdentity: distributionDeveloperIDInstallerIdentity,
+                notarizationCredentialSource: distributionCredentialSource,
+                notarizationCredentialsConfigured: distributionCredentialsConfigured
+            )
         )
     }
 

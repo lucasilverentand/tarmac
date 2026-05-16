@@ -142,6 +142,63 @@ struct DiagnosticsBundleStoreTests {
         #expect(metadata.contains("runner.log"))
     }
 
+    @Test("Apple distribution diagnostics are redacted and signing material is omitted")
+    func appleDistributionDiagnosticsAreRedacted() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        let store = DiagnosticsBundleStore(
+            storage: storage,
+            retention: DiagnosticsRetentionConfiguration(maxBundleCount: 10, maxAgeDays: 30, maxSizeMB: 64)
+        )
+        let sharedDirectory = storage.jobsDirectory.appendingPathComponent("77", isDirectory: true)
+        let diagnosticsDirectory = sharedDirectory.appendingPathComponent("apple-distribution-diagnostics")
+        try FileManager.default.createDirectory(at: diagnosticsDirectory, withIntermediateDirectories: true)
+        try """
+        id: 2efe45b2-1111-4444-9999-3f4f563ed6c9
+        status: Invalid
+        notarytool_password=plain-secret
+        ASC_KEY_ID=ABC123
+        """.write(
+            to: diagnosticsDirectory.appendingPathComponent("notarytool.log"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "certificate".write(
+            to: diagnosticsDirectory.appendingPathComponent("developer-id.p12"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let bundle = try store.createBundle(
+            context: JobDiagnosticsContext(jobId: 77),
+            sharedDirectory: sharedDirectory,
+            outcome: .failed(reason: "notarization failed")
+        )
+
+        let retainedLogURL = bundle.url
+            .appendingPathComponent("apple-distribution-diagnostics")
+            .appendingPathComponent("notarytool.log")
+        let retainedLog = try String(contentsOf: retainedLogURL, encoding: .utf8)
+        #expect(retainedLog.contains("2efe45b2-1111-4444-9999-3f4f563ed6c9"))
+        #expect(!retainedLog.contains("plain-secret"))
+        #expect(!retainedLog.contains("ABC123"))
+        #expect(retainedLog.contains("<redacted>"))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: bundle.url
+                    .appendingPathComponent("apple-distribution-diagnostics")
+                    .appendingPathComponent("developer-id.p12")
+                    .path
+            )
+        )
+
+        let metadata = try String(contentsOf: bundle.url.appendingPathComponent("metadata.json"), encoding: .utf8)
+        #expect(metadata.contains("notarytool.log"))
+        #expect(metadata.contains("developer-id.p12"))
+    }
+
     @Test("retention enforces maximum bundle count")
     func retentionEnforcesCount() throws {
         let root = try TestFactories.makeTempDir()

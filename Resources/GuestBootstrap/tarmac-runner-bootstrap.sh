@@ -193,6 +193,7 @@ run_runner() {
     log "Starting GitHub Actions runner"
     (
         cd "${runner_dir}" || exit 127
+        export TARMAC_SHARED_DIRECTORY="${SHARED_MOUNT}"
         if [[ -f "${CACHE_ENV_FILE}" ]]; then
             # shellcheck disable=SC1090
             . "${CACHE_ENV_FILE}"

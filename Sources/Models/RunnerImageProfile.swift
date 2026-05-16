@@ -9,6 +9,56 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
     var sdks: [ApplePlatformSDK] = []
     var simulatorRuntimes: [AppleSimulatorRuntime] = []
     var capabilities: [AppleBuildCapability] = []
+    var distribution: AppleDistributionToolchain = AppleDistributionToolchain()
+
+    init(
+        name: String = "Apple Platform",
+        baseMacOSVersion: String = "",
+        xcodeVersion: String = "",
+        developerDirectory: String = "",
+        commandLineToolsInstalled: Bool = false,
+        sdks: [ApplePlatformSDK] = [],
+        simulatorRuntimes: [AppleSimulatorRuntime] = [],
+        capabilities: [AppleBuildCapability] = [],
+        distribution: AppleDistributionToolchain = AppleDistributionToolchain()
+    ) {
+        self.name = name
+        self.baseMacOSVersion = baseMacOSVersion
+        self.xcodeVersion = xcodeVersion
+        self.developerDirectory = developerDirectory
+        self.commandLineToolsInstalled = commandLineToolsInstalled
+        self.sdks = sdks
+        self.simulatorRuntimes = simulatorRuntimes
+        self.capabilities = capabilities
+        self.distribution = distribution
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case baseMacOSVersion
+        case xcodeVersion
+        case developerDirectory
+        case commandLineToolsInstalled
+        case sdks
+        case simulatorRuntimes
+        case capabilities
+        case distribution
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Apple Platform"
+        baseMacOSVersion = try container.decodeIfPresent(String.self, forKey: .baseMacOSVersion) ?? ""
+        xcodeVersion = try container.decodeIfPresent(String.self, forKey: .xcodeVersion) ?? ""
+        developerDirectory = try container.decodeIfPresent(String.self, forKey: .developerDirectory) ?? ""
+        commandLineToolsInstalled =
+            try container.decodeIfPresent(Bool.self, forKey: .commandLineToolsInstalled) ?? false
+        sdks = try container.decodeIfPresent([ApplePlatformSDK].self, forKey: .sdks) ?? []
+        simulatorRuntimes =
+            try container.decodeIfPresent([AppleSimulatorRuntime].self, forKey: .simulatorRuntimes) ?? []
+        capabilities = try container.decodeIfPresent([AppleBuildCapability].self, forKey: .capabilities) ?? []
+        distribution = try container.decodeIfPresent(AppleDistributionToolchain.self, forKey: .distribution) ?? .init()
+    }
 
     var advertisedLabels: [String] {
         AppleBuildCapability.allCases
@@ -96,6 +146,10 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
             )
         }
 
+        if capability == .macOSDistribution {
+            issues.append(contentsOf: distribution.readinessIssues(profileName: displayName, capability: capability))
+        }
+
         return issues
     }
 
@@ -128,6 +182,98 @@ struct AppleSimulatorRuntime: Codable, Hashable, Sendable {
     var isAvailable: Bool = true
 }
 
+struct AppleDistributionToolchain: Codable, Hashable, Sendable {
+    var notarytoolInstalled: Bool = false
+    var productbuildInstalled: Bool = false
+    var pkgbuildInstalled: Bool = false
+    var hdiutilInstalled: Bool = false
+    var staplerInstalled: Bool = false
+    var developerIDApplicationIdentity: String = ""
+    var developerIDInstallerIdentity: String = ""
+    var notarizationCredentialSource: AppleNotarizationCredentialSource = .jobEnvironment
+    var notarizationCredentialsConfigured: Bool = false
+
+    var installedToolNames: [String] {
+        [
+            (notarytoolInstalled, "notarytool"),
+            (productbuildInstalled, "productbuild"),
+            (pkgbuildInstalled, "pkgbuild"),
+            (hdiutilInstalled, "hdiutil"),
+            (staplerInstalled, "stapler"),
+        ].compactMap { installed, name in installed ? name : nil }
+    }
+
+    fileprivate func readinessIssues(
+        profileName: String,
+        capability: AppleBuildCapability
+    ) -> [RunnerImageProfileReadinessIssue] {
+        var issues: [RunnerImageProfileReadinessIssue] = []
+
+        for missingTool in missingToolNames {
+            issues.append(
+                .init(
+                    capability: capability,
+                    message: "\(profileName): \(missingTool) is missing for \(capability.displayName)."
+                )
+            )
+        }
+
+        if developerIDApplicationIdentity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(
+                .init(
+                    capability: capability,
+                    message: "\(profileName): Developer ID Application signing identity is missing."
+                )
+            )
+        }
+
+        if developerIDInstallerIdentity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(
+                .init(
+                    capability: capability,
+                    message: "\(profileName): Developer ID Installer signing identity is missing."
+                )
+            )
+        }
+
+        if !notarizationCredentialsConfigured {
+            issues.append(
+                .init(
+                    capability: capability,
+                    message:
+                        "\(profileName): Notarization credentials are not configured through \(notarizationCredentialSource.displayName)."
+                )
+            )
+        }
+
+        return issues
+    }
+
+    private var missingToolNames: [String] {
+        [
+            (notarytoolInstalled, "notarytool"),
+            (productbuildInstalled, "productbuild"),
+            (pkgbuildInstalled, "pkgbuild"),
+            (hdiutilInstalled, "hdiutil"),
+            (staplerInstalled, "stapler"),
+        ].compactMap { installed, name in installed ? nil : name }
+    }
+}
+
+enum AppleNotarizationCredentialSource: String, Codable, CaseIterable, Identifiable, Sendable {
+    case jobEnvironment = "job-environment"
+    case appStoreConnectAPIKey = "app-store-connect-api-key"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .jobEnvironment: "per-job environment secrets"
+        case .appStoreConnectAPIKey: "App Store Connect API key secrets"
+        }
+    }
+}
+
 enum ApplePlatform: String, Codable, CaseIterable, Identifiable, Sendable {
     case macOS = "macos"
     case iOS = "ios"
@@ -155,6 +301,7 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
     case tvOS = "tvos"
     case visionOS = "visionos"
     case spm
+    case macOSDistribution = "macos-distribution"
     case flutterIOS = "flutter-ios"
     case reactNativeIOS = "react-native-ios"
     case expoIOS = "expo-ios"
@@ -170,6 +317,7 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
         case .tvOS: "tvOS"
         case .visionOS: "visionOS"
         case .spm: "Swift Package Manager"
+        case .macOSDistribution: "macOS Distribution"
         case .flutterIOS: "Flutter iOS"
         case .reactNativeIOS: "React Native iOS"
         case .expoIOS: "Expo iOS"
@@ -196,7 +344,7 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
             [.tvOS]
         case .visionOS:
             [.visionOS]
-        case .spm:
+        case .spm, .macOSDistribution:
             [.macOS]
         }
     }
@@ -211,7 +359,7 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
             [.tvOS]
         case .visionOS:
             [.visionOS]
-        case .xcode, .spm:
+        case .xcode, .spm, .macOSDistribution:
             []
         }
     }

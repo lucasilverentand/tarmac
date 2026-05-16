@@ -49,6 +49,7 @@ struct GuestBootstrapResourceTests {
         #expect(contents.contains("TARMAC_XCODE_DERIVED_DATA_PATH"))
         #expect(contents.contains("TARMAC_COCOAPODS_CACHE_PATH"))
         #expect(contents.contains("NPM_CONFIG_CACHE"))
+        #expect(contents.contains("TARMAC_SHARED_DIRECTORY"))
         for target in CacheConfiguration.guestCacheTargets {
             #expect(contents.contains(target.directoryName))
             #expect(contents.contains(target.environmentVariable))
