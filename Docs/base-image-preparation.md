@@ -14,8 +14,8 @@ capabilities:
 3. Select the developer directory with `xcode-select`.
 4. Install or verify command-line tools.
 5. Install simulator runtimes for every advertised platform.
-6. Install optional toolchains such as Flutter, Node, CocoaPods, Expo CLI, and
-   EAS CLI when a profile needs them.
+6. Install optional toolchains such as Flutter, Node, Ruby, CocoaPods, Expo CLI,
+   and EAS CLI when a profile needs them.
 
 Record the base image identifier, checklist status, and tool versions in the
 organization runner image profile. A profile should only advertise labels once
@@ -37,6 +37,10 @@ flutter --version
 dart --version
 node --version
 npm --version
+yarn --version
+pnpm --version
+bun --version
+ruby --version
 pod --version
 npx expo --version
 eas --version
@@ -44,5 +48,10 @@ eas --version
 
 Flutter iOS profiles need Flutter, Dart, CocoaPods, Xcode, and the iOS SDK.
 React Native iOS profiles need Node, at least one JavaScript package manager,
-CocoaPods, Xcode, and the iOS SDK. Expo iOS profiles additionally need Expo CLI
-and EAS CLI.
+CocoaPods, Ruby, Xcode, and the iOS SDK. Expo iOS profiles additionally need
+Expo CLI and EAS CLI.
+
+For unsigned native iOS, watchOS, tvOS, visionOS, and Swift Package Manager
+workflow examples, see [Apple SDK Validation Workflows](apple-sdk-validation-workflows.md).
+For React Native-specific readiness and cache behavior, see
+[React Native iOS Runner Profile](react-native-ios-runner-profile.md).

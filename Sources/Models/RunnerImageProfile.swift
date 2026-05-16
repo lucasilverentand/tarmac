@@ -92,7 +92,9 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
             issues.append(
                 .init(
                     capability: capability,
-                    message: "\(displayName): \(platform.displayName) SDK is missing for \(capability.displayName)."
+                    message:
+                        "\(displayName): \(platform.displayName) SDK is missing for \(capability.displayName). "
+                        + "Run `xcodebuild -showsdks` in the guest and record the matching simulator SDK before advertising `\(capability.label)`."
                 )
             )
         }
@@ -102,7 +104,8 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
                 .init(
                     capability: capability,
                     message:
-                        "\(displayName): \(platform.displayName) simulator runtime is missing for \(capability.displayName)."
+                        "\(displayName): \(platform.displayName) simulator runtime is missing for \(capability.displayName). "
+                        + "Run `xcrun simctl list runtimes` in the guest and install an available runtime before advertising `\(capability.label)`."
                 )
             )
         }
@@ -146,6 +149,15 @@ struct AppleSimulatorRuntime: Codable, Hashable, Sendable {
     var platform: ApplePlatform
     var version: String
     var isAvailable: Bool = true
+}
+
+struct AppleBuildValidationWorkflow: Equatable, Hashable, Sendable {
+    var runnerLabel: String
+    var sdk: String?
+    var destination: String?
+    var command: String
+    var buildSettings: [String]
+    var requiresSigningCredentials: Bool
 }
 
 struct BaseImagePreparation: Codable, Hashable, Sendable {
@@ -218,9 +230,52 @@ struct ToolchainInventory: Codable, Hashable, Sendable {
     var dartVersion: String = ""
     var nodeVersion: String = ""
     var packageManagers: [PackageManagerInventory] = []
+    var rubyVersion: String = ""
     var cocoaPodsVersion: String = ""
     var expoCLIVersion: String = ""
     var easCLIVersion: String = ""
+
+    init(
+        capturedAt: Date? = nil,
+        commandLineToolsVersion: String = "",
+        xcodeLicenseAccepted: Bool = false,
+        flutterVersion: String = "",
+        dartVersion: String = "",
+        nodeVersion: String = "",
+        packageManagers: [PackageManagerInventory] = [],
+        rubyVersion: String = "",
+        cocoaPodsVersion: String = "",
+        expoCLIVersion: String = "",
+        easCLIVersion: String = ""
+    ) {
+        self.capturedAt = capturedAt
+        self.commandLineToolsVersion = commandLineToolsVersion
+        self.xcodeLicenseAccepted = xcodeLicenseAccepted
+        self.flutterVersion = flutterVersion
+        self.dartVersion = dartVersion
+        self.nodeVersion = nodeVersion
+        self.packageManagers = packageManagers
+        self.rubyVersion = rubyVersion
+        self.cocoaPodsVersion = cocoaPodsVersion
+        self.expoCLIVersion = expoCLIVersion
+        self.easCLIVersion = easCLIVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
+        commandLineToolsVersion = try container.decodeIfPresent(String.self, forKey: .commandLineToolsVersion) ?? ""
+        xcodeLicenseAccepted = try container.decodeIfPresent(Bool.self, forKey: .xcodeLicenseAccepted) ?? false
+        flutterVersion = try container.decodeIfPresent(String.self, forKey: .flutterVersion) ?? ""
+        dartVersion = try container.decodeIfPresent(String.self, forKey: .dartVersion) ?? ""
+        nodeVersion = try container.decodeIfPresent(String.self, forKey: .nodeVersion) ?? ""
+        packageManagers =
+            try container.decodeIfPresent([PackageManagerInventory].self, forKey: .packageManagers) ?? []
+        rubyVersion = try container.decodeIfPresent(String.self, forKey: .rubyVersion) ?? ""
+        cocoaPodsVersion = try container.decodeIfPresent(String.self, forKey: .cocoaPodsVersion) ?? ""
+        expoCLIVersion = try container.decodeIfPresent(String.self, forKey: .expoCLIVersion) ?? ""
+        easCLIVersion = try container.decodeIfPresent(String.self, forKey: .easCLIVersion) ?? ""
+    }
 
     func hasTool(_ tool: AppleToolchainRequirement) -> Bool {
         switch tool {
@@ -232,6 +287,8 @@ struct ToolchainInventory: Codable, Hashable, Sendable {
             !nodeVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .packageManager:
             packageManagers.contains { !$0.version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        case .ruby:
+            !rubyVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .cocoaPods:
             !cocoaPodsVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .expoCLI:
@@ -349,11 +406,74 @@ enum AppleBuildCapability: String, Codable, CaseIterable, Identifiable, Sendable
         case .flutterIOS:
             [.flutter, .dart, .cocoaPods]
         case .reactNativeIOS:
-            [.node, .packageManager, .cocoaPods]
+            [.node, .packageManager, .ruby, .cocoaPods]
         case .expoIOS:
-            [.node, .packageManager, .cocoaPods, .expoCLI, .easCLI]
+            [.node, .packageManager, .ruby, .cocoaPods, .expoCLI, .easCLI]
         case .xcode, .iOS, .watchOS, .tvOS, .visionOS, .spm:
             []
+        }
+    }
+
+    var unsignedValidationWorkflow: AppleBuildValidationWorkflow? {
+        let unsignedSimulatorSettings = ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO"]
+
+        switch self {
+        case .iOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "iphonesimulator",
+                destination: "generic/platform=iOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .watchOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "watchsimulator",
+                destination: "generic/platform=watchOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .tvOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "appletvsimulator",
+                destination: "generic/platform=tvOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .visionOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "xrsimulator",
+                destination: "generic/platform=visionOS Simulator",
+                command: "xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .spm:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: nil,
+                destination: nil,
+                command: "swift test",
+                buildSettings: [],
+                requiresSigningCredentials: false
+            )
+        case .reactNativeIOS:
+            return AppleBuildValidationWorkflow(
+                runnerLabel: label,
+                sdk: "iphonesimulator",
+                destination: "generic/platform=iOS Simulator",
+                command: "bundle exec pod install && xcodebuild build",
+                buildSettings: unsignedSimulatorSettings,
+                requiresSigningCredentials: false
+            )
+        case .xcode, .flutterIOS, .expoIOS:
+            return nil
         }
     }
 }
@@ -363,6 +483,7 @@ enum AppleToolchainRequirement: String, Codable, CaseIterable, Identifiable, Sen
     case dart
     case node
     case packageManager
+    case ruby
     case cocoaPods
     case expoCLI
     case easCLI
@@ -375,6 +496,7 @@ enum AppleToolchainRequirement: String, Codable, CaseIterable, Identifiable, Sen
         case .dart: "Dart SDK"
         case .node: "Node.js"
         case .packageManager: "JavaScript package manager"
+        case .ruby: "Ruby"
         case .cocoaPods: "CocoaPods"
         case .expoCLI: "Expo CLI"
         case .easCLI: "EAS CLI"
