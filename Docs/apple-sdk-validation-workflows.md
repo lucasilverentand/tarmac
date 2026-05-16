@@ -149,6 +149,40 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
 ```
 
+## React Native iOS
+
+Use the `react-native-ios` label when the runner profile records Node, at least
+one JavaScript package manager, Ruby, CocoaPods, Xcode, an iOS SDK, and an
+available iOS simulator runtime.
+
+```yaml
+name: React Native iOS
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64, react-native-ios]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Install pods
+        run: |
+          cd ios
+          bundle exec pod install
+      - name: Build unsigned iOS simulator app
+        run: |
+          xcodebuild build \
+            -workspace ios/App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+```
+
 ## Readiness Failures
 
 Tarmac blocks a platform label until the profile has the matching SDK and an
@@ -163,3 +197,6 @@ If a setup check reports a missing SDK or runtime, fix the base image first and
 then update the profile. Do not add signing material for these validation jobs;
 archive, export, notarization, and signed installable builds should use a
 separate workflow that explicitly injects signing credentials.
+
+For React Native-specific cache and signing guidance, see
+[React Native iOS Runner Profile](react-native-ios-runner-profile.md).

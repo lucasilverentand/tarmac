@@ -275,6 +275,7 @@ private struct OrganizationFormSheet: View {
     @State private var dartVersion = ""
     @State private var nodeVersion = ""
     @State private var packageManagerList = ""
+    @State private var rubyVersion = ""
     @State private var cocoaPodsVersion = ""
     @State private var expoCLIVersion = ""
     @State private var easCLIVersion = ""
@@ -496,6 +497,7 @@ private struct OrganizationFormSheet: View {
                     dartVersion = preparation.inventory.dartVersion
                     nodeVersion = preparation.inventory.nodeVersion
                     packageManagerList = formatPackageManagers(preparation.inventory.packageManagers)
+                    rubyVersion = preparation.inventory.rubyVersion
                     cocoaPodsVersion = preparation.inventory.cocoaPodsVersion
                     expoCLIVersion = preparation.inventory.expoCLIVersion
                     easCLIVersion = preparation.inventory.easCLIVersion
@@ -625,6 +627,7 @@ private struct OrganizationFormSheet: View {
                 dartVersion: dartVersion,
                 nodeVersion: nodeVersion,
                 packageManagers: parsePackageManagers(packageManagerList),
+                rubyVersion: rubyVersion,
                 cocoaPodsVersion: cocoaPodsVersion,
                 expoCLIVersion: expoCLIVersion,
                 easCLIVersion: easCLIVersion
@@ -675,6 +678,7 @@ private struct OrganizationFormSheet: View {
                     TextField("Node version", text: $nodeVersion)
                     TextField("Package managers", text: $packageManagerList)
                         .help("Use manager=version entries, e.g. npm=10.8, yarn=1.22")
+                    TextField("Ruby version", text: $rubyVersion)
                     TextField("CocoaPods version", text: $cocoaPodsVersion)
                     TextField("Expo CLI version", text: $expoCLIVersion)
                     TextField("EAS CLI version", text: $easCLIVersion)

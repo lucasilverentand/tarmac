@@ -61,7 +61,8 @@ struct ConfigStoreTests {
                     commandLineToolsVersion: "17.0",
                     xcodeLicenseAccepted: true,
                     nodeVersion: "24.0",
-                    packageManagers: [PackageManagerInventory(manager: .bun, version: "1.2")]
+                    packageManagers: [PackageManagerInventory(manager: .bun, version: "1.2")],
+                    rubyVersion: "3.3"
                 )
             )
         )
@@ -78,6 +79,7 @@ struct ConfigStoreTests {
         #expect(
             loadedPreparation?.inventory.packageManagers == [PackageManagerInventory(manager: .bun, version: "1.2")]
         )
+        #expect(loadedPreparation?.inventory.rubyVersion == "3.3")
 
         defaults.removePersistentDomain(forName: suiteName)
     }
