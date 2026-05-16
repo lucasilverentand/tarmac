@@ -10,23 +10,42 @@ actor RecordingGitHubClient: GitHubClientProtocol {
         let bodyData: Data?
     }
 
+    struct StubbedResponse: Sendable {
+        let data: Data
+        let statusCode: Int
+        let headers: [String: String]
+    }
+
     private(set) var requests: [RecordedRequest] = []
-    private var responseHandlers: [(String) -> Data?] = []
-    private var defaultResponseData: Data
+    private var responseHandlers: [@Sendable (String, String) -> StubbedResponse?] = []
+    private var defaultResponse: StubbedResponse
 
     var requestCount: Int { requests.count }
 
     init(defaultResponseJSON: Data = "{}".data(using: .utf8)!) {
-        self.defaultResponseData = defaultResponseJSON
+        self.defaultResponse = StubbedResponse(data: defaultResponseJSON, statusCode: 200, headers: [:])
     }
 
     func setDefaultResponse(_ data: Data) {
-        defaultResponseData = data
+        defaultResponse = StubbedResponse(data: data, statusCode: 200, headers: [:])
     }
 
     func addResponse(forPathContaining pathFragment: String, json: Data) {
-        responseHandlers.append { path in
-            path.contains(pathFragment) ? json : nil
+        addRawResponse(forPathContaining: pathFragment, statusCode: 200, json: json)
+    }
+
+    func addRawResponse(
+        forPathContaining pathFragment: String,
+        method: String? = nil,
+        statusCode: Int,
+        headers: [String: String] = [:],
+        json: Data
+    ) {
+        responseHandlers.append { requestMethod, path in
+            guard path.contains(pathFragment), method == nil || method == requestMethod else {
+                return nil
+            }
+            return StubbedResponse(data: json, statusCode: statusCode, headers: headers)
         }
     }
 
@@ -35,7 +54,7 @@ actor RecordingGitHubClient: GitHubClientProtocol {
         path: String,
         body: (any Encodable & Sendable)?,
         headers: [String: String]
-    ) -> Data {
+    ) -> StubbedResponse {
         let bodyData: Data?
         if let body {
             bodyData = try? JSONEncoder().encode(body)
@@ -53,12 +72,12 @@ actor RecordingGitHubClient: GitHubClientProtocol {
         )
 
         for handler in responseHandlers {
-            if let data = handler(path) {
-                return data
+            if let response = handler(method, path) {
+                return response
             }
         }
 
-        return defaultResponseData
+        return defaultResponse
     }
 
     nonisolated func request<T: Decodable & Sendable>(
@@ -68,10 +87,10 @@ actor RecordingGitHubClient: GitHubClientProtocol {
         headers: [String: String],
         timeoutInterval: TimeInterval
     ) async throws -> T {
-        let data = await recordAndRespond(method: method, path: path, body: body, headers: headers)
+        let response = await recordAndRespond(method: method, path: path, body: body, headers: headers)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(T.self, from: data)
+        return try decoder.decode(T.self, from: response.data)
     }
 
     nonisolated func requestRaw(
@@ -81,13 +100,13 @@ actor RecordingGitHubClient: GitHubClientProtocol {
         headers: [String: String],
         timeoutInterval: TimeInterval
     ) async throws -> (Data, HTTPURLResponse) {
-        let data = await recordAndRespond(method: method, path: path, body: body, headers: headers)
+        let stub = await recordAndRespond(method: method, path: path, body: body, headers: headers)
         let response = HTTPURLResponse(
             url: URL(string: "https://api.github.com\(path)")!,
-            statusCode: 200,
+            statusCode: stub.statusCode,
             httpVersion: nil,
-            headerFields: nil
+            headerFields: stub.headers
         )!
-        return (data, response)
+        return (stub.data, response)
     }
 }

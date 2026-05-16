@@ -9,22 +9,30 @@ actor QueueEngine {
 
     private let github: GitHubEngine
     private let client: any GitHubClientProtocol
+    private let sessionStore: PollingSessionStore
+    private let retryPolicy: QueuePollingRetryPolicy
     private var pollers: [String: ScaleSetPoller] = [:]
     private var sessions: [String: String] = [:]  // org name → sessionId
     private var pollingTasks: [String: Task<Void, Never>] = [:]
+    private var pollingStates: [String: QueuePollingState] = [:]
+    private var processedMessageIdsByOrg: [String: Set<Int64>] = [:]
 
     init(
         github: GitHubEngine,
         client: any GitHubClientProtocol,
         jobStore: JobStore = JobStore(),
         dispatcher: JobDispatcher = JobDispatcher(),
-        runnerLeaseStore: RunnerLeaseStore = RunnerLeaseStore()
+        runnerLeaseStore: RunnerLeaseStore = RunnerLeaseStore(),
+        sessionStore: PollingSessionStore = PollingSessionStore(),
+        retryPolicy: QueuePollingRetryPolicy = .default
     ) {
         self.github = github
         self.client = client
         self.jobStore = jobStore
         self.dispatcher = dispatcher
         self.runnerLeaseStore = runnerLeaseStore
+        self.sessionStore = sessionStore
+        self.retryPolicy = retryPolicy
     }
 
     func setOnJobReady(_ callback: @escaping @Sendable (RunnerJob) async -> Void) {
@@ -94,6 +102,11 @@ actor QueueEngine {
         pollingTasks.removeAll()
         pollers.removeAll()
         sessions.removeAll()
+        pollingStates.removeAll()
+    }
+
+    func pollingState(orgName: String) -> QueuePollingState? {
+        pollingStates[orgName]
     }
 
     // MARK: - Polling Loop
@@ -106,17 +119,49 @@ actor QueueEngine {
     }
 
     private func pollingLoop(org: Organization, poller: ScaleSetPoller) async {
+        pollingStates[org.name] = QueuePollingState(
+            orgName: org.name,
+            sessionId: nil,
+            isRunning: true,
+            lastFailure: nil,
+            retryAttempt: 0,
+            nextRetryDelay: nil
+        )
+
         // Create session
         do {
             let token = try await github.installationToken(for: org)
+            guard let scaleSetId = org.scaleSetId else {
+                throw ScaleSetPollerError.missingScaleSetId(org: org.name)
+            }
+
+            if let staleSession = sessionStore.record(for: org.name), staleSession.scaleSetId == scaleSetId {
+                try await poller.deleteSession(org: org, token: token, sessionId: staleSession.sessionId)
+                sessionStore.remove(orgName: org.name)
+                Log.queue.info("Deleted stale polling session \(staleSession.sessionId) for org \(org.name)")
+            }
+
             let session = try await poller.createSession(org: org, token: token)
             guard let sessionId = session.sessionId else {
                 Log.queue.error("No session ID returned for org \(org.name)")
+                pollingStates[org.name]?.isRunning = false
+                pollingStates[org.name]?.lastFailure = .malformedResponse
                 return
             }
             sessions[org.name] = sessionId
+            sessionStore.save(
+                PollingSessionRecord(
+                    orgName: org.name,
+                    scaleSetId: scaleSetId,
+                    sessionId: sessionId,
+                    updatedAt: Date()
+                )
+            )
+            pollingStates[org.name]?.sessionId = sessionId
         } catch {
             Log.queue.error("Failed to create session for org \(org.name): \(error.localizedDescription)")
+            pollingStates[org.name]?.isRunning = false
+            pollingStates[org.name]?.lastFailure = failureKind(for: error)
             return
         }
 
@@ -127,13 +172,33 @@ actor QueueEngine {
         while !Task.isCancelled {
             do {
                 let messages = try await poller.poll(org: org, sessionId: sessionId)
+                pollingStates[org.name]?.lastFailure = nil
+                pollingStates[org.name]?.retryAttempt = 0
+                pollingStates[org.name]?.nextRetryDelay = nil
                 await handleMessages(messages, org: org)
             } catch is CancellationError {
                 break
             } catch {
-                Log.queue.error("Poll error for \(org.name): \(error.localizedDescription)")
-                // Back off on errors before retrying
-                try? await Task.sleep(for: .seconds(5))
+                let failure = failureKind(for: error)
+                let nextAttempt = (pollingStates[org.name]?.retryAttempt ?? 0) + 1
+                let retryAfter = (error as? ScaleSetPollerError)?.retryAfter
+                let delay = retryPolicy.delay(for: failure, attempt: nextAttempt, retryAfter: retryAfter)
+
+                pollingStates[org.name]?.lastFailure = failure
+                pollingStates[org.name]?.retryAttempt = nextAttempt
+                pollingStates[org.name]?.nextRetryDelay = delay
+
+                Log.queue.error(
+                    "Poll error for \(org.name) [\(failure.rawValue)], retry \(nextAttempt) in \(delay)s: \(error.localizedDescription)"
+                )
+
+                do {
+                    try await sleep(seconds: delay)
+                } catch is CancellationError {
+                    break
+                } catch {
+                    break
+                }
             }
         }
 
@@ -142,11 +207,13 @@ actor QueueEngine {
             do {
                 let token = try await github.installationToken(for: org)
                 try await poller.deleteSession(org: org, token: token, sessionId: sessionId)
+                sessionStore.remove(orgName: org.name)
             } catch {
                 Log.queue.warning("Failed to delete session for \(org.name): \(error.localizedDescription)")
             }
         }
 
+        pollingStates[org.name]?.isRunning = false
         Log.queue.info("Polling loop ended for org \(org.name)")
     }
 
@@ -154,6 +221,12 @@ actor QueueEngine {
 
     func handleMessages(_ messages: [ScaleSetMessage], org: Organization) async {
         for message in messages {
+            if processedMessageIdsByOrg[org.name, default: []].contains(message.messageId) {
+                Log.queue.debug("Skipping duplicate GitHub message \(message.messageId) for org \(org.name)")
+                continue
+            }
+            processedMessageIdsByOrg[org.name, default: []].insert(message.messageId)
+
             switch message.messageType {
             case "JobAvailable":
                 await handleJobAvailable(message, org: org)
@@ -244,6 +317,34 @@ actor QueueEngine {
             await onJobCompleted?(completedJob, result, source)
         }
         await tryDispatch()
+    }
+
+    private func failureKind(for error: Error) -> QueuePollingFailureKind {
+        guard let pollerError = error as? ScaleSetPollerError else {
+            return .unknown
+        }
+
+        switch pollerError {
+        case .missingScaleSetId:
+            return .missingConfiguration
+        case .tokenExpired:
+            return .tokenExpired
+        case .permissionDenied:
+            return .permissionDenied
+        case .rateLimited:
+            return .rateLimited
+        case .transientFailure:
+            return .transientFailure
+        case .malformedResponse:
+            return .malformedResponse
+        case .requestFailed:
+            return .requestFailed
+        }
+    }
+
+    private func sleep(seconds: TimeInterval) async throws {
+        guard seconds > 0 else { return }
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
 }
 
