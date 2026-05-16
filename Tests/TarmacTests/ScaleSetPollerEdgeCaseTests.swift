@@ -15,14 +15,47 @@ struct ScaleSetPollerEdgeCaseTests {
         #expect(messages.isEmpty)
     }
 
-    @Test("HTTP error from poll is propagated")
-    func pollHTTPError() async {
+    @Test("401 from poll is classified as token expiry")
+    func pollTokenExpired() async {
         let client = ErrorClient(statusCode: 401, message: "Unauthorized")
         let poller = ScaleSetPoller(client: client) { _ in "test-token" }
         let org = TestFactories.makeOrg(scaleSetId: 42)
 
-        await #expect(throws: GitHubAPIError.self) {
+        do {
             _ = try await poller.poll(org: org, sessionId: "session-1")
+            Issue.record("Expected token expiry")
+        } catch let error as ScaleSetPollerError {
+            guard case .tokenExpired(let orgName, let operation, _) = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+            #expect(orgName == org.name)
+            #expect(operation == "poll messages")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("403 rate limit response is classified")
+    func pollRateLimited() async {
+        let client = ErrorClient(
+            statusCode: 403,
+            message: "rate limited",
+            headers: ["X-RateLimit-Remaining": "0", "Retry-After": "12"]
+        )
+        let poller = ScaleSetPoller(client: client) { _ in "test-token" }
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+
+        do {
+            _ = try await poller.poll(org: org, sessionId: "session-1")
+            Issue.record("Expected rate limit")
+        } catch let error as ScaleSetPollerError {
+            guard case .rateLimited = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+        } catch {
+            Issue.record("Unexpected error: \(error)")
         }
     }
 
@@ -54,16 +87,27 @@ struct ScaleSetPollerEdgeCaseTests {
         #expect(paths.contains { $0.contains("org-b") })
     }
 
-    @Test("Poll with non-decodable response returns empty array")
-    func nonDecodableResponse() async throws {
+    @Test("Poll with non-decodable response is classified as malformed")
+    func nonDecodableResponse() async {
         let client = RecordingGitHubClient(
             defaultResponseJSON: "not json at all".data(using: .utf8)!
         )
         let poller = ScaleSetPoller(client: client) { _ in "test-token" }
         let org = TestFactories.makeOrg(scaleSetId: 42)
 
-        let messages = try await poller.poll(org: org, sessionId: "session-1")
-        #expect(messages.isEmpty)
+        do {
+            _ = try await poller.poll(org: org, sessionId: "session-1")
+            Issue.record("Expected malformed response")
+        } catch let error as ScaleSetPollerError {
+            guard case .malformedResponse(let orgName, let operation, _) = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+            #expect(orgName == org.name)
+            #expect(operation == "poll messages")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
     }
 }
 
@@ -100,6 +144,7 @@ private struct Timeout202Client: GitHubClientProtocol {
 private struct ErrorClient: GitHubClientProtocol {
     let statusCode: Int
     let message: String
+    var headers: [String: String] = [:]
 
     func request<T: Decodable & Sendable>(
         method: String,
@@ -123,7 +168,7 @@ private struct ErrorClient: GitHubClientProtocol {
             url: url,
             statusCode: statusCode,
             httpVersion: nil,
-            headerFields: nil
+            headerFields: headers
         )!
         return (message.data(using: .utf8)!, response)
     }
