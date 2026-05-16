@@ -29,6 +29,43 @@ struct GitHubSetupCheckTests {
         #expect(result.statusText.contains("self-hosted"))
     }
 
+    @Test("profile labels are advertised when the image profile is ready")
+    func profileLabelsAdvertised() async throws {
+        let profile = RunnerImageProfile(
+            name: "Xcode 17",
+            baseMacOSVersion: "26.0",
+            xcodeVersion: "17.0",
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+            commandLineToolsInstalled: true,
+            sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
+            simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
+            capabilities: [.xcode, .iOS]
+        )
+        let org = TestFactories.makeOrg(name: "setup-org", scaleSetId: 42, imageProfile: profile)
+        let (engine, _) = try await makeEngine(org: org)
+
+        let result = await engine.runSetupCheck(for: org)
+
+        #expect(result.isReady)
+        #expect(result.advertisedLabels == ["self-hosted", "macOS", "ARM64", "xcode", "ios"])
+    }
+
+    @Test("profile readiness failures block setup checks")
+    func profileReadinessFailures() async throws {
+        let profile = RunnerImageProfile(
+            name: "Incomplete image",
+            commandLineToolsInstalled: true,
+            capabilities: [.iOS]
+        )
+        let org = TestFactories.makeOrg(name: "setup-org", scaleSetId: 42, imageProfile: profile)
+        let (engine, _) = try await makeEngine(org: org)
+
+        let result = await engine.runSetupCheck(for: org)
+
+        #expect(!result.isReady)
+        #expect(result.issues.contains { $0.kind == .imageProfileNotReady && $0.message.contains("iOS SDK") })
+    }
+
     @Test("permission and missing scale set failures use GitHub terms")
     func permissionAndMissingScaleSetFailures() async throws {
         let org = TestFactories.makeOrg(name: "setup-org", scaleSetId: 42)

@@ -178,6 +178,9 @@ struct RunnerHostReadiness: Equatable, Sendable {
             if org.scaleSetId == nil {
                 issues.append(.init(category: .github, message: "\(org.name): Scale set ID is not configured."))
             }
+            for profileIssue in org.imageProfileReadinessIssues {
+                issues.append(.init(category: .github, message: "\(org.name): \(profileIssue.message)"))
+            }
             if !configStore.hasPrivateKey(for: org) {
                 issues.append(.init(category: .github, message: "\(org.name): Private key is not imported."))
             }

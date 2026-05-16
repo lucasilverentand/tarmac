@@ -195,7 +195,7 @@ final class AppState {
             let runnerPath = try await githubEngine.ensureRunner(for: org)
             let runnerName = "ephemeral-\(job.id)"
             let jitConfig = try await githubEngine.generateJITConfig(for: org, runnerName: runnerName)
-            var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.labels)
+            var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.runnerLabels)
             await queueEngine.runnerLeaseStore.upsert(lease)
             await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
 

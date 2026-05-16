@@ -147,6 +147,16 @@ struct ModelCodableTests {
             installationId: 99,
             scaleSetId: 7,
             labels: ["self-hosted", "macOS"],
+            imageProfile: RunnerImageProfile(
+                name: "Xcode 17",
+                baseMacOSVersion: "26.0",
+                xcodeVersion: "17.0",
+                developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+                commandLineToolsInstalled: true,
+                sdks: [ApplePlatformSDK(platform: .iOS, version: "19.0")],
+                simulatorRuntimes: [AppleSimulatorRuntime(platform: .iOS, version: "19.0")],
+                capabilities: [.xcode, .iOS]
+            ),
             isEnabled: false,
             filterMode: .include,
             filteredRepositories: ["my-repo", "other-repo"]
@@ -160,6 +170,9 @@ struct ModelCodableTests {
         #expect(decoded.installationId == 99)
         #expect(decoded.scaleSetId == 7)
         #expect(decoded.labels == ["self-hosted", "macOS"])
+        #expect(decoded.imageProfile?.name == "Xcode 17")
+        #expect(decoded.imageProfile?.sdks == [ApplePlatformSDK(platform: .iOS, version: "19.0")])
+        #expect(decoded.imageProfile?.capabilities == [.xcode, .iOS])
         #expect(decoded.isEnabled == false)
         #expect(decoded.filterMode == .include)
         #expect(decoded.filteredRepositories == ["my-repo", "other-repo"])
