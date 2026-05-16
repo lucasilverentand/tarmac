@@ -141,6 +141,35 @@ struct AppStateTests {
         #expect(appState.vmStatusViewModel.readiness.nextIssue?.category == .vm)
     }
 
+    @Test("start blocks polling when GitHub setup check fails")
+    @MainActor
+    func startBlocksOnGitHubSetupFailure() async throws {
+        let (configStore, _) = TestFactories.makeConfigStore()
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        try configStore.configureStorage(at: tempDir)
+        try TestFactories.prepareReadyRunnerHostStorage(for: configStore)
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        configStore.addOrganization(org)
+        _ = configStore.savePrivateKey(try TestFactories.makeTestKeyData(), for: org)
+
+        let client = AppStateSetupFailureGitHubClient(statusCode: 403)
+        let appState = AppState(
+            configStore: configStore,
+            githubClientFactory: { client }
+        )
+
+        await appState.start()
+
+        #expect(!appState.queueViewModel.isPolling)
+        #expect(
+            appState.vmStatusViewModel.readiness.issues.contains {
+                $0.category == .github && $0.message.contains("Permission missing")
+            }
+        )
+    }
+
     @Test("resolvedBaseImagePath defaults to configured storage root")
     @MainActor
     func resolvedBaseImagePathDefault() throws {
@@ -154,5 +183,45 @@ struct AppStateTests {
         #expect(appState.vmStatusViewModel.activeVM == nil)
         #expect(appState.vmStatusViewModel.baseImageExists == false)
         #expect(appState.vmStatusViewModel.readyForJobs == false)
+    }
+}
+
+private struct AppStateSetupFailureGitHubClient: GitHubClientProtocol {
+    private let statusCode: Int
+
+    init(statusCode: Int) {
+        self.statusCode = statusCode
+    }
+
+    nonisolated func request<T: Decodable & Sendable>(
+        method: String,
+        path: String,
+        body: (any Encodable & Sendable)?,
+        headers: [String: String],
+        timeoutInterval: TimeInterval
+    ) async throws -> T {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let data = """
+            {"token":"ghs_setup","expires_at":"\(futureDate)"}
+            """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(T.self, from: data)
+    }
+
+    nonisolated func requestRaw(
+        method: String,
+        path: String,
+        body: (any Encodable & Sendable)?,
+        headers: [String: String],
+        timeoutInterval: TimeInterval
+    ) async throws -> (Data, HTTPURLResponse) {
+        let response = HTTPURLResponse(
+            url: URL(string: "https://api.github.com\(path)")!,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (Data(), response)
     }
 }

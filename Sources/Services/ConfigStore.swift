@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 final class ConfigStore {
     private let defaults: UserDefaults
-    private let keychainService: any KeychainServiceProtocol
+    let keychainService: any KeychainServiceProtocol
 
     private(set) var organizations: [Organization] = []
     var vmConfiguration: VMConfiguration = VMConfiguration()

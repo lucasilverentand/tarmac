@@ -83,9 +83,21 @@ final class AppState {
         let storage = StorageManager(rootPath: configStore.storageRootPath)
         let githubEngine = GitHubEngine(
             client: client,
+            keychainService: configStore.keychainService,
             storage: storage
         )
         self.githubEngine = githubEngine
+
+        let setupResults = await settingsViewModel.runGitHubSetupChecks(using: githubEngine)
+        let setupIssues = setupResults.flatMap(\.readinessIssues)
+        guard setupIssues.isEmpty else {
+            var readiness = vmStatusViewModel.readiness
+            readiness.issues.append(contentsOf: setupIssues)
+            vmStatusViewModel.readiness = readiness
+            self.githubEngine = nil
+            Log.app.warning("Cannot start: GitHub setup checks failed")
+            return
+        }
 
         let vmEngine = vmEngineFactory(
             configStore.storageRootPath,
