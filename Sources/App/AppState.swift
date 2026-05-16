@@ -114,6 +114,9 @@ final class AppState {
             await self.handleJobCompleted(job, result: result)
         }
 
+        let reconciliation = await queueEngine.reconcileInterruptedLeases(orgs: configStore.organizations)
+        vmStatusViewModel.runnerReconciliation = reconciliation
+
         // Start polling
         await queueEngine.start(orgs: configStore.organizations)
         queueViewModel.startPolling()
