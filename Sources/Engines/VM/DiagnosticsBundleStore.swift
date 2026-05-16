@@ -84,6 +84,13 @@ struct DiagnosticsBundleStore: Sendable {
             } else if FileManager.default.fileExists(atPath: runnerLog.path) {
                 omittedFiles.append(GuestBootstrapContract.runnerLogFileName)
             }
+
+            captureAppleBuildArtifacts(
+                from: sharedDirectory,
+                to: bundleURL,
+                retainedFiles: &retainedFiles,
+                omittedFiles: &omittedFiles
+            )
         }
 
         let metadata = JobDiagnosticsMetadata(
@@ -161,6 +168,87 @@ struct DiagnosticsBundleStore: Sendable {
         }
     }
 
+    private func captureAppleBuildArtifacts(
+        from sharedDirectory: URL,
+        to bundleURL: URL,
+        retainedFiles: inout [String],
+        omittedFiles: inout [String]
+    ) {
+        let destinationRoot = bundleURL.appendingPathComponent("apple-artifacts", isDirectory: true)
+        var remainingBytes = retention.appleArtifactBudgetBytes
+
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: sharedDirectory,
+                includingPropertiesForKeys: [.isDirectoryKey, .totalFileAllocatedSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return
+        }
+
+        while let artifactURL = enumerator.nextObject() as? URL {
+            guard let relativePath = relativePath(for: artifactURL, under: sharedDirectory) else {
+                continue
+            }
+
+            let isDirectory = (try? artifactURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if shouldSkipDiagnosticsTraversal(relativePath: relativePath) {
+                if isDirectory {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+
+            if isSensitiveAppleBuildArtifact(artifactURL) {
+                omittedFiles.append("apple-artifacts/\(relativePath) (excluded: signing material)")
+                if isDirectory {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+
+            if isGitHubActionsArtifact(artifactURL) {
+                omittedFiles.append("apple-artifacts/\(relativePath) (left for GitHub Actions artifacts)")
+                if isDirectory {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+
+            guard isAppleBuildDiagnosticArtifact(artifactURL, isDirectory: isDirectory) else {
+                continue
+            }
+
+            let artifactSize = (try? Self.itemSize(at: artifactURL)) ?? 0
+            guard artifactSize <= remainingBytes else {
+                omittedFiles.append("apple-artifacts/\(relativePath) (exceeds diagnostics artifact budget)")
+                if isDirectory {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+
+            let destination = destinationRoot.appendingPathComponent(relativePath)
+            do {
+                try FileManager.default.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.copyItem(at: artifactURL, to: destination)
+                retainedFiles.append("apple-artifacts/\(relativePath)")
+                remainingBytes -= artifactSize
+            } catch {
+                omittedFiles.append("apple-artifacts/\(relativePath) (copy failed)")
+                Log.vm.warning("Could not copy Apple build artifact \(relativePath): \(error.localizedDescription)")
+            }
+
+            if isDirectory {
+                enumerator.skipDescendants()
+            }
+        }
+    }
+
     private func writeMetadata(_ metadata: JobDiagnosticsMetadata, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -194,6 +282,16 @@ struct DiagnosticsBundleStore: Sendable {
     }
 
     private static func itemSize(at url: URL) throws -> Int64 {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return 0
+        }
+
+        if !isDirectory.boolValue {
+            let values = try url.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
+            return Int64(values.totalFileAllocatedSize ?? 0)
+        }
+
         let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
@@ -220,6 +318,101 @@ struct DiagnosticsBundleStore: Sendable {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)
     }
+}
+
+extension DiagnosticsRetentionConfiguration {
+    var appleArtifactBudgetBytes: Int64 {
+        min(maxSizeBytes, 256 * 1024 * 1024)
+    }
+}
+
+private func relativePath(for url: URL, under root: URL) -> String? {
+    let rootPath = root.standardizedFileURL.path
+    let path = url.standardizedFileURL.path
+    guard path.hasPrefix(rootPath + "/") else { return nil }
+    let relative = String(path.dropFirst(rootPath.count + 1))
+    guard !relative.isEmpty, !relative.split(separator: "/").contains("..") else { return nil }
+    return relative
+}
+
+private func shouldSkipDiagnosticsTraversal(relativePath: String) -> Bool {
+    let topLevel = relativePath.split(separator: "/", maxSplits: 1).first.map(String.init) ?? relativePath
+    return [
+        GuestBootstrapContract.runnerDirectoryName,
+        GuestBootstrapContract.bootstrapLogFileName,
+        GuestBootstrapContract.runnerLogFileName,
+        GuestBootstrapContract.exitCodeFileName,
+        GuestBootstrapContract.completionMarkerFileName,
+        "host-lifecycle.log",
+    ].contains(topLevel)
+}
+
+private func isAppleBuildDiagnosticArtifact(_ url: URL, isDirectory: Bool) -> Bool {
+    let name = url.lastPathComponent.lowercased()
+    let ext = url.pathExtension.lowercased()
+
+    if ext == "xcresult" {
+        return true
+    }
+
+    if !isDirectory && ext == "xcactivitylog" {
+        return true
+    }
+
+    guard !isDirectory, ["log", "txt", "json"].contains(ext) else {
+        return false
+    }
+
+    return [
+        "xcodebuild",
+        "xcresult",
+        "resultbundle",
+        "notary",
+        "notarization",
+        "altool",
+        "export",
+        "archive",
+        "package",
+        "packaging",
+    ].contains { name.contains($0) }
+}
+
+private func isGitHubActionsArtifact(_ url: URL) -> Bool {
+    [
+        "app",
+        "dmg",
+        "dsym",
+        "ipa",
+        "pkg",
+        "xcarchive",
+    ].contains(url.pathExtension.lowercased())
+}
+
+private func isSensitiveAppleBuildArtifact(_ url: URL) -> Bool {
+    let name = url.lastPathComponent.lowercased()
+    let ext = url.pathExtension.lowercased()
+
+    if [
+        "cer",
+        "cert",
+        "keychain",
+        "mobileprovision",
+        "p12",
+        "pem",
+        "provisionprofile",
+    ].contains(ext) {
+        return true
+    }
+
+    return [
+        ".keychain",
+        ".keychain-db",
+        "mobileprovision",
+        "provisioningprofile",
+        "provisioning_profile",
+        "temporary-keychain",
+        "temporary.keychain",
+    ].contains { name.contains($0) }
 }
 
 struct JobDiagnosticsContext: Sendable {
