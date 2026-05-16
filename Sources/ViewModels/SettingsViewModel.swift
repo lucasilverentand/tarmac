@@ -5,6 +5,8 @@ import Foundation
 final class SettingsViewModel {
     let configStore: ConfigStore
     private(set) var storageHealth: StorageHealth
+    private(set) var githubSetupChecks: [UUID: GitHubSetupCheckResult] = [:]
+    private(set) var githubSetupChecksInFlight: Set<UUID> = []
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
@@ -213,6 +215,41 @@ final class SettingsViewModel {
 
     func refreshStorageHealth() {
         storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth()
+    }
+
+    // MARK: - GitHub Setup Checks
+
+    func setupCheckResult(for org: Organization) -> GitHubSetupCheckResult? {
+        githubSetupChecks[org.id]
+    }
+
+    func isSetupCheckRunning(for org: Organization) -> Bool {
+        githubSetupChecksInFlight.contains(org.id)
+    }
+
+    func runGitHubSetupCheck(for org: Organization) async {
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+        _ = await runGitHubSetupCheck(for: org, using: engine)
+    }
+
+    func runGitHubSetupCheck(for org: Organization, using engine: GitHubEngine) async -> GitHubSetupCheckResult {
+        githubSetupChecksInFlight.insert(org.id)
+        defer { githubSetupChecksInFlight.remove(org.id) }
+
+        let result = await engine.runSetupCheck(for: org)
+        githubSetupChecks[org.id] = result
+        return result
+    }
+
+    func runGitHubSetupChecks(using engine: GitHubEngine) async -> [GitHubSetupCheckResult] {
+        var results: [GitHubSetupCheckResult] = []
+        for org in configStore.organizations where org.isEnabled {
+            results.append(await runGitHubSetupCheck(for: org, using: engine))
+        }
+        return results
     }
 
     // MARK: - Validation

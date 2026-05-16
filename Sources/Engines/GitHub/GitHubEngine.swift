@@ -3,8 +3,8 @@ import Foundation
 actor GitHubEngine {
     let tokenManager: TokenManager
     let runnerProvider: RunnerProvider
-    private let client: any GitHubClientProtocol
-    private let keychainService: any KeychainServiceProtocol
+    let client: any GitHubClientProtocol
+    let keychainService: any KeychainServiceProtocol
 
     init(
         client: any GitHubClientProtocol = GitHubClient(),

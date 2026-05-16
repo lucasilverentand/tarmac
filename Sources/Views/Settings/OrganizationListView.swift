@@ -53,8 +53,13 @@ struct OrganizationListView: View {
                 OrganizationRow(
                     org: org,
                     position: position(of: org),
+                    setupCheck: viewModel.setupCheckResult(for: org),
+                    isCheckingSetup: viewModel.isSetupCheckRunning(for: org),
                     onToggle: { updated in
                         viewModel.updateOrganization(updated)
+                    },
+                    onRunSetupCheck: { org in
+                        await viewModel.runGitHubSetupCheck(for: org)
                     }
                 )
                 .contentShape(Rectangle())
@@ -81,7 +86,10 @@ struct OrganizationListView: View {
 private struct OrganizationRow: View {
     let org: Organization
     let position: Int
+    let setupCheck: GitHubSetupCheckResult?
+    let isCheckingSetup: Bool
     let onToggle: (Organization) -> Void
+    let onRunSetupCheck: (Organization) async -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -142,22 +150,39 @@ private struct OrganizationRow: View {
                         }
                     }
                 }
+
+                setupCheckStatus
             }
 
             Spacer()
 
-            Toggle(
-                "",
-                isOn: Binding(
-                    get: { org.isEnabled },
-                    set: { enabled in
-                        var updated = org
-                        updated.isEnabled = enabled
-                        onToggle(updated)
-                    }
+            VStack(alignment: .trailing, spacing: 8) {
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { org.isEnabled },
+                        set: { enabled in
+                            var updated = org
+                            updated.isEnabled = enabled
+                            onToggle(updated)
+                        }
+                    )
                 )
-            )
-            .labelsHidden()
+                .labelsHidden()
+
+                Button {
+                    Task { await onRunSetupCheck(org) }
+                } label: {
+                    if isCheckingSetup {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Check Setup", systemImage: "checklist")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(isCheckingSetup || !org.isEnabled)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -171,6 +196,33 @@ private struct OrganizationRow: View {
             Label("\(org.filteredRepositories.count) repo(s)", systemImage: "line.3.horizontal.decrease.circle")
         case .exclude:
             Label("Excluding \(org.filteredRepositories.count)", systemImage: "line.3.horizontal.decrease.circle")
+        }
+    }
+
+    @ViewBuilder
+    private var setupCheckStatus: some View {
+        if let setupCheck {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(
+                    setupCheck.statusText,
+                    systemImage: setupCheck.isReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(setupCheck.isReady ? .green : .orange)
+
+                if !setupCheck.advertisedLabels.isEmpty || !setupCheck.runnerGroupNames.isEmpty {
+                    HStack(spacing: 8) {
+                        if !setupCheck.advertisedLabels.isEmpty {
+                            Text("Advertises \(setupCheck.advertisedLabels.joined(separator: ", "))")
+                        }
+                        if !setupCheck.runnerGroupNames.isEmpty {
+                            Text("Runner groups: \(setupCheck.runnerGroupNames.joined(separator: ", "))")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 }
