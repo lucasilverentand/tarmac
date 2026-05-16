@@ -52,6 +52,11 @@ struct GuestBootstrapResourceTests {
         #expect(contents.contains("TARMAC_YARN_CACHE_PATH"))
         #expect(contents.contains("TARMAC_PNPM_STORE_PATH"))
         #expect(contents.contains("TARMAC_BUN_INSTALL_CACHE_PATH"))
+        #expect(contents.contains("SIGNING_IMPORT_SCRIPT_FILE"))
+        #expect(contents.contains(GuestBootstrapContract.appleSigningDirectoryName))
+        #expect(contents.contains(GuestBootstrapContract.appleSigningImportScriptFileName))
+        #expect(contents.contains("configure_apple_signing"))
+        #expect(contents.contains("Ephemeral Apple signing assets"))
         for target in CacheConfiguration.guestCacheTargets {
             #expect(contents.contains(target.directoryName))
             #expect(contents.contains(target.environmentVariable))

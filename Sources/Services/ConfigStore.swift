@@ -7,6 +7,7 @@ final class ConfigStore {
     let keychainService: any KeychainServiceProtocol
 
     private(set) var organizations: [Organization] = []
+    private(set) var appleSigningAssets: [AppleSigningAsset] = []
     var vmConfiguration: VMConfiguration = VMConfiguration()
     var cacheConfig: CacheConfiguration = CacheConfiguration()
     var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration = DiagnosticsRetentionConfiguration()
@@ -93,6 +94,122 @@ final class ConfigStore {
         keychainService.load(key: org.privateKeyKeychainKey) != nil
     }
 
+    // MARK: - Apple Signing Assets
+
+    func saveAppleSigningAsset(
+        _ asset: AppleSigningAsset,
+        certificateData: Data,
+        certificatePassphrase: String,
+        provisioningProfileData: Data
+    ) -> Bool {
+        guard !certificateData.isEmpty,
+            !certificatePassphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            !provisioningProfileData.isEmpty
+        else {
+            return false
+        }
+
+        var storedAsset = asset
+        let now = Date()
+        if appleSigningAssets.contains(where: { $0.id == asset.id }) {
+            storedAsset.updatedAt = now
+        } else {
+            storedAsset.createdAt = now
+            storedAsset.updatedAt = now
+        }
+
+        let previousCertificate = keychainService.load(key: storedAsset.certificateKeychainKey)
+        let previousPassphrase = keychainService.load(key: storedAsset.passphraseKeychainKey)
+        let previousProfile = keychainService.load(key: storedAsset.provisioningProfileKeychainKey)
+
+        let savedCertificate = keychainService.save(key: storedAsset.certificateKeychainKey, data: certificateData)
+        let savedPassphrase = keychainService.save(
+            key: storedAsset.passphraseKeychainKey,
+            data: Data(certificatePassphrase.utf8)
+        )
+        let savedProfile = keychainService.save(
+            key: storedAsset.provisioningProfileKeychainKey,
+            data: provisioningProfileData
+        )
+
+        guard savedCertificate && savedPassphrase && savedProfile else {
+            restoreKeychainValue(previousCertificate, key: storedAsset.certificateKeychainKey)
+            restoreKeychainValue(previousPassphrase, key: storedAsset.passphraseKeychainKey)
+            restoreKeychainValue(previousProfile, key: storedAsset.provisioningProfileKeychainKey)
+            return false
+        }
+
+        upsertAppleSigningAsset(storedAsset)
+        return true
+    }
+
+    func deleteAppleSigningAsset(_ asset: AppleSigningAsset) -> Bool {
+        let deletedCertificate = keychainService.delete(key: asset.certificateKeychainKey)
+        let deletedPassphrase = keychainService.delete(key: asset.passphraseKeychainKey)
+        let deletedProfile = keychainService.delete(key: asset.provisioningProfileKeychainKey)
+        appleSigningAssets.removeAll { $0.id == asset.id }
+        saveAppleSigningAssets()
+        return deletedCertificate && deletedPassphrase && deletedProfile
+    }
+
+    func loadAppleSigningInjection(for asset: AppleSigningAsset) -> AppleSigningInjection? {
+        guard let certificateData = keychainService.load(key: asset.certificateKeychainKey),
+            let passphraseData = keychainService.load(key: asset.passphraseKeychainKey),
+            let passphrase = String(data: passphraseData, encoding: .utf8),
+            let provisioningProfileData = keychainService.load(key: asset.provisioningProfileKeychainKey)
+        else {
+            return nil
+        }
+
+        return AppleSigningInjection(
+            asset: asset,
+            certificateData: certificateData,
+            certificatePassphrase: passphrase,
+            provisioningProfileData: provisioningProfileData
+        )
+    }
+
+    func validateAppleSigningAsset(
+        _ asset: AppleSigningAsset,
+        bundleIdentifier: String? = nil,
+        now: Date = Date()
+    ) -> AppleSigningAssetValidation {
+        var issues: [AppleSigningAssetValidationIssue] = []
+        if asset.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(.missingDisplayName)
+        }
+        if asset.teamId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(.missingTeamId)
+        }
+        if asset.bundleIdentifierPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(.missingBundleIdentifierPattern)
+        }
+        if keychainService.load(key: asset.certificateKeychainKey)?.isEmpty != false {
+            issues.append(.missingCertificate)
+        }
+        if let passphraseData = keychainService.load(key: asset.passphraseKeychainKey),
+            let passphrase = String(data: passphraseData, encoding: .utf8),
+            !passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            // Present and usable.
+        } else {
+            issues.append(.missingCertificatePassphrase)
+        }
+        if keychainService.load(key: asset.provisioningProfileKeychainKey)?.isEmpty != false {
+            issues.append(.missingProvisioningProfile)
+        }
+        if let expiresAt = asset.certificateExpiresAt, expiresAt <= now {
+            issues.append(.expiredCertificate)
+        }
+        if let expiresAt = asset.provisioningProfileExpiresAt, expiresAt <= now {
+            issues.append(.expiredProvisioningProfile)
+        }
+        if let bundleIdentifier, !asset.matches(bundleIdentifier: bundleIdentifier) {
+            issues.append(.bundleIdentifierMismatch)
+        }
+        return AppleSigningAssetValidation(assetId: asset.id, issues: issues)
+    }
+
     // MARK: - Storage
 
     var resolvedBaseImagePath: String {
@@ -124,6 +241,7 @@ final class ConfigStore {
 
     func save() {
         saveOrganizations()
+        saveAppleSigningAssets()
         if let data = try? JSONEncoder().encode(vmConfiguration) {
             defaults.set(data, forKey: "vmConfiguration")
         }
@@ -148,6 +266,11 @@ final class ConfigStore {
             let orgs = try? JSONDecoder().decode([Organization].self, from: data)
         {
             organizations = orgs
+        }
+        if let data = defaults.data(forKey: "appleSigningAssets"),
+            let assets = try? JSONDecoder().decode([AppleSigningAsset].self, from: data)
+        {
+            appleSigningAssets = assets
         }
         if let data = defaults.data(forKey: "vmConfiguration"),
             let config = try? JSONDecoder().decode(VMConfiguration.self, from: data)
@@ -195,6 +318,29 @@ final class ConfigStore {
     private func saveOrganizations() {
         if let data = try? JSONEncoder().encode(organizations) {
             defaults.set(data, forKey: "organizations")
+        }
+    }
+
+    private func saveAppleSigningAssets() {
+        if let data = try? JSONEncoder().encode(appleSigningAssets) {
+            defaults.set(data, forKey: "appleSigningAssets")
+        }
+    }
+
+    private func upsertAppleSigningAsset(_ asset: AppleSigningAsset) {
+        if let index = appleSigningAssets.firstIndex(where: { $0.id == asset.id }) {
+            appleSigningAssets[index] = asset
+        } else {
+            appleSigningAssets.append(asset)
+        }
+        saveAppleSigningAssets()
+    }
+
+    private func restoreKeychainValue(_ data: Data?, key: String) {
+        if let data {
+            _ = keychainService.save(key: key, data: data)
+        } else {
+            _ = keychainService.delete(key: key)
         }
     }
 }
