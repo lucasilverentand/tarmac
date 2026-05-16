@@ -33,6 +33,11 @@ struct DiagnosticsBundleStoreTests {
             atomically: true,
             encoding: .utf8
         )
+        try #"{"exitCode":1}"#.write(
+            to: sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+            atomically: true,
+            encoding: .utf8
+        )
 
         var job = TestFactories.makeJob(id: 42, status: .failed)
         job.runnerRequestId = 777
@@ -58,6 +63,11 @@ struct DiagnosticsBundleStoreTests {
         #expect(
             FileManager.default.fileExists(
                 atPath: bundle.url.appendingPathComponent(GuestBootstrapContract.exitCodeFileName).path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName).path
             )
         )
 
@@ -94,6 +104,11 @@ struct DiagnosticsBundleStoreTests {
             atomically: true,
             encoding: .utf8
         )
+        try #"{"exitCode":0}"#.write(
+            to: sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let bundle = try store.createBundle(
             context: JobDiagnosticsContext(job: TestFactories.makeJob(id: 99, status: .completed)),
@@ -109,6 +124,11 @@ struct DiagnosticsBundleStoreTests {
         #expect(
             FileManager.default.fileExists(
                 atPath: bundle.url.appendingPathComponent(GuestBootstrapContract.exitCodeFileName).path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundle.url.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName).path
             )
         )
         #expect(

@@ -46,6 +46,7 @@ struct GuestBootstrapResourceTests {
         #expect(contents.contains("bootstrap.log"))
         #expect(contents.contains("runner.log"))
         #expect(contents.contains("exit-code"))
+        #expect(contents.contains("completion.json"))
         #expect(contents.contains("/sbin/shutdown -h now"))
     }
 

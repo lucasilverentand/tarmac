@@ -11,4 +11,5 @@ enum GuestBootstrapContract {
     static let bootstrapLogFileName = "bootstrap.log"
     static let runnerLogFileName = "runner.log"
     static let exitCodeFileName = "exit-code"
+    static let completionMarkerFileName = "completion.json"
 }

@@ -41,13 +41,19 @@ struct ConfigStoreTests {
         let keychain = PreviewKeychainService()
 
         let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
-        store1.vmConfiguration = VMConfiguration(cpuCount: 8, memorySizeGB: 16, diskSizeGB: 120)
+        store1.vmConfiguration = VMConfiguration(
+            cpuCount: 8,
+            memorySizeGB: 16,
+            diskSizeGB: 120,
+            runnerCompletionTimeoutSeconds: 7_200
+        )
         store1.save()
 
         let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
         #expect(store2.vmConfiguration.cpuCount == 8)
         #expect(store2.vmConfiguration.memorySizeGB == 16)
         #expect(store2.vmConfiguration.diskSizeGB == 120)
+        #expect(store2.vmConfiguration.runnerCompletionTimeoutSeconds == 7_200)
 
         defaults.removePersistentDomain(forName: suiteName)
     }
@@ -60,6 +66,7 @@ struct ConfigStoreTests {
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)
+        #expect(store.vmConfiguration.runnerCompletionTimeoutSeconds == 3_600)
         #expect(store.diagnosticsRetentionConfig.maxBundleCount == 100)
         #expect(store.diagnosticsRetentionConfig.maxAgeDays == 14)
         #expect(!store.keepInstallerAfterVerification)

@@ -273,6 +273,11 @@ struct VMEngineTests {
             atomically: true,
             encoding: .utf8
         )
+        try #"{"exitCode":1}"#.write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+            atomically: true,
+            encoding: .utf8
+        )
 
         try await engine.teardown(outcome: .failed(reason: "runner failed"))
 
@@ -294,6 +299,84 @@ struct VMEngineTests {
                 atPath: bundleURL.appendingPathComponent(GuestBootstrapContract.exitCodeFileName).path
             )
         )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: bundleURL.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName).path
+            )
+        )
+    }
+
+    @Test("waitForJobCompletion returns success for zero exit code")
+    @MainActor
+    func waitForJobCompletionSuccess() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let storage = StorageManager(rootPath: tempDir.path)
+        let sharedDir = storage.jobsDirectory.appendingPathComponent("700", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        try "0".write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.exitCodeFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"{"exitCode":0}"#.write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try await engine.waitForJobCompletion(
+            jobId: 700,
+            timeoutSeconds: 1,
+            pollIntervalSeconds: 0.01
+        )
+
+        #expect(result == .success)
+    }
+
+    @Test("waitForJobCompletion returns failure for nonzero exit code")
+    @MainActor
+    func waitForJobCompletionFailure() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let storage = StorageManager(rootPath: tempDir.path)
+        let sharedDir = storage.jobsDirectory.appendingPathComponent("701", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        try "2".write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.exitCodeFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"{"exitCode":2}"#.write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = try await engine.waitForJobCompletion(
+            jobId: 701,
+            timeoutSeconds: 1,
+            pollIntervalSeconds: 0.01
+        )
+
+        #expect(result == .failure("Runner exited with code 2"))
+    }
+
+    @Test("waitForJobCompletion times out without marker")
+    @MainActor
+    func waitForJobCompletionTimeout() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let result = try await engine.waitForJobCompletion(
+            jobId: 702,
+            timeoutSeconds: 1,
+            pollIntervalSeconds: 0.01
+        )
+
+        #expect(result == .failure("Timed out after 1s waiting for runner completion marker"))
     }
 
     @Test("cacheSizeBytes delegates to CacheManager")

@@ -5,7 +5,7 @@ actor QueueEngine {
     let dispatcher: JobDispatcher
     let runnerLeaseStore: RunnerLeaseStore
     var onJobReady: (@Sendable (RunnerJob) async -> Void)?
-    var onJobCompleted: (@Sendable (RunnerJob, JobResult) async -> Void)?
+    var onJobCompleted: (@Sendable (RunnerJob, JobResult, JobCompletionSource) async -> Void)?
 
     private let github: GitHubEngine
     private let client: any GitHubClientProtocol
@@ -31,7 +31,7 @@ actor QueueEngine {
         onJobReady = callback
     }
 
-    func setOnJobCompleted(_ callback: @escaping @Sendable (RunnerJob, JobResult) async -> Void) {
+    func setOnJobCompleted(_ callback: @escaping @Sendable (RunnerJob, JobResult, JobCompletionSource) async -> Void) {
         onJobCompleted = callback
     }
 
@@ -206,11 +206,11 @@ actor QueueEngine {
         }
 
         let result: JobResult = completed.result == "success" ? .success : .failure(completed.result ?? "unknown")
-        await dispatcher.markCompleted(jobId: completed.jobId, in: jobStore, result: result)
-        if let completedJob = await jobStore.job(byId: completed.jobId) {
-            await onJobCompleted?(completedJob, result)
-        }
-        await tryDispatch()
+        await completeJob(jobId: completed.jobId, result: result, source: .github)
+    }
+
+    func completeJobFromGuest(jobId: Int64, result: JobResult) async {
+        await completeJob(jobId: jobId, result: result, source: .guest)
     }
 
     // MARK: - Dispatch
@@ -227,4 +227,27 @@ actor QueueEngine {
             await callback(current)
         }
     }
+
+    private func completeJob(jobId: Int64, result: JobResult, source: JobCompletionSource) async {
+        guard let job = await jobStore.job(byId: jobId) else {
+            Log.queue.warning("Completion ignored for unknown job \(jobId)")
+            return
+        }
+
+        guard job.status != .completed, job.status != .failed else {
+            Log.queue.info("Completion ignored for terminal job \(jobId)")
+            return
+        }
+
+        await dispatcher.markCompleted(jobId: jobId, in: jobStore, result: result)
+        if let completedJob = await jobStore.job(byId: jobId) {
+            await onJobCompleted?(completedJob, result, source)
+        }
+        await tryDispatch()
+    }
+}
+
+enum JobCompletionSource: Equatable, Sendable {
+    case github
+    case guest
 }

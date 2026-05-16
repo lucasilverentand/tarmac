@@ -68,6 +68,11 @@ struct DiagnosticsBundleStore: Sendable {
                 to: bundleURL.appendingPathComponent(GuestBootstrapContract.exitCodeFileName),
                 retainedFiles: &retainedFiles
             )
+            copyIfPresent(
+                sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+                to: bundleURL.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+                retainedFiles: &retainedFiles
+            )
 
             let runnerLog = sharedDirectory.appendingPathComponent(GuestBootstrapContract.runnerLogFileName)
             if shouldKeepFullLogs {

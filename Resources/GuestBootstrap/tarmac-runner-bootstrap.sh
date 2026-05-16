@@ -12,6 +12,7 @@ LOCAL_LOG="/var/log/tarmac-runner-bootstrap.log"
 BOOTSTRAP_LOG=""
 RUNNER_LOG=""
 EXIT_CODE_FILE=""
+COMPLETION_MARKER_FILE=""
 
 log() {
     local message="$1"
@@ -37,6 +38,9 @@ finish() {
     local exit_code="$1"
     if [[ -n "${EXIT_CODE_FILE}" ]]; then
         echo "${exit_code}" > "${EXIT_CODE_FILE}"
+    fi
+    if [[ -n "${COMPLETION_MARKER_FILE}" ]]; then
+        printf '{"exitCode":%s,"completedAt":"%s"}\n' "${exit_code}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "${COMPLETION_MARKER_FILE}"
     fi
     log "Bootstrap finished with exit code ${exit_code}"
     shutdown_guest
@@ -94,6 +98,7 @@ prepare_shared_logging() {
     BOOTSTRAP_LOG="${SHARED_MOUNT}/bootstrap.log"
     RUNNER_LOG="${SHARED_MOUNT}/runner.log"
     EXIT_CODE_FILE="${SHARED_MOUNT}/exit-code"
+    COMPLETION_MARKER_FILE="${SHARED_MOUNT}/completion.json"
 
     /usr/bin/touch "${BOOTSTRAP_LOG}" "${RUNNER_LOG}" "${EXIT_CODE_FILE}" 2>> "${LOCAL_LOG}" || {
         log "Cannot write bootstrap files into ${SHARED_MOUNT}"

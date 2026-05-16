@@ -12,6 +12,7 @@ final class AppState {
     private var queueEngine: QueueEngine?
     private var vmEngine: VMEngine?
     private var syncTask: Task<Void, Never>?
+    private var completionMonitorTasks: [Int64: Task<Void, Never>] = [:]
 
     private let githubClientFactory: () -> any GitHubClientProtocol
     private let vmEngineFactory:
@@ -109,9 +110,9 @@ final class AppState {
             guard let self else { return }
             await self.handleJobReady(job)
         }
-        await queueEngine.setOnJobCompleted { [weak self] job, result in
+        await queueEngine.setOnJobCompleted { [weak self] job, result, source in
             guard let self else { return }
-            await self.handleJobCompleted(job, result: result)
+            await self.handleJobCompleted(job, result: result, source: source)
         }
 
         let reconciliation = await queueEngine.reconcileInterruptedLeases(orgs: configStore.organizations)
@@ -130,6 +131,10 @@ final class AppState {
     func stop() async {
         syncTask?.cancel()
         syncTask = nil
+        for task in completionMonitorTasks.values {
+            task.cancel()
+        }
+        completionMonitorTasks.removeAll()
 
         if let queueEngine {
             await queueEngine.stop()
@@ -215,6 +220,7 @@ final class AppState {
             vmStatusViewModel.activeVM = vmEngine.currentInstance
 
             Log.app.info("Job \(job.id) is running in VM")
+            startCompletionMonitor(for: job.id, vmEngine: vmEngine, queueEngine: queueEngine)
         } catch {
             Log.app.error("Failed to provision job \(job.id): \(error.localizedDescription)")
             if let failedLease = await queueEngine.runnerLeaseStore.recordCleanupState(jobId: job.id, state: .failed) {
@@ -250,9 +256,39 @@ final class AppState {
         }
     }
 
-    private func handleJobCompleted(_ job: RunnerJob, result: JobResult) async {
+    private func startCompletionMonitor(for jobId: Int64, vmEngine: VMEngine, queueEngine: QueueEngine) {
+        completionMonitorTasks[jobId]?.cancel()
+        completionMonitorTasks[jobId] = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let result = try await vmEngine.waitForJobCompletion(
+                    jobId: jobId,
+                    timeoutSeconds: self.configStore.vmConfiguration.runnerCompletionTimeoutSeconds
+                )
+                guard !Task.isCancelled else { return }
+                await queueEngine.completeJobFromGuest(jobId: jobId, result: result)
+            } catch is CancellationError {
+                Log.app.debug("Completion monitor cancelled for job \(jobId)")
+            } catch {
+                await queueEngine.completeJobFromGuest(jobId: jobId, result: .failure(error.localizedDescription))
+            }
+
+            self.completionMonitorTasks[jobId] = nil
+        }
+    }
+
+    private func handleJobCompleted(
+        _ job: RunnerJob,
+        result: JobResult,
+        source: JobCompletionSource
+    ) async {
         guard let vmEngine, let queueEngine else { return }
         guard vmEngine.currentInstance?.jobId == job.id else { return }
+        if source == .github {
+            completionMonitorTasks[job.id]?.cancel()
+            completionMonitorTasks[job.id] = nil
+        }
 
         let outcome: JobDiagnosticsOutcome =
             switch result {
@@ -278,7 +314,9 @@ final class AppState {
         if let diagnosticsPath {
             await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
         }
+        queueViewModel.updateJobStatus(id: job.id, status: result.jobStatus)
         vmStatusViewModel.activeVM = nil
+        completionMonitorTasks[job.id] = nil
     }
 
     // MARK: - Job Store Sync
