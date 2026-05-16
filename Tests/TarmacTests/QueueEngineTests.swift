@@ -6,7 +6,13 @@ import Testing
 
 @Suite("QueueEngine")
 struct QueueEngineTests {
-    private func makeEngine() throws -> (QueueEngine, JobStore, RecordingGitHubClient) {
+    private func makeEngine(
+        sessionStore: PollingSessionStore = PollingSessionStore(
+            defaults: UserDefaults(suiteName: "queue-engine-\(UUID().uuidString)")!
+        ),
+        privateKeyOrg: Organization = TestFactories.makeOrg(),
+        retryPolicy: QueuePollingRetryPolicy = .immediate
+    ) throws -> (QueueEngine, JobStore, RecordingGitHubClient) {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let client = RecordingGitHubClient(
             defaultResponseJSON: """
@@ -17,9 +23,7 @@ struct QueueEngineTests {
         let keychain = PreviewKeychainService()
         let keyData = try TestFactories.makeTestKeyData()
 
-        // Save key for the default test org
-        let defaultOrg = TestFactories.makeOrg()
-        _ = keychain.save(key: defaultOrg.privateKeyKeychainKey, data: keyData)
+        _ = keychain.save(key: privateKeyOrg.privateKeyKeychainKey, data: keyData)
 
         let tempDir = try TestFactories.makeTempDir()
         let github = GitHubEngine(
@@ -34,7 +38,9 @@ struct QueueEngineTests {
             github: github,
             client: client,
             jobStore: jobStore,
-            dispatcher: dispatcher
+            dispatcher: dispatcher,
+            sessionStore: sessionStore,
+            retryPolicy: retryPolicy
         )
 
         return (engine, jobStore, client)
@@ -383,6 +389,102 @@ struct QueueEngineTests {
 
         #expect(report.removedRunners.map(\.runnerId) == [777])
         #expect(await leaseStore.activeLeases.isEmpty)
+    }
+
+    @Test("Duplicate GitHub message ID is ignored before job handling")
+    func duplicateMessageIdIgnored() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg()
+
+        let first = jobAvailableMessage(jobId: 70)
+        let second = ScaleSetMessage(
+            messageId: first.messageId,
+            messageType: "JobAvailable",
+            body: """
+                {"jobMessageBase":{"jobId":71,"runnerRequestId":2,"repositoryName":"test-repo","ownerName":"test-org","workflowRunName":"CI"}}
+                """,
+            statistics: nil
+        )
+
+        await engine.handleMessages([first, second], org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.id == 70)
+    }
+
+    @Test("start removes stale persisted session before creating a new one")
+    func startRemovesStalePersistedSession() async throws {
+        let defaults = UserDefaults(suiteName: "polling-session-\(UUID().uuidString)")!
+        let sessionStore = PollingSessionStore(defaults: defaults)
+        let org = TestFactories.makeOrg()
+        sessionStore.save(
+            PollingSessionRecord(
+                orgName: org.name,
+                scaleSetId: org.scaleSetId!,
+                sessionId: "stale-session",
+                updatedAt: Date()
+            )
+        )
+
+        let (engine, _, client) = try makeEngine(sessionStore: sessionStore, privateKeyOrg: org)
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/stale-session",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                {"sessionId":"new-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/new-session/message",
+            method: "POST",
+            statusCode: 202,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/new-session",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+
+        await engine.start(orgs: [org])
+
+        var requests = await client.requests
+        for _ in 0..<50 {
+            let sawStaleDelete = requests.contains {
+                $0.method == "DELETE" && $0.path.contains("stale-session")
+            }
+            let sawCreate = requests.contains {
+                $0.method == "POST" && $0.path == "/orgs/test-org/actions/runners/42/sessions"
+            }
+            if sawStaleDelete && sawCreate {
+                break
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+            requests = await client.requests
+        }
+
+        await engine.stop()
+
+        let deleteStaleIndex = requests.firstIndex {
+            $0.method == "DELETE" && $0.path.contains("stale-session")
+        }
+        let createIndex = requests.firstIndex {
+            $0.method == "POST" && $0.path == "/orgs/test-org/actions/runners/42/sessions"
+        }
+
+        let staleDeleteIndex = try #require(deleteStaleIndex)
+        let newCreateIndex = try #require(createIndex)
+        #expect(staleDeleteIndex < newCreateIndex)
+        #expect(sessionStore.record(for: org.name) == nil)
     }
 }
 
