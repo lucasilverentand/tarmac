@@ -113,33 +113,12 @@ final class SettingsViewModel {
     var cacheDirectoryPath: String {
         get { configStore.storageRootPath }
         set {
-            let oldRoot = URL(fileURLWithPath: configStore.storageRootPath)
-            let newStorage = StorageManager(rootPath: newValue)
             do {
-                let explicitBaseImageURL =
-                    configStore.baseImagePath.isEmpty
-                    ? nil
-                    : URL(fileURLWithPath: configStore.baseImagePath)
-                let result = try newStorage.migrateManagedData(
-                    from: oldRoot,
-                    explicitBaseImageURL: explicitBaseImageURL
-                )
-                if result.movedItems > 0 {
-                    Log.config.info("Migrated \(result.movedItems) storage item(s) to \(newStorage.rootDirectory.path)")
-                }
-                if result.skippedExistingDestination > 0 {
-                    Log.config.warning(
-                        "Skipped \(result.skippedExistingDestination) storage item(s) because the destination already exists"
-                    )
-                }
-                configStore.storageRootPath = newStorage.rootDirectory.path
-                configStore.baseImagePath = newStorage.baseImageURL.path
+                try setStorageRoot(to: URL(fileURLWithPath: newValue))
             } catch {
                 Log.config.error("Failed to migrate storage folder: \(error.localizedDescription)")
                 return
             }
-            configStore.save()
-            refreshStorageHealth()
         }
     }
 
@@ -195,9 +174,7 @@ final class SettingsViewModel {
     }
 
     func configureStorage(at url: URL) throws {
-        try configStore.configureStorage(at: url)
-        refreshStorageHealth()
-        Log.config.info("Storage directory changed to \(url.path)")
+        try setStorageRoot(to: url)
     }
 
     func formatStorageBytes(_ bytes: Int64) -> String {
@@ -313,6 +290,38 @@ final class SettingsViewModel {
         )
         .issues
         .map(\.message)
+    }
+
+    private func setStorageRoot(to directory: URL) throws {
+        let newStorage = StorageManager(rootDirectory: directory)
+        try newStorage.validateForSetup()
+
+        if configStore.hasCompletedStorageSetup {
+            let oldRoot = URL(fileURLWithPath: configStore.storageRootPath)
+            let explicitBaseImageURL =
+                configStore.baseImagePath.isEmpty
+                ? nil
+                : URL(fileURLWithPath: configStore.baseImagePath)
+            let result = try newStorage.migrateManagedData(
+                from: oldRoot,
+                explicitBaseImageURL: explicitBaseImageURL
+            )
+            if result.movedItems > 0 {
+                Log.config.info("Migrated \(result.movedItems) storage item(s) to \(newStorage.rootDirectory.path)")
+            }
+            if result.skippedExistingDestination > 0 {
+                Log.config.warning(
+                    "Skipped \(result.skippedExistingDestination) storage item(s) because the destination already exists"
+                )
+            }
+        }
+
+        configStore.storageRootPath = newStorage.rootDirectory.path
+        configStore.baseImagePath = newStorage.baseImageURL.path
+        configStore.hasCompletedStorageSetup = true
+        configStore.save()
+        refreshStorageHealth()
+        Log.config.info("Storage directory changed to \(newStorage.rootDirectory.path)")
     }
 }
 

@@ -189,7 +189,7 @@ struct SettingsViewModelTests {
             TestFactories.cleanup(newRoot)
         }
 
-        store.storageRootPath = oldRoot.path
+        try store.configureStorage(at: oldRoot)
         let oldStorage = StorageManager(rootDirectory: oldRoot)
         try FileManager.default.createDirectory(at: oldStorage.runnerDirectory, withIntermediateDirectories: true)
         try "runner".write(
@@ -205,6 +205,74 @@ struct SettingsViewModelTests {
         #expect(store.baseImagePath == newStorage.baseImageURL.path)
         #expect(
             FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
+        )
+    }
+
+    @Test("configureStorage migrates managed artifacts from the UI path")
+    func configureStorageMigratesArtifacts() throws {
+        let (vm, store, _) = makeVM()
+        let oldRoot = try TestFactories.makeTempDir()
+        let newRoot = try TestFactories.makeTempDir()
+        defer {
+            TestFactories.cleanup(oldRoot)
+            TestFactories.cleanup(newRoot)
+        }
+
+        try store.configureStorage(at: oldRoot)
+        let oldStorage = StorageManager(rootDirectory: oldRoot)
+        try oldStorage.prepareBaseDirectories()
+        try "platform".write(
+            to: oldStorage.platformDirectory.appendingPathComponent("identity.data"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "cache".write(
+            to: oldStorage.actionsCacheDirectory.appendingPathComponent("entry"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try vm.configureStorage(at: newRoot)
+
+        let newStorage = StorageManager(rootDirectory: newRoot)
+        #expect(store.storageRootPath == newStorage.rootDirectory.path)
+        #expect(store.hasCompletedStorageSetup)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: newStorage.platformDirectory.appendingPathComponent("identity.data").path
+            )
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: newStorage.actionsCacheDirectory.appendingPathComponent("entry").path
+            )
+        )
+    }
+
+    @Test("configureStorage does not migrate from an unconfirmed default root")
+    func configureStorageSkipsMigrationBeforeSetup() throws {
+        let (vm, store, _) = makeVM()
+        let oldRoot = try TestFactories.makeTempDir()
+        let newRoot = try TestFactories.makeTempDir()
+        defer {
+            TestFactories.cleanup(oldRoot)
+            TestFactories.cleanup(newRoot)
+        }
+
+        store.storageRootPath = oldRoot.path
+        let oldStorage = StorageManager(rootDirectory: oldRoot)
+        try oldStorage.prepareBaseDirectories()
+        try FileManager.default.createDirectory(at: oldStorage.runnerDirectory, withIntermediateDirectories: true)
+        let oldRunner = oldStorage.runnerDirectory.appendingPathComponent("run.sh")
+        try "runner".write(to: oldRunner, atomically: true, encoding: .utf8)
+
+        try vm.configureStorage(at: newRoot)
+
+        let newStorage = StorageManager(rootDirectory: newRoot)
+        #expect(store.hasCompletedStorageSetup)
+        #expect(FileManager.default.fileExists(atPath: oldRunner.path))
+        #expect(
+            !FileManager.default.fileExists(atPath: newStorage.runnerDirectory.appendingPathComponent("run.sh").path)
         )
     }
 
