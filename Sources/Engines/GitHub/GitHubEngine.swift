@@ -38,14 +38,14 @@ actor GitHubEngine {
 
     func ensureRunner(for org: Organization) async throws -> URL {
         let token = try await installationToken(for: org)
-        return try await runnerProvider.ensureRunner(token: token, org: org.name)
+        return try await runnerProvider.ensureRunner(token: token, accountPath: org.accountPath)
     }
 
     func generateJITConfig(for org: Organization, runnerName: String) async throws -> String {
         let token = try await installationToken(for: org)
         return try await runnerProvider.generateJITConfig(
             token: token,
-            org: org.name,
+            accountPath: org.accountPath,
             name: runnerName,
             labels: org.runnerLabels
         )
@@ -59,7 +59,7 @@ actor GitHubEngine {
         while true {
             let response: GitHubRunnerListResponse = try await client.request(
                 method: "GET",
-                path: "/orgs/\(org.name)/actions/runners?per_page=100&page=\(page)",
+                path: "\(org.accountPath)/actions/runners?per_page=100&page=\(page)",
                 body: nil,
                 headers: ["Authorization": "Bearer \(token)"],
                 timeoutInterval: 30
@@ -79,7 +79,7 @@ actor GitHubEngine {
         let token = try await installationToken(for: org)
         let (data, response) = try await client.requestRaw(
             method: "DELETE",
-            path: "/orgs/\(org.name)/actions/runners/\(runnerId)",
+            path: "\(org.accountPath)/actions/runners/\(runnerId)",
             body: nil,
             headers: ["Authorization": "Bearer \(token)"],
             timeoutInterval: 30

@@ -13,7 +13,7 @@ enum AppSection: String, Identifiable, CaseIterable, Hashable {
         switch self {
         case .queue: "Queue"
         case .virtualMachine: "Virtual Machine"
-        case .organizations: "Organizations"
+        case .organizations: "Accounts"
         case .cache: "Cache & Diagnostics"
         case .storage: "Storage"
         }
