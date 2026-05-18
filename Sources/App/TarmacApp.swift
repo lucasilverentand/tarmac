@@ -33,31 +33,22 @@ struct TarmacApp: App {
                 .onAppear {
                     Log.app.info("Dashboard window opened")
                     NSApp.activate()
-                    centerAndFloatDashboard()
                 }
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    appState.selectedSection = .storage
+                    openWindow(id: "dashboard")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
 
         Window("VM Display", id: "vm-display") {
             VMDisplayWindow()
         }
         .windowResizability(.contentMinSize)
-
-        Settings {
-            SettingsView(settingsViewModel: appState.settingsViewModel)
-        }
-    }
-
-    private func centerAndFloatDashboard() {
-        DispatchQueue.main.async {
-            guard
-                let window = NSApp.windows.first(where: {
-                    $0.isVisible && $0.identifier?.rawValue.contains("dashboard") == true
-                        || ($0.title == "Dashboard" && $0.level == .normal)
-                })
-            else { return }
-            window.center()
-            window.level = .floating
-        }
     }
 }

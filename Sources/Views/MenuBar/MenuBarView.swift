@@ -4,7 +4,6 @@ struct MenuBarView: View {
     let appState: AppState
 
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -78,6 +77,7 @@ struct MenuBarView: View {
     private var actionButtons: some View {
         VStack(spacing: 4) {
             Button {
+                appState.selectedSection = .queue
                 openWindow(id: "dashboard")
                 NSApp.activate()
             } label: {
@@ -87,7 +87,9 @@ struct MenuBarView: View {
             .buttonStyle(.plain)
 
             Button {
-                openSettings()
+                appState.selectedSection = .storage
+                openWindow(id: "dashboard")
+                NSApp.activate()
             } label: {
                 Label("Settings...", systemImage: "gear")
                     .frame(maxWidth: .infinity, alignment: .leading)

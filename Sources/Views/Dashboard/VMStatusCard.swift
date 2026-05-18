@@ -2,12 +2,16 @@ import SwiftUI
 
 struct VMStatusCard: View {
     let vmStatusViewModel: VMStatusViewModel
-    let vmConfig: VMConfiguration
     let configStore: ConfigStore
+    @Bindable var settingsViewModel: SettingsViewModel
+    var onWizardDismiss: (() -> Void)? = nil
 
     @State private var showingImageWizard = false
     @State private var displaySource = VMDisplaySource.shared
     @Environment(\.openWindow) private var openWindow
+
+    private var maxCPU: Int { ProcessInfo.processInfo.processorCount }
+    private var maxMemoryGB: Int { Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024)) }
 
     var body: some View {
         Group {
@@ -20,7 +24,7 @@ struct VMStatusCard: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $showingImageWizard) {
+        .sheet(isPresented: $showingImageWizard, onDismiss: { onWizardDismiss?() }) {
             BaseImageWizardView(configStore: configStore)
         }
     }
@@ -31,14 +35,47 @@ struct VMStatusCard: View {
             heroStatus
             readinessSection
             baseImageSection
+            resourcesSection
             storageSection
             activeVMSection
             runnerCleanupSection
             imageProfileSection
-            configurationSection
             Spacer(minLength: 0)
         }
         .padding(20)
+    }
+
+    private var resourcesSection: some View {
+        InspectorSection(title: "Resources") {
+            VStack(alignment: .leading, spacing: 12) {
+                Stepper(
+                    "CPU cores: \(settingsViewModel.vmConfiguration.cpuCount)",
+                    value: $settingsViewModel.vmConfiguration.cpuCount,
+                    in: 1...maxCPU
+                )
+
+                Stepper(
+                    "Memory: \(settingsViewModel.vmConfiguration.memorySizeGB) GB",
+                    value: $settingsViewModel.vmConfiguration.memorySizeGB,
+                    in: 4...maxMemoryGB
+                )
+
+                Stepper(
+                    "Disk size: \(settingsViewModel.vmConfiguration.diskSizeGB) GB",
+                    value: $settingsViewModel.vmConfiguration.diskSizeGB,
+                    in: 40...500,
+                    step: 10
+                )
+
+                Stepper(
+                    "Runner timeout: \(settingsViewModel.vmConfiguration.runnerCompletionTimeoutSeconds / 60) min",
+                    value: $settingsViewModel.vmConfiguration.runnerCompletionTimeoutSeconds,
+                    in: 300...28_800,
+                    step: 300
+                )
+            }
+            .font(.subheadline)
+        }
     }
 
     private var header: some View {
@@ -270,16 +307,6 @@ struct VMStatusCard: View {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    private var configurationSection: some View {
-        InspectorSection(title: "Configuration") {
-            VStack(alignment: .leading, spacing: 10) {
-                DetailRow(title: "CPU", value: "\(vmConfig.cpuCount) cores")
-                DetailRow(title: "Memory", value: "\(vmConfig.memorySizeGB) GB")
-                DetailRow(title: "Disk", value: "\(vmConfig.diskSizeGB) GB")
             }
         }
     }

@@ -106,6 +106,5 @@ struct CacheSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding()
     }
 }

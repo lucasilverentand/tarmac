@@ -1,5 +1,35 @@
 import Foundation
 
+enum AppSection: String, Identifiable, CaseIterable, Hashable {
+    case queue
+    case virtualMachine
+    case organizations
+    case cache
+    case storage
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .queue: "Queue"
+        case .virtualMachine: "Virtual Machine"
+        case .organizations: "Organizations"
+        case .cache: "Cache & Diagnostics"
+        case .storage: "Storage"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .queue: "tray.full"
+        case .virtualMachine: "desktopcomputer"
+        case .organizations: "building.2"
+        case .cache: "archivebox"
+        case .storage: "externaldrive"
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class AppState {
@@ -7,6 +37,7 @@ final class AppState {
     let queueViewModel: QueueViewModel
     let vmStatusViewModel: VMStatusViewModel
     let settingsViewModel: SettingsViewModel
+    var selectedSection: AppSection = .queue
 
     private var githubEngine: GitHubEngine?
     private var queueEngine: QueueEngine?
@@ -354,7 +385,7 @@ final class AppState {
         }
     }
 
-    private func refreshReadiness() {
+    func refreshReadiness() {
         settingsViewModel.refreshStorageHealth()
         let storage = StorageManager(rootPath: configStore.storageRootPath)
         vmStatusViewModel.storageHealth = settingsViewModel.storageHealth
