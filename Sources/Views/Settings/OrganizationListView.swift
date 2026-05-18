@@ -39,11 +39,17 @@ struct OrganizationListView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView(
-            "No Organizations",
-            systemImage: "building.2",
-            description: Text("Add a GitHub organization to start receiving runner jobs.")
-        )
+        VStack(spacing: 18) {
+            ContentUnavailableView(
+                "No Organizations",
+                systemImage: "building.2",
+                description: Text("Add a GitHub organization runner scale set to start receiving jobs.")
+            )
+
+            GitHubSetupGuidanceList(items: GitHubSetupGuidance.setupOverview)
+                .padding(.horizontal, 32)
+                .frame(maxWidth: 640)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -250,6 +256,68 @@ private struct OrganizationRow: View {
     }
 }
 
+// MARK: - Setup Guidance
+
+private struct GitHubSetupGuidanceList: View {
+    let items: [GitHubSetupGuidance]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(items) { item in
+                GuidanceCallout(item: item)
+            }
+        }
+    }
+}
+
+private struct GuidanceCallout: View {
+    let item: GitHubSetupGuidance
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var iconName: String {
+        switch item.scope {
+        case .organization:
+            "building.2"
+        case .repository:
+            "line.3.horizontal.decrease.circle"
+        case .enterprise:
+            "exclamationmark.triangle"
+        case .permissions:
+            "key"
+        }
+    }
+
+    private var iconColor: Color {
+        switch item.scope {
+        case .enterprise:
+            .orange
+        default:
+            .secondary
+        }
+    }
+}
+
 // MARK: - Form Sheet
 
 private struct OrganizationFormSheet: View {
@@ -302,14 +370,22 @@ private struct OrganizationFormSheet: View {
             ScrollView {
                 Form {
                     Section("Connection") {
+                        GitHubSetupGuidanceList(items: [
+                            .organization,
+                            .enterprise,
+                        ])
+
                         TextField("Organization name", text: $name)
                             .disabled(isEditing)
                         TextField("Installation ID", text: $installationId)
+                            .help("The GitHub App installation ID for this organization")
                         TextField("Scale Set ID", text: $scaleSetId)
                             .help("The numeric ID of your Actions Runner Scale Set for this org")
                     }
 
                     Section("GitHub App Credentials") {
+                        GuidanceCallout(item: .permissions)
+
                         TextField("App ID", text: $appId)
 
                         HStack {
@@ -419,6 +495,8 @@ private struct OrganizationFormSheet: View {
                     }
 
                     Section("Repository Filter") {
+                        GuidanceCallout(item: .repository)
+
                         Picker("Filter mode", selection: $filterMode) {
                             ForEach(RepositoryFilterMode.allCases, id: \.self) { mode in
                                 Text(mode.label).tag(mode)
