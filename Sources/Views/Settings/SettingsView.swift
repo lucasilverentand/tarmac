@@ -29,6 +29,8 @@ private struct GeneralSettingsTab: View {
     @Bindable var viewModel: SettingsViewModel
 
     @State private var storageError: String?
+    @State private var showingBaseImageWizard = false
+    @State private var showingRebuildConfirmation = false
 
     var body: some View {
         let report = viewModel.storageReport
@@ -124,9 +126,14 @@ private struct GeneralSettingsTab: View {
                 Button("Remove Stale Cloned Disks", role: .destructive) {
                     viewModel.cleanupDebugDisks()
                 }
+
+                Button("Rebuild Base Image", role: .destructive) {
+                    showingRebuildConfirmation = true
+                }
+                .disabled(report.baseImageBytes == 0 && report.platformDataBytes == 0)
             }
 
-            if let storageError {
+            if let storageError = storageError ?? viewModel.lastBaseImageResetError {
                 Label(storageError, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -151,6 +158,27 @@ private struct GeneralSettingsTab: View {
         .padding()
         .onAppear {
             viewModel.refreshStorageHealth()
+        }
+        .sheet(isPresented: $showingBaseImageWizard) {
+            BaseImageWizardView(configStore: viewModel.configStore)
+        }
+        .confirmationDialog(
+            "Rebuild base image?",
+            isPresented: $showingRebuildConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset and Rebuild", role: .destructive) {
+                if viewModel.resetBaseImage(preserveRestoreImage: true) {
+                    storageError = nil
+                    showingBaseImageWizard = true
+                }
+            }
+
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "This removes the current base image and VM platform identity. A retained restore image is kept so the wizard can reinstall and verify the replacement."
+            )
         }
     }
 
