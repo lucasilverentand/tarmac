@@ -245,7 +245,8 @@ final class ImageManager: Sendable {
         platform.machineIdentifier = machineIdentifier
         platform.auxiliaryStorage = try VZMacAuxiliaryStorage(
             creatingStorageAt: platformStore.auxiliaryStoragePath,
-            hardwareModel: hardwareModel
+            hardwareModel: hardwareModel,
+            options: [.allowOverwrite]
         )
 
         let vmConfig = VZVirtualMachineConfiguration()
