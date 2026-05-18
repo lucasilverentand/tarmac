@@ -83,7 +83,9 @@ struct Organization: Identifiable, Codable, Hashable, Sendable {
         self.appId = try container.decode(String.self, forKey: .appId)
         self.installationId = try container.decode(Int.self, forKey: .installationId)
         self.scaleSetId = try container.decodeIfPresent(Int.self, forKey: .scaleSetId)
-        self.labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? ["self-hosted", "macOS", "ARM64"]
+        self.labels =
+            try container.decodeIfPresent([String].self, forKey: .labels)
+            ?? ["self-hosted", "macOS", "ARM64"]
         self.imageProfile = try container.decodeIfPresent(RunnerImageProfile.self, forKey: .imageProfile)
         self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         self.filterMode = try container.decodeIfPresent(RepositoryFilterMode.self, forKey: .filterMode) ?? .all
