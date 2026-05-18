@@ -18,12 +18,12 @@ struct OrganizationListView: View {
 
             HStack {
                 if !viewModel.organizations.isEmpty {
-                    Text("Drag to set priority — top org is dispatched first")
+                    Text("Drag to set priority — top account is dispatched first")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Button("Add Organization...") {
+                Button("Add Account...") {
                     showingAddSheet = true
                 }
                 .controlSize(.small)
@@ -40,9 +40,9 @@ struct OrganizationListView: View {
 
     private var emptyState: some View {
         ContentUnavailableView(
-            "No Organizations",
+            "No Accounts",
             systemImage: "building.2",
-            description: Text("Add a GitHub organization to start receiving runner jobs.")
+            description: Text("Add a GitHub organization or enterprise to start receiving runner jobs.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -108,6 +108,13 @@ private struct OrganizationRow: View {
                     Text(org.name)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(org.isEnabled ? .primary : .secondary)
+
+                    Text(org.accountType.displayName.lowercased())
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
 
                     if !org.isEnabled {
                         Text("disabled")
@@ -257,6 +264,7 @@ private struct OrganizationFormSheet: View {
     var existing: Organization?
 
     @State private var name: String = ""
+    @State private var accountType: GitHubAccountType = .organization
     @State private var appId: String = ""
     @State private var installationId: String = ""
     @State private var scaleSetId: String = ""
@@ -294,19 +302,32 @@ private struct OrganizationFormSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(isEditing ? "Edit Organization" : "Add Organization")
+            Text(isEditing ? "Edit Account" : "Add Account")
                 .font(.headline)
                 .padding(.top, 20)
                 .padding(.bottom, 4)
 
             ScrollView {
                 Form {
-                    Section("Connection") {
-                        TextField("Organization name", text: $name)
+                    Section("Account") {
+                        Picker("Type", selection: $accountType) {
+                            ForEach(GitHubAccountType.allCases) { type in
+                                Text(type.displayName).tag(type)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(isEditing)
+
+                        TextField(accountType == .enterprise ? "Enterprise slug" : "Organization name", text: $name)
                             .disabled(isEditing)
+                            .help(
+                                accountType == .enterprise
+                                    ? "The enterprise slug as shown in github.com/enterprises/<slug>"
+                                    : "The organization login as shown in github.com/<name>"
+                            )
                         TextField("Installation ID", text: $installationId)
                         TextField("Scale Set ID", text: $scaleSetId)
-                            .help("The numeric ID of your Actions Runner Scale Set for this org")
+                            .help("The numeric ID of your Actions Runner Scale Set for this account")
                     }
 
                     Section("GitHub App Credentials") {
@@ -477,6 +498,7 @@ private struct OrganizationFormSheet: View {
         .onAppear {
             if let org = existing {
                 name = org.name
+                accountType = org.accountType
                 appId = org.appId
                 installationId = "\(org.installationId)"
                 scaleSetId = org.scaleSetId.map(String.init) ?? ""
@@ -568,6 +590,7 @@ private struct OrganizationFormSheet: View {
 
         if var org = existing {
             org.name = name
+            org.accountType = accountType
             org.appId = appId
             org.installationId = parsedInstallationId
             org.scaleSetId = parsedScaleSetId
@@ -579,6 +602,7 @@ private struct OrganizationFormSheet: View {
         } else {
             var org = Organization(
                 name: name,
+                accountType: accountType,
                 appId: appId,
                 installationId: parsedInstallationId,
                 labels: parsedLabels

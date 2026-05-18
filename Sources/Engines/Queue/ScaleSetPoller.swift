@@ -21,7 +21,7 @@ actor ScaleSetPoller {
             throw ScaleSetPollerError.missingScaleSetId(org: org.name)
         }
 
-        let path = "/orgs/\(org.name)/actions/runners/\(scaleSetId)/sessions"
+        let path = "\(org.accountPath)/actions/runners/\(scaleSetId)/sessions"
 
         Log.poller.info("Creating session for org \(org.name) scaleSet \(scaleSetId)")
 
@@ -55,7 +55,7 @@ actor ScaleSetPoller {
             throw ScaleSetPollerError.missingScaleSetId(org: org.name)
         }
 
-        let path = "/orgs/\(org.name)/actions/runners/\(scaleSetId)/sessions/\(sessionId)"
+        let path = "\(org.accountPath)/actions/runners/\(scaleSetId)/sessions/\(sessionId)"
 
         Log.poller.info("Deleting session \(sessionId) for org \(org.name)")
 
@@ -85,7 +85,7 @@ actor ScaleSetPoller {
         }
 
         let token = try await tokenProvider(org)
-        let path = "/orgs/\(org.name)/actions/runners/\(scaleSetId)/sessions/\(sessionId)/message"
+        let path = "\(org.accountPath)/actions/runners/\(scaleSetId)/sessions/\(sessionId)/message"
 
         Log.poller.debug("Long-polling org \(org.name) session \(sessionId)")
 
