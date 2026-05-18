@@ -38,6 +38,11 @@ struct TarmacApp: App {
         }
         .windowResizability(.contentSize)
 
+        Window("VM Display", id: "vm-display") {
+            VMDisplayWindow()
+        }
+        .windowResizability(.contentMinSize)
+
         Settings {
             SettingsView(settingsViewModel: appState.settingsViewModel)
         }

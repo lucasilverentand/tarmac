@@ -204,6 +204,7 @@ final class ImageManager: Sendable {
         defer {
             stopInstallProgressTimer()
             progressObservation = nil
+            VMDisplaySource.shared.clear()
         }
 
         let hardwareModelData = try await withCheckedThrowingContinuation {
@@ -262,10 +263,21 @@ final class ImageManager: Sendable {
         network.attachment = VZNATNetworkDeviceAttachment()
         vmConfig.networkDevices = [network]
 
+        let graphics = VZMacGraphicsDeviceConfiguration()
+        graphics.displays = [
+            VZMacGraphicsDisplayConfiguration(
+                widthInPixels: 1920,
+                heightInPixels: 1080,
+                pixelsPerInch: 144
+            )
+        ]
+        vmConfig.graphicsDevices = [graphics]
+
         try vmConfig.validate()
 
         let vm = VZVirtualMachine(configuration: vmConfig)
         let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipsw)
+        VMDisplaySource.shared.publish(vm: vm, label: "Installing macOS")
         installStatus = "Starting macOS installer..."
 
         progressObservation = installer.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
