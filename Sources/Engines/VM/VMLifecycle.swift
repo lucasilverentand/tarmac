@@ -125,10 +125,12 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
                 }
             }
 
+            VMDisplaySource.shared.publish(vm: virtualMachine, label: "Runner VM")
             Log.vm.info("VM booted successfully")
             return virtualMachine
         } catch {
             self.vm = nil
+            VMDisplaySource.shared.clear()
             throw error
         }
     }
@@ -155,6 +157,7 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
         }
 
         self.vm = nil
+        VMDisplaySource.shared.clear()
         Log.vm.info("VM stopped")
     }
 
@@ -162,12 +165,14 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
 
     nonisolated func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         Task { @MainActor in
+            VMDisplaySource.shared.clear()
             Log.vm.error("VM stopped with error: \(error.localizedDescription)")
         }
     }
 
     nonisolated func guestDidStop(_ virtualMachine: VZVirtualMachine) {
         Task { @MainActor in
+            VMDisplaySource.shared.clear()
             Log.vm.info("Guest initiated shutdown")
         }
     }

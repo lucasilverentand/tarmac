@@ -6,6 +6,8 @@ struct VMStatusCard: View {
     let configStore: ConfigStore
 
     @State private var showingImageWizard = false
+    @State private var displaySource = VMDisplaySource.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -181,14 +183,23 @@ struct VMStatusCard: View {
     @ViewBuilder
     private var activeVMSection: some View {
         InspectorSection(title: "Status") {
-            if let vm = vmStatusViewModel.activeVM {
-                VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                if let vm = vmStatusViewModel.activeVM {
                     StatusLine(title: "VM running", systemImage: "play.circle.fill", tint: .green)
                     DetailRow(title: "Job ID", value: "\(vm.jobId)")
                     DetailRow(title: "Boot time", value: vm.startedAt.formatted(.relative(presentation: .named)))
+                } else {
+                    StatusLine(title: "No VM running", systemImage: "stop.circle", tint: .secondary)
                 }
-            } else {
-                StatusLine(title: "No VM running", systemImage: "stop.circle", tint: .secondary)
+
+                if displaySource.activeVM != nil {
+                    Button {
+                        openWindow(id: "vm-display")
+                    } label: {
+                        Label("Show VM display", systemImage: "display")
+                    }
+                    .controlSize(.small)
+                }
             }
         }
     }
