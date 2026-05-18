@@ -7,6 +7,7 @@ final class SettingsViewModel {
     private(set) var storageHealth: StorageHealth
     private(set) var githubSetupChecks: [UUID: GitHubSetupCheckResult] = [:]
     private(set) var githubSetupChecksInFlight: Set<UUID> = []
+    private(set) var lastBaseImageResetError: String?
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
@@ -235,6 +236,23 @@ final class SettingsViewModel {
             Log.cache.info("Installer artifacts removed from settings")
         } catch {
             Log.cache.error("Failed to remove installer artifacts: \(error.localizedDescription)")
+        }
+    }
+
+    func resetBaseImage(preserveRestoreImage: Bool = true) -> Bool {
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+        do {
+            let result = try storage.resetBaseImage(preserveRestoreImage: preserveRestoreImage)
+            configStore.baseImagePath = storage.baseImageURL.path
+            configStore.save()
+            refreshStorageHealth()
+            lastBaseImageResetError = nil
+            Log.image.info("Base image reset removed \(result.removedItems) item(s)")
+            return true
+        } catch {
+            lastBaseImageResetError = error.localizedDescription
+            Log.image.error("Failed to reset base image: \(error.localizedDescription)")
+            return false
         }
     }
 

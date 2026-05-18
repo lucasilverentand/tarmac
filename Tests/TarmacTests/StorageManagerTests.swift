@@ -125,6 +125,48 @@ struct StorageManagerTests {
         #expect(!FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
     }
 
+    @Test("resetBaseImage removes image and platform data but preserves retained installer")
+    func resetBaseImagePreservesRetainedInstaller() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.restoreIPSWURL)
+        try "machine-id".write(
+            to: storage.platformDirectory.appendingPathComponent("MachineIdentifier"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try storage.markBaseImageVerified()
+
+        let result = try storage.resetBaseImage(preserveRestoreImage: true)
+
+        #expect(result.removedItems == 2)
+        #expect(!FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+        #expect(!storage.isBaseImageVerified())
+        #expect(FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+        #expect(FileManager.default.fileExists(atPath: storage.platformDirectory.path))
+    }
+
+    @Test("resetBaseImage can remove the retained installer")
+    func resetBaseImageCanRemoveRetainedInstaller() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.restoreIPSWURL)
+
+        let result = try storage.resetBaseImage(preserveRestoreImage: false)
+
+        #expect(result.removedItems == 3)
+        #expect(!FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+    }
+
     @Test("cleanupTransientFiles removes stale transient data")
     func cleanupTransientFiles() throws {
         let root = try TestFactories.makeTempDir()

@@ -310,6 +310,28 @@ struct SettingsViewModelTests {
         #expect(!FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
     }
 
+    @Test("resetBaseImage uses configured storage root and keeps retained installer")
+    func resetBaseImageUsesConfiguredRoot() throws {
+        let (vm, store, _) = makeVM()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try Data([0x01]).write(to: storage.baseImageURL)
+        try Data([0x02]).write(to: storage.restoreIPSWURL)
+        try storage.markBaseImageVerified()
+        store.storageRootPath = root.path
+        store.baseImagePath = "/tmp/old-base-image.img"
+
+        #expect(vm.resetBaseImage())
+
+        #expect(store.baseImagePath == storage.baseImageURL.path)
+        #expect(!FileManager.default.fileExists(atPath: storage.baseImageURL.path))
+        #expect(!storage.isBaseImageVerified())
+        #expect(FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path))
+    }
+
     @Test("cache size description reflects cache contents and clear resets targets")
     func cacheSizeDescriptionAndClear() throws {
         let (vm, _, _) = makeVM()

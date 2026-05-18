@@ -152,6 +152,28 @@ struct StorageManager: Sendable {
     }
 
     @discardableResult
+    func resetBaseImage(preserveRestoreImage: Bool = true) throws -> BaseImageResetResult {
+        var result = BaseImageResetResult()
+        let fm = FileManager.default
+
+        for url in [baseImageURL, platformDirectory] {
+            guard fm.fileExists(atPath: url.path) else { continue }
+            result.removedBytes += (try? itemSize(at: url)) ?? 0
+            try fm.removeItem(at: url)
+            result.removedItems += 1
+        }
+
+        if !preserveRestoreImage, fm.fileExists(atPath: restoreIPSWURL.path) {
+            result.removedBytes += (try? itemSize(at: restoreIPSWURL)) ?? 0
+            try fm.removeItem(at: restoreIPSWURL)
+            result.removedItems += 1
+        }
+
+        try prepareBaseDirectories()
+        return result
+    }
+
+    @discardableResult
     func migrateManagedData(from oldRoot: URL?, explicitBaseImageURL: URL?) throws -> StorageMigrationResult {
         try prepareBaseDirectories()
 
@@ -328,6 +350,11 @@ struct StorageMigrationResult: Sendable {
 }
 
 struct InstallerArtifactCleanupResult: Equatable, Sendable {
+    var removedItems: Int = 0
+    var removedBytes: Int64 = 0
+}
+
+struct BaseImageResetResult: Equatable, Sendable {
     var removedItems: Int = 0
     var removedBytes: Int64 = 0
 }

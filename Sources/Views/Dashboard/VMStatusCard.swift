@@ -116,9 +116,9 @@ struct VMStatusCard: View {
                         systemImage: "exclamationmark.triangle.fill",
                         tint: .orange
                     )
-
-                    setupBaseImageButton
                 }
+
+                setupBaseImageButton
 
                 if vmStatusViewModel.isInstalling {
                     VStack(alignment: .leading, spacing: 6) {
@@ -156,11 +156,14 @@ struct VMStatusCard: View {
 
     @ViewBuilder
     private var setupBaseImageButton: some View {
+        let title = vmStatusViewModel.baseImageExists ? "Rebuild base image" : "Set up base image"
+        let icon = vmStatusViewModel.baseImageExists ? "arrow.clockwise.circle" : "arrow.down.circle"
+
         if #available(macOS 26.0, *) {
             Button {
                 showingImageWizard = true
             } label: {
-                Label("Set up base image", systemImage: "arrow.down.circle")
+                Label(title, systemImage: icon)
             }
             .controlSize(.regular)
             .buttonStyle(.glassProminent)
@@ -168,7 +171,7 @@ struct VMStatusCard: View {
             Button {
                 showingImageWizard = true
             } label: {
-                Label("Set up base image", systemImage: "arrow.down.circle")
+                Label(title, systemImage: icon)
             }
             .controlSize(.regular)
             .buttonStyle(.borderedProminent)

@@ -22,8 +22,15 @@ struct BaseImageWizardView: View {
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
+        let storage = StorageManager(rootPath: configStore.storageRootPath)
+
+        let retainedIPSW =
+            FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path)
+            ? storage.restoreIPSWURL : nil
+        _currentStep = State(initialValue: retainedIPSW == nil ? 0 : 1)
+        _ipswURL = State(initialValue: retainedIPSW)
         _imageManager = State(
-            initialValue: ImageManager(storage: StorageManager(rootPath: configStore.storageRootPath))
+            initialValue: ImageManager(storage: storage)
         )
     }
 
