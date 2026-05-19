@@ -41,6 +41,31 @@ actor GitHubEngine {
         return try await runnerProvider.ensureRunner(token: token, accountPath: org.accountPath)
     }
 
+    func organizationInstallationId(
+        organizationName: String,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> Int {
+        struct InstallationResponse: Decodable, Sendable {
+            let id: Int
+        }
+
+        let org = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !org.isEmpty else {
+            throw GitHubInstallationDiscoveryError.missingOrganizationName
+        }
+
+        let jwt = try await tokenManager.appJWT(appId: appId, privateKeyData: privateKeyData)
+        let response: InstallationResponse = try await client.request(
+            method: "GET",
+            path: "/orgs/\(org)/installation",
+            body: nil,
+            headers: ["Authorization": "Bearer \(jwt)"],
+            timeoutInterval: 30
+        )
+        return response.id
+    }
+
     func generateJITConfig(for org: Organization, runnerName: String) async throws -> String {
         let token = try await installationToken(for: org)
         return try await runnerProvider.generateJITConfig(
@@ -162,5 +187,15 @@ actor GitHubEngine {
 
         let leaseLabels = Set(lease.runner.labels)
         return leaseLabels.isSubset(of: runner.labelNames)
+    }
+}
+
+enum GitHubInstallationDiscoveryError: Error, LocalizedError, Sendable {
+    case missingOrganizationName
+
+    var errorDescription: String? {
+        switch self {
+        case .missingOrganizationName: "Enter the organization name before finding the installation."
+        }
     }
 }

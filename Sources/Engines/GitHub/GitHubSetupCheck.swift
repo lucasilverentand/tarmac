@@ -45,6 +45,7 @@ enum GitHubSetupCheckIssueKind: String, Sendable {
     case permissionMissing
     case runnerGroupUnavailable
     case scaleSetUnavailable
+    case unsupportedAccountType
     case githubUnavailable
 }
 
@@ -53,6 +54,17 @@ extension GitHubEngine {
         var issues: [GitHubSetupCheckIssue] = []
         var runnerGroups: [String] = []
         let labels = Self.normalizedLabels(org.runnerLabels)
+
+        if org.accountType == .enterprise {
+            issues.append(
+                .init(
+                    kind: .unsupportedAccountType,
+                    message:
+                        "\(org.name): Enterprise runner accounts are not supported. Add the organization that owns the runner scale set."
+                )
+            )
+            return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
+        }
 
         if org.appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(

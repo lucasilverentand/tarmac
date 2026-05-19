@@ -36,7 +36,7 @@ struct OrganizationListView: View {
                     Text("No Accounts")
                         .font(.title2.weight(.semibold))
 
-                    Text("Add a GitHub organization or enterprise to start receiving runner jobs.")
+                    Text("Add a GitHub organization to start receiving runner jobs.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -523,6 +523,8 @@ private struct OrganizationFormSheet: View {
 
     @State private var name: String = ""
     @State private var accountType: GitHubAccountType = .organization
+    @State private var appOwnerType: GitHubAccountType = .organization
+    @State private var enterpriseSlug: String = ""
     @State private var appId: String = ""
     @State private var installationId: String = ""
     @State private var scaleSetId: String = ""
@@ -553,13 +555,39 @@ private struct OrganizationFormSheet: View {
     @State private var hasKey: Bool = false
     @State private var showingFileImporter = false
     @State private var importError: String?
+    @State private var installationLookupInFlight = false
+    @State private var installationLookupError: String?
 
     @Environment(\.dismiss) private var dismiss
 
     var isEditing: Bool { existing != nil }
 
     private var setupGuide: GitHubAppSetupGuide {
-        GitHubAppSetupGuide.guide(for: accountType)
+        GitHubAppSetupGuide.guide(for: appOwnerType)
+    }
+
+    private var setupGuideAccountName: String {
+        switch appOwnerType {
+        case .organization:
+            name
+        case .enterprise:
+            enterpriseSlug
+        }
+    }
+
+    private var availableAccountTypes: [GitHubAccountType] {
+        accountType == .enterprise ? [.organization, .enterprise] : GitHubAccountType.runnerAccountTypes
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && Int(installationId) != nil
+            && accountType == .organization
+    }
+
+    private var locksAccountIdentity: Bool {
+        isEditing && existing?.accountType != .enterprise
     }
 
     var body: some View {
@@ -572,28 +600,47 @@ private struct OrganizationFormSheet: View {
             ScrollView {
                 Form {
                     Section("Account") {
-                        Picker("Type", selection: $accountType) {
-                            ForEach(GitHubAccountType.allCases) { type in
-                                Text(type.displayName).tag(type)
+                        if isEditing && existing?.accountType == .enterprise {
+                            Picker("Runner account", selection: $accountType) {
+                                ForEach(availableAccountTypes) { type in
+                                    Text(type.displayName).tag(type)
+                                }
                             }
-                        }
-                        .pickerStyle(.segmented)
-                        .disabled(isEditing)
+                            .pickerStyle(.segmented)
+                            .disabled(locksAccountIdentity)
 
-                        TextField(accountType == .enterprise ? "Enterprise slug" : "Organization name", text: $name)
-                            .disabled(isEditing)
-                            .help(
-                                accountType == .enterprise
-                                    ? "The enterprise slug as shown in github.com/enterprises/<slug>"
-                                    : "The organization login as shown in github.com/<name>"
-                            )
+                            GuidanceCallout(item: .enterprise)
+                        }
+
+                        TextField("Organization name", text: $name)
+                            .disabled(locksAccountIdentity)
+                            .help("The organization login as shown in github.com/<name>")
                         FieldInlineHint(text: tarmacFieldDetail(.accountName))
 
-                        GitHubAppSetupGuideView(accountType: accountType, accountName: name)
+                        HStack {
+                            TextField("Installation ID", text: $installationId)
+                                .help("The GitHub App installation ID for this organization")
 
-                        TextField("Installation ID", text: $installationId)
-                            .help("The GitHub App installation ID for this account")
+                            Button {
+                                findInstallation()
+                            } label: {
+                                if installationLookupInFlight {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Label("Find Installation", systemImage: "magnifyingglass")
+                                }
+                            }
+                            .controlSize(.small)
+                            .disabled(installationLookupInFlight || accountType != .organization)
+                        }
                         FieldInlineHint(text: tarmacFieldDetail(.installationId))
+                        if let installationLookupError {
+                            Text(installationLookupError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
 
                         TextField("Scale Set ID", text: $scaleSetId)
                             .help("The numeric ID of your Actions Runner Scale Set for this account")
@@ -601,6 +648,23 @@ private struct OrganizationFormSheet: View {
                     }
 
                     Section("GitHub App Credentials") {
+                        Picker("App owner", selection: $appOwnerType) {
+                            Text("Organization").tag(GitHubAccountType.organization)
+                            Text("Enterprise").tag(GitHubAccountType.enterprise)
+                        }
+                        .pickerStyle(.segmented)
+
+                        if appOwnerType == .enterprise {
+                            TextField("Enterprise slug", text: $enterpriseSlug)
+                                .help("The enterprise slug as shown in github.com/enterprises/<slug>")
+                            FieldInlineHint(
+                                text:
+                                    "Use this when the GitHub App is created from Enterprise settings. The runner account above still stays as the organization; do not paste an enterprise installation ID."
+                            )
+                        }
+
+                        GitHubAppSetupGuideView(accountType: appOwnerType, accountName: setupGuideAccountName)
+
                         TextField("App ID", text: $appId)
                         FieldInlineHint(text: tarmacFieldDetail(.appId))
 
@@ -621,8 +685,11 @@ private struct OrganizationFormSheet: View {
                                 Button("Remove", role: .destructive) {
                                     if let org = existing {
                                         viewModel.deletePrivateKey(for: org)
-                                        hasKey = false
+                                    } else {
+                                        pendingKeyData = nil
                                     }
+                                    hasKey = false
+                                    installationLookupError = nil
                                 }
                                 .controlSize(.small)
                             }
@@ -766,7 +833,7 @@ private struct OrganizationFormSheet: View {
 
                 Button(isEditing ? "Save" : "Add") { save() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(name.isEmpty || appId.isEmpty || installationId.isEmpty)
+                    .disabled(!canSave)
             }
             .padding(16)
         }
@@ -775,6 +842,8 @@ private struct OrganizationFormSheet: View {
             if let org = existing {
                 name = org.name
                 accountType = org.accountType
+                appOwnerType = org.accountType == .enterprise ? .enterprise : .organization
+                enterpriseSlug = org.accountType == .enterprise ? org.name : ""
                 appId = org.appId
                 installationId = "\(org.installationId)"
                 scaleSetId = org.scaleSetId.map(String.init) ?? ""
@@ -827,6 +896,7 @@ private struct OrganizationFormSheet: View {
                     try viewModel.importPrivateKey(from: url, for: org)
                     hasKey = true
                     importError = nil
+                    installationLookupError = nil
                 } catch {
                     importError = error.localizedDescription
                 }
@@ -842,6 +912,7 @@ private struct OrganizationFormSheet: View {
                     pendingKeyData = try Data(contentsOf: url)
                     hasKey = true
                     importError = nil
+                    installationLookupError = nil
                 } catch {
                     importError = error.localizedDescription
                 }
@@ -855,6 +926,57 @@ private struct OrganizationFormSheet: View {
 
     private func tarmacFieldDetail(_ kind: TarmacAccountFieldGuide.Kind) -> String {
         setupGuide.tarmacFields.first { $0.kind == kind }?.detail ?? ""
+    }
+
+    private func findInstallation() {
+        installationLookupError = nil
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAppId = appId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard accountType == .organization else {
+            installationLookupError =
+                "Add the organization that owns the runner scale set. Enterprise runner accounts are not supported."
+            return
+        }
+        guard !trimmedName.isEmpty else {
+            installationLookupError = "Enter the organization name first."
+            return
+        }
+        guard !trimmedAppId.isEmpty else {
+            installationLookupError = "Enter the App ID first."
+            return
+        }
+        guard let keyData = lookupPrivateKeyData else {
+            installationLookupError = "Import the GitHub App private key before finding the installation."
+            return
+        }
+
+        installationLookupInFlight = true
+        Task {
+            do {
+                let id = try await viewModel.findOrganizationInstallationId(
+                    organizationName: trimmedName,
+                    appId: trimmedAppId,
+                    privateKeyData: keyData
+                )
+                installationId = "\(id)"
+                installationLookupError = nil
+            } catch {
+                installationLookupError =
+                    "Could not find an installation for \(trimmedName). Confirm the app is installed on that organization and the App ID/private key match."
+            }
+            installationLookupInFlight = false
+        }
+    }
+
+    private var lookupPrivateKeyData: Data? {
+        if let pendingKeyData {
+            return pendingKeyData
+        }
+        guard let existing else {
+            return nil
+        }
+        return viewModel.configStore.loadPrivateKey(for: existing)
     }
 
     private func save() {

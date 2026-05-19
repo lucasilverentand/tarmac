@@ -69,6 +69,26 @@ struct GitHubSetupCheckTests {
         #expect(result.issues.contains { $0.kind == .imageProfileNotReady && $0.message.contains("iOS SDK") })
     }
 
+    @Test("enterprise account type is reported as unsupported before API checks")
+    func enterpriseAccountTypeUnsupported() async throws {
+        let org = TestFactories.makeOrg(name: "example-enterprise", accountType: .enterprise)
+        let (engine, client) = try await makeEngine(org: org)
+
+        let result = await engine.runSetupCheck(for: org)
+
+        #expect(!result.isReady)
+        #expect(
+            result.issues == [
+                GitHubSetupCheckIssue(
+                    kind: .unsupportedAccountType,
+                    message:
+                        "example-enterprise: Enterprise runner accounts are not supported. Add the organization that owns the runner scale set."
+                )
+            ]
+        )
+        #expect(await client.requestCount == 0)
+    }
+
     @Test("permission and missing scale set failures use GitHub terms")
     func permissionAndMissingScaleSetFailures() async throws {
         let org = TestFactories.makeOrg(name: "setup-org", scaleSetId: 42)

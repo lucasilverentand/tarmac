@@ -60,6 +60,22 @@ final class SettingsViewModel {
         Log.config.info("Private key deleted for org \(org.name)")
     }
 
+    func findOrganizationInstallationId(
+        organizationName: String,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> Int {
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+        return try await engine.organizationInstallationId(
+            organizationName: organizationName,
+            appId: appId,
+            privateKeyData: privateKeyData
+        )
+    }
+
     // MARK: - VM Configuration
 
     var vmConfiguration: VMConfiguration {

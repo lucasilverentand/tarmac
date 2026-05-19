@@ -98,6 +98,27 @@ struct RunnerHostReadinessTests {
         #expect(readiness.issues.contains { $0.category == .github && $0.message.contains("Private key") })
     }
 
+    @Test("enterprise account entries block startup with migration guidance")
+    func enterpriseAccountsBlockStartup() throws {
+        let (store, _) = TestFactories.makeConfigStore()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        try store.configureStorage(at: root)
+        try TestFactories.prepareReadyRunnerHostStorage(for: store)
+        let org = TestFactories.makeOrg(name: "example-enterprise", accountType: .enterprise)
+        store.addOrganization(org)
+        _ = store.savePrivateKey(Data([0x01]), for: org)
+
+        let readiness = RunnerHostReadiness.evaluate(
+            configStore: store,
+            hostCapability: Self.supportedHost
+        )
+
+        #expect(!readiness.isReady)
+        #expect(readiness.issues.contains { $0.message.contains("Enterprise runner accounts are not supported") })
+    }
+
     @Test("image profile readiness failures block startup")
     func imageProfileFailuresBlockStartup() throws {
         let (store, _) = TestFactories.makeConfigStore()

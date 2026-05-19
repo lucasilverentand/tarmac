@@ -249,9 +249,9 @@ struct ModelCodableTests {
         let guidance = GitHubSetupGuidance.setupOverview
 
         #expect(guidance.map(\.scope) == [.organization, .repository, .enterprise, .permissions])
-        #expect(GitHubSetupGuidance.organization.detail.contains("organization name"))
+        #expect(GitHubSetupGuidance.organization.detail.contains("find the organization installation ID"))
         #expect(GitHubSetupGuidance.repository.detail.contains("only decides which queued jobs Tarmac accepts"))
-        #expect(GitHubSetupGuidance.enterprise.detail.contains("enterprise runner endpoints"))
+        #expect(GitHubSetupGuidance.enterprise.detail.contains("only grants enterprise permissions"))
         #expect(GitHubSetupGuidance.permissions.detail.contains("organization self-hosted runner permission"))
     }
 
@@ -304,13 +304,17 @@ struct ModelCodableTests {
         #expect(queryItems["public"] == nil)
         #expect(queryItems["organization_self_hosted_runners"] == "write")
         #expect(
-            guide.tarmacFields.first { $0.kind == .accountName }?.detail.contains("Do not enter an organization name")
+            guide.tarmacFields.first { $0.kind == .accountName }?.detail.contains("organization login")
                 == true
         )
         #expect(
             guide.appFields.contains {
-                $0.field == "Installation target" && $0.value == "Only enterprise organizations"
+                $0.field == "Enterprise installation" && $0.value == "Optional; not the runner installation ID"
             }
+        )
+        #expect(
+            guide.tarmacFields.first { $0.kind == .installationId }?.detail.contains("Do not paste the enterprise")
+                == true
         )
     }
 

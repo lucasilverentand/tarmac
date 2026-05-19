@@ -28,6 +28,7 @@ enum TestFactories {
 
     static func makeOrg(
         name: String = "test-org",
+        accountType: GitHubAccountType = .organization,
         appId: String = "123456",
         installationId: Int = 12345,
         scaleSetId: Int? = 42,
@@ -39,6 +40,7 @@ enum TestFactories {
     ) -> Organization {
         Organization(
             name: name,
+            accountType: accountType,
             appId: appId,
             installationId: installationId,
             scaleSetId: scaleSetId,
