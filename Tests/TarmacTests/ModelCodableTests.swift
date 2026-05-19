@@ -244,6 +244,17 @@ struct ModelCodableTests {
         #expect(org.acceptsRepository(nil))
     }
 
+    @Test("GitHub setup guidance distinguishes supported setup scopes")
+    func githubSetupGuidanceScopes() {
+        let guidance = GitHubSetupGuidance.setupOverview
+
+        #expect(guidance.map(\.scope) == [.organization, .repository, .enterprise, .permissions])
+        #expect(GitHubSetupGuidance.organization.detail.contains("organization name"))
+        #expect(GitHubSetupGuidance.repository.detail.contains("only decides which queued jobs Tarmac accepts"))
+        #expect(GitHubSetupGuidance.enterprise.detail.contains("enterprise runner endpoints"))
+        #expect(GitHubSetupGuidance.permissions.detail.contains("organization self-hosted runner permission"))
+    }
+
     // MARK: - AppleSigningAsset
 
     @Test("AppleSigningAsset round-trip preserves metadata")
