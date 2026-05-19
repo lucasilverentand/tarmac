@@ -136,6 +136,33 @@ struct VMEngineTests {
         #expect(engine.currentInstance?.jobId == 99)
     }
 
+    @Test("provisionAndRun can boot from runner-specific image")
+    @MainActor
+    func provisionAndRunUsesRunnerImageOverride() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let customImage = tempDir.appendingPathComponent("custom-runner.img")
+        let imageData = Data("custom-runner-image".utf8)
+        try imageData.write(to: customImage)
+
+        let runnerPath = tempDir.appendingPathComponent("runner")
+        try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
+
+        var job = TestFactories.makeJob(id: 199)
+        job.jitConfig = "test-jit-config"
+
+        let instance = try await engine.provisionAndRun(
+            job: job,
+            config: VMConfiguration(),
+            runnerPath: runnerPath,
+            baseImagePath: customImage.path
+        )
+
+        #expect(try Data(contentsOf: instance.diskImagePath) == imageData)
+    }
+
     @Test("teardown stops VM and cleans up disk")
     @MainActor
     func teardownCleansUp() async throws {

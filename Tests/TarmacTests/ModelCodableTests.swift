@@ -149,6 +149,8 @@ struct ModelCodableTests {
             labels: ["self-hosted", "macOS"],
             imageProfile: RunnerImageProfile(
                 name: "Xcode 17",
+                baseImagePath: "/Images/Xcode17.img",
+                vmConfiguration: VMConfiguration(cpuCount: 8, memorySizeGB: 16, diskSizeGB: 120),
                 baseMacOSVersion: "26.0",
                 xcodeVersion: "17.0",
                 developerDirectory: "/Applications/Xcode.app/Contents/Developer",
@@ -186,6 +188,8 @@ struct ModelCodableTests {
         #expect(decoded.scaleSetId == 7)
         #expect(decoded.labels == ["self-hosted", "macOS"])
         #expect(decoded.imageProfile?.name == "Xcode 17")
+        #expect(decoded.imageProfile?.baseImagePath == "/Images/Xcode17.img")
+        #expect(decoded.imageProfile?.vmConfiguration?.memorySizeGB == 16)
         #expect(decoded.imageProfile?.sdks == [ApplePlatformSDK(platform: .iOS, version: "19.0")])
         #expect(decoded.imageProfile?.capabilities == [.xcode, .iOS])
         #expect(decoded.imageProfile?.preparation?.baseImageIdentifier == "base-image-2026-05-16")
@@ -196,6 +200,31 @@ struct ModelCodableTests {
         #expect(decoded.isEnabled == false)
         #expect(decoded.filterMode == .include)
         #expect(decoded.filteredRepositories == ["my-repo", "other-repo"])
+    }
+
+    @Test("RunnerImageProfile decodes legacy payloads without image overrides")
+    func runnerImageProfileDecodesLegacyPayload() throws {
+        let data = Data(
+            """
+            {
+              "name": "Legacy Xcode",
+              "baseMacOSVersion": "26.0",
+              "xcodeVersion": "17.0",
+              "developerDirectory": "/Applications/Xcode.app/Contents/Developer",
+              "commandLineToolsInstalled": true,
+              "sdks": [{ "platform": "ios", "version": "19.0" }],
+              "simulatorRuntimes": [],
+              "capabilities": ["xcode"]
+            }
+            """.utf8
+        )
+
+        let decoded = try JSONDecoder().decode(RunnerImageProfile.self, from: data)
+
+        #expect(decoded.name == "Legacy Xcode")
+        #expect(decoded.baseImagePath == "")
+        #expect(decoded.vmConfiguration == nil)
+        #expect(decoded.capabilities == [.xcode])
     }
 
     @Test("Organization Hashable consistency")

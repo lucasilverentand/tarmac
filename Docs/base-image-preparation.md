@@ -17,10 +17,19 @@ capabilities:
 6. Install optional toolchains such as Flutter, Node, Ruby, CocoaPods, Expo CLI,
    and EAS CLI when a profile needs them.
 
-Record the base image identifier, checklist status, and tool versions in the
-organization runner image profile. A profile should only advertise labels once
-its required SDKs, simulator runtimes, license state, and optional tools are
-present.
+Use **Scan Image** in the account's runner image profile to automate this
+inventory. Tarmac boots a temporary clone of the selected runner image, runs the
+toolchain checks inside the guest, records the discovered SDKs, runtimes, and
+tool versions, then advertises only the labels that pass readiness checks.
+
+Runner image profiles can point at a specific disk image path and can override
+CPU, memory, disk size, and runner timeout for jobs that use that profile. Leave
+the image path empty to use the managed `BaseImage.img`; set it when an account
+or runner class needs a separate Xcode or platform image.
+
+A profile should only advertise labels once its required SDKs, simulator
+runtimes, license state, and optional tools are present. The scan action is the
+preferred way to keep that contract current.
 
 ## Toolchain Checks
 

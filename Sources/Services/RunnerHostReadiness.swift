@@ -102,7 +102,7 @@ struct RunnerHostReadiness: Equatable, Sendable {
         }
 
         let requiredFreeBytes = requiredFreeBytes(
-            for: configStore.vmConfiguration,
+            for: largestRunnerConfiguration(configStore: configStore),
             cloneBehavior: storageHealth.cloneBehavior
         )
         if let available = storageHealth.volume?.availableCapacityBytes,
@@ -125,21 +125,44 @@ struct RunnerHostReadiness: Equatable, Sendable {
         storage: StorageManager
     ) {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: configStore.resolvedBaseImagePath) else {
-            issues.append(
-                .init(
-                    category: .vm,
-                    message: "Create and verify a base image before starting."
+        let defaultBaseImagePath = configStore.resolvedBaseImagePath
+        let enabledOrganizations = configStore.organizations.filter(\.isEnabled)
+        let defaultImageRequired =
+            enabledOrganizations.isEmpty
+            || enabledOrganizations.contains {
+                pathsMatch($0.runnerBaseImagePath(defaultPath: defaultBaseImagePath), defaultBaseImagePath)
+            }
+
+        if defaultImageRequired {
+            guard fm.fileExists(atPath: defaultBaseImagePath) else {
+                issues.append(
+                    .init(
+                        category: .vm,
+                        message: "Create and verify a base image before starting."
+                    )
                 )
-            )
-            return
+                return
+            }
+
+            if !storage.isBaseImageVerified() {
+                issues.append(
+                    .init(
+                        category: .vm,
+                        message: "Verify the base image before starting."
+                    )
+                )
+            }
         }
 
-        if !storage.isBaseImageVerified() {
+        for org in enabledOrganizations {
+            let imagePath = org.runnerBaseImagePath(defaultPath: defaultBaseImagePath)
+            guard !pathsMatch(imagePath, defaultBaseImagePath), !fm.fileExists(atPath: imagePath) else {
+                continue
+            }
             issues.append(
                 .init(
                     category: .vm,
-                    message: "Verify the base image before starting."
+                    message: "\(org.name): Runner image does not exist at \(imagePath)."
                 )
             )
         }
@@ -153,6 +176,11 @@ struct RunnerHostReadiness: Equatable, Sendable {
                 )
             )
         }
+    }
+
+    private static func pathsMatch(_ lhs: String, _ rhs: String) -> Bool {
+        URL(fileURLWithPath: lhs).standardizedFileURL.path
+            == URL(fileURLWithPath: rhs).standardizedFileURL.path
     }
 
     @MainActor
@@ -196,6 +224,15 @@ struct RunnerHostReadiness: Equatable, Sendable {
             return max(10 * gib, Int64(config.diskSizeGB) * gib / 10)
         }
         return Int64(config.diskSizeGB) * gib
+    }
+
+    @MainActor
+    private static func largestRunnerConfiguration(configStore: ConfigStore) -> VMConfiguration {
+        configStore.organizations
+            .filter(\.isEnabled)
+            .map { $0.runnerVMConfiguration(defaultConfiguration: configStore.vmConfiguration) }
+            .max { lhs, rhs in lhs.diskSizeGB < rhs.diskSizeGB }
+            ?? configStore.vmConfiguration
     }
 
     private static func formatBytes(_ bytes: Int64) -> String {
