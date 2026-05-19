@@ -17,10 +17,13 @@ struct AppSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .navigationTitle("Tarmac")
     }
 
     private func row(_ section: AppSection) -> some View {
-        Label(section.displayName, systemImage: section.systemImage)
-            .tag(section)
+        NavigationLink(value: section) {
+            Label(section.displayName, systemImage: section.systemImage)
+        }
+        .tag(section)
     }
 }

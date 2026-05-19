@@ -49,6 +49,12 @@ struct OrganizationListView: View {
             GitHubSetupGuidanceList(items: GitHubSetupGuidance.setupOverview)
                 .padding(.horizontal, 32)
                 .frame(maxWidth: 640)
+
+            Button {
+                showingAddSheet = true
+            } label: {
+                Label("Add Account", systemImage: "plus")
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
