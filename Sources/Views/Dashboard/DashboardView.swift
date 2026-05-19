@@ -1,26 +1,51 @@
 import SwiftUI
 
 struct DashboardView: View {
-    let appState: AppState
+    @Bindable var appState: AppState
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
         Group {
             if appState.configStore.hasCompletedStorageSetup {
-                HSplitView {
-                    JobQueueView(queueViewModel: appState.queueViewModel)
-                        .frame(minWidth: 520)
-
-                    VMStatusCard(
-                        vmStatusViewModel: appState.vmStatusViewModel,
-                        vmConfig: appState.configStore.vmConfiguration,
-                        configStore: appState.configStore
-                    )
-                    .frame(minWidth: 320, idealWidth: 340, maxWidth: 380)
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    AppSidebar(selection: $appState.selectedSection)
+                        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                } detail: {
+                    detailView
+                        .navigationTitle(appState.selectedSection.displayName)
                 }
-                .frame(minWidth: 900, minHeight: 560)
+                .navigationSplitViewStyle(.balanced)
+                .frame(minWidth: 1000, minHeight: 600)
             } else {
                 StorageOnboardingView(configStore: appState.configStore)
+                    .frame(minWidth: 720, minHeight: 520)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var detailView: some View {
+        switch appState.selectedSection {
+        case .queue:
+            JobQueueView(queueViewModel: appState.queueViewModel)
+        case .virtualMachine:
+            ScrollView {
+                VMStatusCard(
+                    vmStatusViewModel: appState.vmStatusViewModel,
+                    configStore: appState.configStore,
+                    settingsViewModel: appState.settingsViewModel,
+                    onWizardDismiss: {
+                        appState.refreshReadiness()
+                        Task { await appState.start() }
+                    }
+                )
+            }
+        case .organizations:
+            OrganizationListView(viewModel: appState.settingsViewModel)
+        case .cache:
+            CacheSettingsView(viewModel: appState.settingsViewModel)
+        case .storage:
+            StorageSettingsView(viewModel: appState.settingsViewModel)
         }
     }
 }

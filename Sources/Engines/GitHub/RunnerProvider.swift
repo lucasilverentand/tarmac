@@ -14,7 +14,7 @@ actor RunnerProvider {
         self.storage = storage
     }
 
-    func ensureRunner(token: String, org: String) async throws -> URL {
+    func ensureRunner(token: String, accountPath: String) async throws -> URL {
         if let cached = cachedRunnerPath,
             FileManager.default.fileExists(atPath: cached.appendingPathComponent("run.sh").path)
         {
@@ -24,7 +24,7 @@ actor RunnerProvider {
 
         let downloads: [RunnerDownloadInfo] = try await client.request(
             method: "GET",
-            path: "/orgs/\(org)/actions/runners/downloads",
+            path: "\(accountPath)/actions/runners/downloads",
             body: nil as String?,
             headers: ["Authorization": "Bearer \(token)"],
             timeoutInterval: 30
@@ -64,7 +64,7 @@ actor RunnerProvider {
         return runnerDir
     }
 
-    func generateJITConfig(token: String, org: String, name: String, labels: [String]) async throws -> String {
+    func generateJITConfig(token: String, accountPath: String, name: String, labels: [String]) async throws -> String {
         struct JITRequest: Encodable, Sendable {
             let name: String
             let runner_group_id: Int
@@ -85,7 +85,7 @@ actor RunnerProvider {
 
         let response: JITResponse = try await client.request(
             method: "POST",
-            path: "/orgs/\(org)/actions/runners/generate-jitconfig",
+            path: "\(accountPath)/actions/runners/generate-jitconfig",
             body: request,
             headers: ["Authorization": "Bearer \(token)"],
             timeoutInterval: 30

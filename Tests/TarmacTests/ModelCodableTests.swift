@@ -249,9 +249,9 @@ struct ModelCodableTests {
         let guidance = GitHubSetupGuidance.setupOverview
 
         #expect(guidance.map(\.scope) == [.organization, .repository, .enterprise, .permissions])
-        #expect(GitHubSetupGuidance.organization.detail.contains("organization scope"))
+        #expect(GitHubSetupGuidance.organization.detail.contains("organization name"))
         #expect(GitHubSetupGuidance.repository.detail.contains("only decides which queued jobs Tarmac accepts"))
-        #expect(GitHubSetupGuidance.enterprise.detail.contains("not supported yet"))
+        #expect(GitHubSetupGuidance.enterprise.detail.contains("enterprise runner endpoints"))
         #expect(GitHubSetupGuidance.permissions.detail.contains("organization self-hosted runner permission"))
     }
 

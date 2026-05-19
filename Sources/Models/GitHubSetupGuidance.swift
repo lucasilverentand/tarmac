@@ -20,7 +20,7 @@ extension GitHubSetupGuidance {
         scope: .organization,
         title: "Use an organization runner scale set",
         detail:
-            "Tarmac currently connects to GitHub Actions at organization scope. Install the GitHub App on the organization, enter the organization name, App ID, installation ID, and the Actions Runner Scale Set ID from that organization."
+            "Install the GitHub App on the organization, enter the organization name, App ID, installation ID, and the Actions Runner Scale Set ID from that organization."
     )
 
     static let repository = GitHubSetupGuidance(
@@ -32,9 +32,9 @@ extension GitHubSetupGuidance {
 
     static let enterprise = GitHubSetupGuidance(
         scope: .enterprise,
-        title: "Enterprise runner scale sets are not supported yet",
+        title: "Enterprise accounts use enterprise slugs",
         detail:
-            "For GitHub Enterprise Cloud, install Tarmac per organization. Enterprise-level runner groups and runner scale sets are not supported yet because they use different endpoints and are outside the current setup flow."
+            "For GitHub Enterprise Cloud, choose Enterprise and enter the slug from github.com/enterprises/<slug>. Tarmac will use the enterprise runner endpoints for JIT configuration."
     )
 
     static let permissions = GitHubSetupGuidance(

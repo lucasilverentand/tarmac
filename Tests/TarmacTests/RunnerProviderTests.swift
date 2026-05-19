@@ -19,7 +19,7 @@ struct RunnerProviderTests {
         let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
         let config = try await provider.generateJITConfig(
             token: "test-token",
-            org: "my-org",
+            accountPath: "/orgs/my-org",
             name: "runner-1",
             labels: ["self-hosted"]
         )
@@ -41,7 +41,7 @@ struct RunnerProviderTests {
         let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
         _ = try await provider.generateJITConfig(
             token: "tok",
-            org: "test-org",
+            accountPath: "/orgs/test-org",
             name: "runner-1",
             labels: ["self-hosted"]
         )
@@ -50,6 +50,29 @@ struct RunnerProviderTests {
         #expect(requests.count == 1)
         #expect(requests[0].path == "/orgs/test-org/actions/runners/generate-jitconfig")
         #expect(requests[0].method == "POST")
+    }
+
+    @Test("generateJITConfig routes enterprise accounts to /enterprises path")
+    func generateJITConfigEnterprisePath() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"encoded_jit_config":"cfg"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        _ = try await provider.generateJITConfig(
+            token: "tok",
+            accountPath: "/enterprises/acme",
+            name: "runner-1",
+            labels: ["self-hosted"]
+        )
+
+        let requests = await client.requests
+        #expect(requests[0].path == "/enterprises/acme/actions/runners/generate-jitconfig")
     }
 
     @Test("generateJITConfig sends correct labels in request body")
@@ -66,7 +89,7 @@ struct RunnerProviderTests {
         let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
         _ = try await provider.generateJITConfig(
             token: "tok",
-            org: "org",
+            accountPath: "/orgs/org",
             name: "r1",
             labels: ["custom", "macOS"]
         )
@@ -120,7 +143,7 @@ struct RunnerProviderTests {
         let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
 
         await #expect(throws: RunnerProviderError.noCompatibleRunner) {
-            _ = try await provider.ensureRunner(token: "tok", org: "org")
+            _ = try await provider.ensureRunner(token: "tok", accountPath: "/orgs/org")
         }
     }
 }

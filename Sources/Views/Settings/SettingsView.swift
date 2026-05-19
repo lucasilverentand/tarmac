@@ -1,31 +1,6 @@
 import SwiftUI
 
-struct SettingsView: View {
-    let settingsViewModel: SettingsViewModel
-
-    var body: some View {
-        TabView {
-            Tab("General", systemImage: "gear") {
-                GeneralSettingsTab(viewModel: settingsViewModel)
-            }
-
-            Tab("Organizations", systemImage: "building.2") {
-                OrganizationListView(viewModel: settingsViewModel)
-            }
-
-            Tab("Virtual Machine", systemImage: "desktopcomputer") {
-                VMSettingsView(viewModel: settingsViewModel)
-            }
-
-            Tab("Cache", systemImage: "archivebox") {
-                CacheSettingsView(viewModel: settingsViewModel)
-            }
-        }
-        .frame(width: 560, height: 620)
-    }
-}
-
-private struct GeneralSettingsTab: View {
+struct StorageSettingsView: View {
     @Bindable var viewModel: SettingsViewModel
 
     @State private var storageError: String?
@@ -155,7 +130,6 @@ private struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .padding()
         .onAppear {
             viewModel.refreshStorageHealth()
         }
