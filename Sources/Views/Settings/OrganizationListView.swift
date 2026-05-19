@@ -12,23 +12,10 @@ struct OrganizationListView: View {
                 emptyState
             } else {
                 orgList
-            }
 
-            Divider()
-
-            HStack {
-                if !viewModel.organizations.isEmpty {
-                    Text("Drag to set priority — top account is dispatched first")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                Button("Add Account...") {
-                    showingAddSheet = true
-                }
-                .controlSize(.small)
+                Divider()
+                footer
             }
-            .padding(12)
         }
         .sheet(isPresented: $showingAddSheet) {
             OrganizationFormSheet(viewModel: viewModel)
@@ -39,18 +26,53 @@ struct OrganizationListView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 18) {
-            ContentUnavailableView(
-                "No Accounts",
-                systemImage: "building.2",
-                description: Text("Add a GitHub organization or enterprise to start receiving runner jobs.")
-            )
+        ScrollView {
+            VStack(spacing: 18) {
+                Image(systemName: "building.2")
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(.tertiary)
 
-            GitHubSetupGuidanceList(items: GitHubSetupGuidance.setupOverview)
-                .padding(.horizontal, 32)
-                .frame(maxWidth: 640)
+                VStack(spacing: 8) {
+                    Text("No Accounts")
+                        .font(.title2.weight(.semibold))
+
+                    Text("Add a GitHub organization or enterprise to start receiving runner jobs.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
+
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Label("Add Account", systemImage: "plus")
+                }
+
+                GitHubSetupGuidanceList(items: GitHubSetupGuidance.setupOverview)
+                    .frame(maxWidth: 640)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 48)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var footer: some View {
+        HStack {
+            Text("Drag to set priority — top account is dispatched first")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            Spacer()
+
+            Button("Add Account...") {
+                showingAddSheet = true
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
     }
 
     private var orgList: some View {
