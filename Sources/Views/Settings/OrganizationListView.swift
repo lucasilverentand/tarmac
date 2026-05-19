@@ -349,6 +349,174 @@ private struct GuidanceCallout: View {
 
 // MARK: - Form Sheet
 
+private struct GitHubAppSetupGuideView: View {
+    let accountType: GitHubAccountType
+    let accountName: String
+
+    @State private var showingGitHubFields = true
+    @State private var showingTarmacFields = true
+    @State private var showingSteps = false
+    @Environment(\.openURL) private var openURL
+
+    private var guide: GitHubAppSetupGuide {
+        GitHubAppSetupGuide.guide(for: accountType)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(guide.title, systemImage: accountType == .enterprise ? "building.columns" : "building.2")
+                    .font(.caption.weight(.semibold))
+
+                Spacer()
+
+                Button {
+                    if let url = guide.registrationURL(accountName: accountName) {
+                        openURL(url)
+                    }
+                } label: {
+                    Label("Open in GitHub", systemImage: "arrow.up.right.square")
+                }
+                .controlSize(.small)
+                .disabled(guide.registrationURL(accountName: accountName) == nil)
+
+                if let docsURL = URL(string: guide.documentationURL) {
+                    Link(destination: docsURL) {
+                        Label("Docs", systemImage: "book")
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            Text(guide.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("GitHub setup URL")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(guide.registrationPath(accountName: accountName))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(
+                        accountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .tertiary : .secondary
+                    )
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if accountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(
+                        accountType == .enterprise
+                            ? "Enter the enterprise slug to enable the setup link."
+                            : "Enter the organization name to enable the setup link."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                }
+            }
+
+            Divider()
+
+            DisclosureGroup("GitHub fields to fill", isExpanded: $showingGitHubFields) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(guide.resolvedAppFields(accountName: accountName)) { field in
+                        GuideFieldRow(label: field.field, value: field.value, detail: field.detail)
+                    }
+                }
+                .padding(.top, 8)
+            }
+
+            DisclosureGroup("Values to copy into Tarmac", isExpanded: $showingTarmacFields) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(guide.tarmacFields) { field in
+                        GuideFieldRow(label: field.field, value: nil, detail: field.detail)
+                    }
+                }
+                .padding(.top, 8)
+            }
+
+            DisclosureGroup("After creating the app", isExpanded: $showingSteps) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(guide.afterCreationSteps) { step in
+                        GuideStepRow(step: step)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct GuideFieldRow: View {
+    let label: String
+    let value: String?
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 142, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let value, !value.isEmpty {
+                    Text(value)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct GuideStepRow: View {
+    let step: GitHubAppSetupStep
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(step.number)")
+                .font(.caption2.bold().monospacedDigit())
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(.tint))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title)
+                    .font(.caption.weight(.semibold))
+
+                Text(step.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct FieldInlineHint: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct OrganizationFormSheet: View {
     let viewModel: SettingsViewModel
     var existing: Organization?
@@ -390,6 +558,10 @@ private struct OrganizationFormSheet: View {
 
     var isEditing: Bool { existing != nil }
 
+    private var setupGuide: GitHubAppSetupGuide {
+        GitHubAppSetupGuide.guide(for: accountType)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(isEditing ? "Edit Account" : "Add Account")
@@ -400,11 +572,6 @@ private struct OrganizationFormSheet: View {
             ScrollView {
                 Form {
                     Section("Account") {
-                        GitHubSetupGuidanceList(items: [
-                            .organization,
-                            .enterprise,
-                        ])
-
                         Picker("Type", selection: $accountType) {
                             ForEach(GitHubAccountType.allCases) { type in
                                 Text(type.displayName).tag(type)
@@ -420,16 +587,22 @@ private struct OrganizationFormSheet: View {
                                     ? "The enterprise slug as shown in github.com/enterprises/<slug>"
                                     : "The organization login as shown in github.com/<name>"
                             )
+                        FieldInlineHint(text: tarmacFieldDetail(.accountName))
+
+                        GitHubAppSetupGuideView(accountType: accountType, accountName: name)
+
                         TextField("Installation ID", text: $installationId)
                             .help("The GitHub App installation ID for this account")
+                        FieldInlineHint(text: tarmacFieldDetail(.installationId))
+
                         TextField("Scale Set ID", text: $scaleSetId)
                             .help("The numeric ID of your Actions Runner Scale Set for this account")
+                        FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
                     }
 
                     Section("GitHub App Credentials") {
-                        GuidanceCallout(item: .permissions)
-
                         TextField("App ID", text: $appId)
+                        FieldInlineHint(text: tarmacFieldDetail(.appId))
 
                         HStack {
                             if hasKey {
@@ -460,6 +633,8 @@ private struct OrganizationFormSheet: View {
                             .controlSize(.small)
                         }
 
+                        FieldInlineHint(text: tarmacFieldDetail(.privateKey))
+
                         if let error = importError {
                             Text(error)
                                 .font(.caption)
@@ -470,6 +645,7 @@ private struct OrganizationFormSheet: View {
                     Section("Runner Labels") {
                         TextField("Labels (comma-separated)", text: $labels)
                             .help("e.g. self-hosted, macOS, ARM64")
+                        FieldInlineHint(text: tarmacFieldDetail(.labels))
                     }
 
                     Section("Runner Image Profile") {
@@ -594,7 +770,7 @@ private struct OrganizationFormSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 460, height: 580)
+        .frame(width: 700, height: 720)
         .onAppear {
             if let org = existing {
                 name = org.name
@@ -676,6 +852,10 @@ private struct OrganizationFormSheet: View {
     }
 
     @State private var pendingKeyData: Data?
+
+    private func tarmacFieldDetail(_ kind: TarmacAccountFieldGuide.Kind) -> String {
+        setupGuide.tarmacFields.first { $0.kind == kind }?.detail ?? ""
+    }
 
     private func save() {
         let parsedLabels = labels.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }

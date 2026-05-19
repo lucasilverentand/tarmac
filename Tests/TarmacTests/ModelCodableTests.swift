@@ -255,6 +255,65 @@ struct ModelCodableTests {
         #expect(GitHubSetupGuidance.permissions.detail.contains("organization self-hosted runner permission"))
     }
 
+    @Test("GitHub App setup guide builds organization registration guidance")
+    func githubAppSetupGuideOrganization() throws {
+        let guide = GitHubAppSetupGuide.guide(for: .organization)
+        let url = try #require(guide.registrationURL(accountName: "octo-org"))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let queryItems = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+            }
+        )
+
+        #expect(
+            guide.registrationPath(accountName: "octo-org")
+                == "https://github.com/organizations/octo-org/settings/apps/new"
+        )
+        #expect(queryItems["name"] == "Tarmac octo-org")
+        #expect(queryItems["url"] == "https://github.com/octo-org")
+        #expect(queryItems["webhook_active"] == "false")
+        #expect(queryItems["organization_self_hosted_runners"] == "write")
+        #expect(queryItems["public"] == "false")
+        #expect(
+            guide.resolvedAppFields(accountName: "octo-org").contains {
+                $0.value == "Self-hosted runners: Read & write"
+            }
+        )
+        #expect(
+            guide.tarmacFields.map(\.kind) == [
+                .type, .accountName, .appId, .installationId, .privateKey, .scaleSetId, .labels,
+            ]
+        )
+    }
+
+    @Test("GitHub App setup guide builds enterprise registration guidance")
+    func githubAppSetupGuideEnterprise() throws {
+        let guide = GitHubAppSetupGuide.guide(for: .enterprise)
+        let url = try #require(guide.registrationURL(accountName: "acme"))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let queryItems = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+            }
+        )
+
+        #expect(guide.registrationPath(accountName: "acme") == "https://github.com/enterprises/acme/settings/apps/new")
+        #expect(queryItems["name"] == "Tarmac acme")
+        #expect(queryItems["url"] == "https://github.com/enterprises/acme")
+        #expect(queryItems["public"] == nil)
+        #expect(queryItems["organization_self_hosted_runners"] == "write")
+        #expect(
+            guide.tarmacFields.first { $0.kind == .accountName }?.detail.contains("Do not enter an organization name")
+                == true
+        )
+        #expect(
+            guide.appFields.contains {
+                $0.field == "Installation target" && $0.value == "Only enterprise organizations"
+            }
+        )
+    }
+
     // MARK: - AppleSigningAsset
 
     @Test("AppleSigningAsset round-trip preserves metadata")
