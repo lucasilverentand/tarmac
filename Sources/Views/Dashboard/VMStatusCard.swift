@@ -299,6 +299,16 @@ struct VMStatusCard: View {
                                         DetailRow(title: "Image", value: preparation.baseImageIdentifier)
                                     }
                                 }
+                                if !item.profile.baseImagePath.isEmpty {
+                                    DetailRow(title: "Path", value: item.profile.baseImagePath)
+                                }
+                                if let vmConfiguration = item.profile.vmConfiguration {
+                                    DetailRow(
+                                        title: "VM",
+                                        value:
+                                            "\(vmConfiguration.cpuCount) CPU, \(vmConfiguration.memorySizeGB) GB RAM, \(vmConfiguration.diskSizeGB) GB disk"
+                                    )
+                                }
                             } else if let issue = item.profile.readinessIssues.first {
                                 Text(issue.message)
                                     .font(.caption)

@@ -215,6 +215,8 @@ struct RunnerImageProfileTests {
     func organizationRunnerLabelsMergeProfileLabels() {
         let profile = RunnerImageProfile(
             name: "Xcode 17",
+            baseImagePath: "/Images/Xcode17.img",
+            vmConfiguration: VMConfiguration(cpuCount: 8, memorySizeGB: 16, diskSizeGB: 120),
             baseMacOSVersion: "26.0",
             xcodeVersion: "17.0",
             developerDirectory: "/Applications/Xcode.app/Contents/Developer",
@@ -235,6 +237,45 @@ struct RunnerImageProfileTests {
         )
 
         #expect(org.runnerLabels == ["self-hosted", "macOS", "xcode", "spm"])
+        #expect(org.runnerBaseImagePath(defaultPath: "/Images/Default.img") == "/Images/Xcode17.img")
+        #expect(org.runnerVMConfiguration(defaultConfiguration: VMConfiguration()).cpuCount == 8)
+    }
+
+    @Test("inventory report parser creates automatic advertised profile")
+    func inventoryReportCreatesAutomaticProfile() {
+        let report = RunnerImageInventoryReport.parse(
+            """
+            captured_at\t2026-05-19T10:15:30Z
+            macos_version\t26.0
+            developer_directory\t/Applications/Xcode.app/Contents/Developer
+            xcode_version\t17.0
+            xcode_license_accepted\ttrue
+            command_line_tools_installed\ttrue
+            command_line_tools_version\t17.0.0.0.1
+            sdk\tmacos\t26.0
+            sdk\tios\t19.0
+            runtime\tios\t19.0\ttrue
+            tool\tnode\tv24.0.0
+            tool\truby\truby 3.3.0
+            tool\tcocoapods\t1.16.0
+            package_manager\tnpm\t10.8.0
+            """
+        )
+
+        let profile = RunnerImageProfile.automatic(
+            from: report,
+            baseImagePath: "/Images/Xcode17.img",
+            vmConfiguration: VMConfiguration(cpuCount: 6, memorySizeGB: 12, diskSizeGB: 100),
+            name: "Scanned"
+        )
+
+        #expect(report.capturedAt != nil)
+        #expect(profile.name == "Scanned")
+        #expect(profile.baseImagePath == "/Images/Xcode17.img")
+        #expect(profile.vmConfiguration?.cpuCount == 6)
+        #expect(profile.preparation?.baseImageIdentifier == "Xcode17.img")
+        #expect(profile.capabilities == [.xcode, .iOS, .spm, .reactNativeIOS])
+        #expect(profile.advertisedLabels == ["xcode", "ios", "spm", "react-native-ios"])
     }
 
     @Test("Apple platform capabilities expose unsigned validation workflows")

@@ -118,6 +118,14 @@ extension Organization {
         imageProfile?.readinessIssues ?? []
     }
 
+    func runnerBaseImagePath(defaultPath: String) -> String {
+        imageProfile?.resolvedBaseImagePath(defaultPath: defaultPath) ?? defaultPath
+    }
+
+    func runnerVMConfiguration(defaultConfiguration: VMConfiguration) -> VMConfiguration {
+        imageProfile?.resolvedVMConfiguration(defaultConfiguration: defaultConfiguration) ?? defaultConfiguration
+    }
+
     func acceptsRepository(_ repoName: String?) -> Bool {
         guard let repoName else { return true }
         switch filterMode {
