@@ -260,6 +260,27 @@ final class SettingsViewModel {
         storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth()
     }
 
+    func scanRunnerImage(
+        baseImagePath: String,
+        vmConfiguration: VMConfiguration
+    ) async throws -> RunnerImageInventoryReport {
+        let imagePath =
+            baseImagePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? configStore.resolvedBaseImagePath
+            : baseImagePath
+        let engine = VMEngine(
+            cacheDirectoryPath: configStore.storageRootPath,
+            baseImagePath: configStore.resolvedBaseImagePath,
+            platformDirectoryPath: configStore.platformDirectoryPath,
+            cacheConfig: configStore.cacheConfig,
+            diagnosticsRetention: configStore.diagnosticsRetentionConfig
+        )
+        return try await engine.scanRunnerImage(
+            baseImagePath: imagePath,
+            config: vmConfiguration
+        )
+    }
+
     // MARK: - GitHub Setup Checks
 
     func setupCheckResult(for org: Organization) -> GitHubSetupCheckResult? {

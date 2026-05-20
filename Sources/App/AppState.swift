@@ -239,10 +239,12 @@ final class AppState {
             runnableJob.runnerName = runnerName
             runnableJob.runnerLease = lease
             runnableJob.status = .running
+            let runnerVMConfiguration = org.runnerVMConfiguration(defaultConfiguration: configStore.vmConfiguration)
             let instance = try await vmEngine.provisionAndRun(
                 job: runnableJob,
-                config: configStore.vmConfiguration,
-                runnerPath: runnerPath
+                config: runnerVMConfiguration,
+                runnerPath: runnerPath,
+                baseImagePath: org.runnerBaseImagePath(defaultPath: configStore.resolvedBaseImagePath)
             )
             let sharedDirectoryPath = StorageManager(rootPath: configStore.storageRootPath)
                 .jobsDirectory
@@ -263,7 +265,12 @@ final class AppState {
             vmStatusViewModel.activeVM = vmEngine.currentInstance
 
             Log.app.info("Job \(job.id) is running in VM")
-            startCompletionMonitor(for: job.id, vmEngine: vmEngine, queueEngine: queueEngine)
+            startCompletionMonitor(
+                for: job.id,
+                timeoutSeconds: runnerVMConfiguration.runnerCompletionTimeoutSeconds,
+                vmEngine: vmEngine,
+                queueEngine: queueEngine
+            )
         } catch {
             Log.app.error("Failed to provision job \(job.id): \(error.localizedDescription)")
             if let failedLease = await queueEngine.runnerLeaseStore.recordCleanupState(jobId: job.id, state: .failed) {
@@ -299,7 +306,12 @@ final class AppState {
         }
     }
 
-    private func startCompletionMonitor(for jobId: Int64, vmEngine: VMEngine, queueEngine: QueueEngine) {
+    private func startCompletionMonitor(
+        for jobId: Int64,
+        timeoutSeconds: Int,
+        vmEngine: VMEngine,
+        queueEngine: QueueEngine
+    ) {
         completionMonitorTasks[jobId]?.cancel()
         completionMonitorTasks[jobId] = Task { [weak self] in
             guard let self else { return }
@@ -307,7 +319,7 @@ final class AppState {
             do {
                 let result = try await vmEngine.waitForJobCompletion(
                     jobId: jobId,
-                    timeoutSeconds: self.configStore.vmConfiguration.runnerCompletionTimeoutSeconds
+                    timeoutSeconds: timeoutSeconds
                 )
                 guard !Task.isCancelled else { return }
                 await queueEngine.completeJobFromGuest(jobId: jobId, result: result)

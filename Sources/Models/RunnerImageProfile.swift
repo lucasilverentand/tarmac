@@ -2,6 +2,8 @@ import Foundation
 
 struct RunnerImageProfile: Codable, Hashable, Sendable {
     var name: String = "Apple Platform"
+    var baseImagePath: String = ""
+    var vmConfiguration: VMConfiguration?
     var baseMacOSVersion: String = ""
     var xcodeVersion: String = ""
     var developerDirectory: String = ""
@@ -10,6 +12,63 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
     var simulatorRuntimes: [AppleSimulatorRuntime] = []
     var capabilities: [AppleBuildCapability] = []
     var preparation: BaseImagePreparation?
+
+    init(
+        name: String = "Apple Platform",
+        baseImagePath: String = "",
+        vmConfiguration: VMConfiguration? = nil,
+        baseMacOSVersion: String = "",
+        xcodeVersion: String = "",
+        developerDirectory: String = "",
+        commandLineToolsInstalled: Bool = false,
+        sdks: [ApplePlatformSDK] = [],
+        simulatorRuntimes: [AppleSimulatorRuntime] = [],
+        capabilities: [AppleBuildCapability] = [],
+        preparation: BaseImagePreparation? = nil
+    ) {
+        self.name = name
+        self.baseImagePath = baseImagePath
+        self.vmConfiguration = vmConfiguration
+        self.baseMacOSVersion = baseMacOSVersion
+        self.xcodeVersion = xcodeVersion
+        self.developerDirectory = developerDirectory
+        self.commandLineToolsInstalled = commandLineToolsInstalled
+        self.sdks = sdks
+        self.simulatorRuntimes = simulatorRuntimes
+        self.capabilities = capabilities
+        self.preparation = preparation
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case baseImagePath
+        case vmConfiguration
+        case baseMacOSVersion
+        case xcodeVersion
+        case developerDirectory
+        case commandLineToolsInstalled
+        case sdks
+        case simulatorRuntimes
+        case capabilities
+        case preparation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Apple Platform"
+        baseImagePath = try container.decodeIfPresent(String.self, forKey: .baseImagePath) ?? ""
+        vmConfiguration = try container.decodeIfPresent(VMConfiguration.self, forKey: .vmConfiguration)
+        baseMacOSVersion = try container.decodeIfPresent(String.self, forKey: .baseMacOSVersion) ?? ""
+        xcodeVersion = try container.decodeIfPresent(String.self, forKey: .xcodeVersion) ?? ""
+        developerDirectory = try container.decodeIfPresent(String.self, forKey: .developerDirectory) ?? ""
+        commandLineToolsInstalled =
+            try container.decodeIfPresent(Bool.self, forKey: .commandLineToolsInstalled) ?? false
+        sdks = try container.decodeIfPresent([ApplePlatformSDK].self, forKey: .sdks) ?? []
+        simulatorRuntimes =
+            try container.decodeIfPresent([AppleSimulatorRuntime].self, forKey: .simulatorRuntimes) ?? []
+        capabilities = try container.decodeIfPresent([AppleBuildCapability].self, forKey: .capabilities) ?? []
+        preparation = try container.decodeIfPresent(BaseImagePreparation.self, forKey: .preparation)
+    }
 
     var advertisedLabels: [String] {
         AppleBuildCapability.allCases
@@ -46,7 +105,7 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
         name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Runner image profile" : name
     }
 
-    private func readinessIssues(for capability: AppleBuildCapability) -> [RunnerImageProfileReadinessIssue] {
+    func readinessIssues(for capability: AppleBuildCapability) -> [RunnerImageProfileReadinessIssue] {
         var issues: [RunnerImageProfileReadinessIssue] = []
         let inventory = preparation?.inventory ?? ToolchainInventory()
 
@@ -120,6 +179,15 @@ struct RunnerImageProfile: Codable, Hashable, Sendable {
         }
 
         return issues
+    }
+
+    func resolvedBaseImagePath(defaultPath: String) -> String {
+        let path = baseImagePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? defaultPath : path
+    }
+
+    func resolvedVMConfiguration(defaultConfiguration: VMConfiguration) -> VMConfiguration {
+        vmConfiguration ?? defaultConfiguration
     }
 
     private func hasSDK(for platform: ApplePlatform) -> Bool {
@@ -519,6 +587,246 @@ enum AppleToolchainRequirement: String, Codable, CaseIterable, Identifiable, Sen
         case .expoCLI: "Expo CLI"
         case .easCLI: "EAS CLI"
         }
+    }
+}
+
+struct RunnerImageInventoryReport: Codable, Equatable, Sendable {
+    var capturedAt: Date?
+    var baseMacOSVersion: String
+    var xcodeVersion: String
+    var developerDirectory: String
+    var commandLineToolsInstalled: Bool
+    var commandLineToolsVersion: String
+    var xcodeLicenseAccepted: Bool
+    var sdks: [ApplePlatformSDK]
+    var simulatorRuntimes: [AppleSimulatorRuntime]
+    var flutterVersion: String
+    var dartVersion: String
+    var nodeVersion: String
+    var packageManagers: [PackageManagerInventory]
+    var rubyVersion: String
+    var cocoaPodsVersion: String
+    var expoCLIVersion: String
+    var easCLIVersion: String
+
+    init(
+        capturedAt: Date? = nil,
+        baseMacOSVersion: String = "",
+        xcodeVersion: String = "",
+        developerDirectory: String = "",
+        commandLineToolsInstalled: Bool = false,
+        commandLineToolsVersion: String = "",
+        xcodeLicenseAccepted: Bool = false,
+        sdks: [ApplePlatformSDK] = [],
+        simulatorRuntimes: [AppleSimulatorRuntime] = [],
+        flutterVersion: String = "",
+        dartVersion: String = "",
+        nodeVersion: String = "",
+        packageManagers: [PackageManagerInventory] = [],
+        rubyVersion: String = "",
+        cocoaPodsVersion: String = "",
+        expoCLIVersion: String = "",
+        easCLIVersion: String = ""
+    ) {
+        self.capturedAt = capturedAt
+        self.baseMacOSVersion = baseMacOSVersion
+        self.xcodeVersion = xcodeVersion
+        self.developerDirectory = developerDirectory
+        self.commandLineToolsInstalled = commandLineToolsInstalled
+        self.commandLineToolsVersion = commandLineToolsVersion
+        self.xcodeLicenseAccepted = xcodeLicenseAccepted
+        self.sdks = sdks
+        self.simulatorRuntimes = simulatorRuntimes
+        self.flutterVersion = flutterVersion
+        self.dartVersion = dartVersion
+        self.nodeVersion = nodeVersion
+        self.packageManagers = packageManagers
+        self.rubyVersion = rubyVersion
+        self.cocoaPodsVersion = cocoaPodsVersion
+        self.expoCLIVersion = expoCLIVersion
+        self.easCLIVersion = easCLIVersion
+    }
+}
+
+extension RunnerImageInventoryReport {
+    static func parse(_ contents: String) -> RunnerImageInventoryReport {
+        var report = RunnerImageInventoryReport()
+        var sdksByPlatform: [ApplePlatform: ApplePlatformSDK] = [:]
+        var runtimes: [AppleSimulatorRuntime] = []
+        var packageManagersByManager: [JavaScriptPackageManager: PackageManagerInventory] = [:]
+        let formatter = ISO8601DateFormatter()
+
+        for rawLine in contents.split(whereSeparator: \.isNewline) {
+            let parts = rawLine.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard let key = parts.first else { continue }
+
+            switch key {
+            case "captured_at":
+                report.capturedAt = parts.value(at: 1).flatMap(formatter.date(from:))
+            case "macos_version":
+                report.baseMacOSVersion = parts.value(at: 1) ?? ""
+            case "developer_directory":
+                report.developerDirectory = parts.value(at: 1) ?? ""
+            case "xcode_version":
+                report.xcodeVersion = parts.value(at: 1) ?? ""
+            case "xcode_license_accepted":
+                report.xcodeLicenseAccepted = parts.value(at: 1) == "true"
+            case "command_line_tools_installed":
+                report.commandLineToolsInstalled = parts.value(at: 1) == "true"
+            case "command_line_tools_version":
+                report.commandLineToolsVersion = parts.value(at: 1) ?? ""
+            case "sdk":
+                guard let platform = parts.platform(at: 1), let version = parts.value(at: 2), !version.isEmpty else {
+                    continue
+                }
+                sdksByPlatform[platform] = ApplePlatformSDK(platform: platform, version: version)
+            case "runtime":
+                guard let platform = parts.platform(at: 1), let version = parts.value(at: 2), !version.isEmpty else {
+                    continue
+                }
+                runtimes.append(
+                    AppleSimulatorRuntime(
+                        platform: platform,
+                        version: version,
+                        isAvailable: parts.value(at: 3) != "false"
+                    )
+                )
+            case "tool":
+                guard let tool = parts.value(at: 1), let version = parts.value(at: 2), !version.isEmpty else {
+                    continue
+                }
+                switch tool {
+                case "flutter": report.flutterVersion = version
+                case "dart": report.dartVersion = version
+                case "node": report.nodeVersion = version
+                case "ruby": report.rubyVersion = version
+                case "cocoapods": report.cocoaPodsVersion = version
+                case "expo": report.expoCLIVersion = version
+                case "eas": report.easCLIVersion = version
+                default: continue
+                }
+            case "package_manager":
+                guard let managerName = parts.value(at: 1),
+                    let manager = JavaScriptPackageManager(rawValue: managerName),
+                    let version = parts.value(at: 2),
+                    !version.isEmpty
+                else {
+                    continue
+                }
+                packageManagersByManager[manager] = PackageManagerInventory(manager: manager, version: version)
+            default:
+                continue
+            }
+        }
+
+        report.sdks = ApplePlatform.allCases.compactMap { sdksByPlatform[$0] }
+        report.simulatorRuntimes = runtimes
+        report.packageManagers = JavaScriptPackageManager.allCases.compactMap { packageManagersByManager[$0] }
+        return report
+    }
+}
+
+extension RunnerImageProfile {
+    static func automatic(
+        from report: RunnerImageInventoryReport,
+        baseImagePath: String,
+        vmConfiguration: VMConfiguration? = nil,
+        name: String = "Detected Apple Platform"
+    ) -> RunnerImageProfile {
+        var profile = RunnerImageProfile(
+            name: name,
+            baseImagePath: baseImagePath,
+            vmConfiguration: vmConfiguration,
+            baseMacOSVersion: report.baseMacOSVersion,
+            xcodeVersion: report.xcodeVersion,
+            developerDirectory: report.developerDirectory,
+            commandLineToolsInstalled: report.commandLineToolsInstalled,
+            sdks: report.sdks,
+            simulatorRuntimes: report.simulatorRuntimes,
+            capabilities: AppleBuildCapability.allCases,
+            preparation: BaseImagePreparation(
+                baseImageIdentifier: Self.defaultBaseImageIdentifier(for: baseImagePath),
+                steps: Self.preparationSteps(from: report),
+                inventory: ToolchainInventory(
+                    capturedAt: report.capturedAt,
+                    commandLineToolsVersion: report.commandLineToolsVersion,
+                    xcodeLicenseAccepted: report.xcodeLicenseAccepted,
+                    flutterVersion: report.flutterVersion,
+                    dartVersion: report.dartVersion,
+                    nodeVersion: report.nodeVersion,
+                    packageManagers: report.packageManagers,
+                    rubyVersion: report.rubyVersion,
+                    cocoaPodsVersion: report.cocoaPodsVersion,
+                    expoCLIVersion: report.expoCLIVersion,
+                    easCLIVersion: report.easCLIVersion
+                ),
+                updatedAt: report.capturedAt
+            )
+        )
+        profile.capabilities = AppleBuildCapability.allCases.filter {
+            profile.readinessIssues(for: $0).isEmpty
+        }
+        return profile
+    }
+
+    private static func defaultBaseImageIdentifier(for path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return URL(fileURLWithPath: trimmed).lastPathComponent
+    }
+
+    private static func preparationSteps(from report: RunnerImageInventoryReport) -> [BaseImagePreparationStep] {
+        BaseImagePreparationStepID.allCases.map { id in
+            BaseImagePreparationStep(
+                id: id,
+                status: preparationStatus(for: id, report: report),
+                updatedAt: report.capturedAt
+            )
+        }
+    }
+
+    private static func preparationStatus(
+        for id: BaseImagePreparationStepID,
+        report: RunnerImageInventoryReport
+    ) -> PreparationStepStatus {
+        switch id {
+        case .installXcode:
+            report.xcodeVersion.isEmpty ? .blocked : .completed
+        case .acceptXcodeLicense:
+            report.xcodeLicenseAccepted ? .completed : .blocked
+        case .selectDeveloperDirectory:
+            report.developerDirectory.isEmpty ? .blocked : .completed
+        case .installCommandLineTools:
+            report.commandLineToolsInstalled ? .completed : .blocked
+        case .installSimulatorRuntimes:
+            report.simulatorRuntimes.contains(where: \.isAvailable) ? .completed : .notStarted
+        case .installOptionalToolchains:
+            report.hasOptionalToolchain ? .completed : .notStarted
+        }
+    }
+}
+
+private extension RunnerImageInventoryReport {
+    var hasOptionalToolchain: Bool {
+        !flutterVersion.isEmpty
+            || !dartVersion.isEmpty
+            || !nodeVersion.isEmpty
+            || !packageManagers.isEmpty
+            || !rubyVersion.isEmpty
+            || !cocoaPodsVersion.isEmpty
+            || !expoCLIVersion.isEmpty
+            || !easCLIVersion.isEmpty
+    }
+}
+
+private extension [String] {
+    func value(at index: Int) -> String? {
+        guard indices.contains(index) else { return nil }
+        return self[index].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func platform(at index: Int) -> ApplePlatform? {
+        value(at: index).flatMap(ApplePlatform.init(rawValue:))
     }
 }
 

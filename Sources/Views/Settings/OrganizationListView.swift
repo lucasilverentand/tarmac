@@ -529,6 +529,12 @@ private struct OrganizationFormSheet: View {
     @State private var labels: String = "self-hosted, macOS, ARM64"
     @State private var imageProfileEnabled = false
     @State private var imageProfileName = "Apple Platform"
+    @State private var runnerBaseImagePath = ""
+    @State private var overrideVMConfiguration = false
+    @State private var runnerCPUCount = "4"
+    @State private var runnerMemorySizeGB = "8"
+    @State private var runnerDiskSizeGB = "80"
+    @State private var runnerCompletionTimeoutSeconds = "3600"
     @State private var baseMacOSVersion = ""
     @State private var xcodeVersion = ""
     @State private var developerDirectory = ""
@@ -553,6 +559,8 @@ private struct OrganizationFormSheet: View {
     @State private var hasKey: Bool = false
     @State private var showingFileImporter = false
     @State private var importError: String?
+    @State private var imageScanInFlight = false
+    @State private var imageScanError: String?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -653,6 +661,58 @@ private struct OrganizationFormSheet: View {
 
                         if imageProfileEnabled {
                             TextField("Profile name", text: $imageProfileName)
+                            TextField("Runner image path", text: $runnerBaseImagePath)
+                                .help("Leave blank to use the managed base image.")
+
+                            HStack {
+                                Button("Use Managed Image") {
+                                    runnerBaseImagePath = viewModel.baseImagePath
+                                }
+                                .controlSize(.small)
+
+                                Button {
+                                    scanRunnerImage()
+                                } label: {
+                                    if imageScanInFlight {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Label("Scan Image", systemImage: "waveform.path.ecg")
+                                    }
+                                }
+                                .controlSize(.small)
+                                .disabled(imageScanInFlight)
+                            }
+
+                            Text(
+                                "Scanning boots a temporary clone of this image, records the installed Apple toolchain, and updates the advertised labels from what is actually present."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                            if let imageScanError {
+                                Text(imageScanError)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Toggle("Override VM resources for this runner image", isOn: $overrideVMConfiguration)
+
+                            if overrideVMConfiguration {
+                                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                                    GridRow {
+                                        TextField("CPU", text: $runnerCPUCount)
+                                        TextField("Memory GB", text: $runnerMemorySizeGB)
+                                    }
+                                    GridRow {
+                                        TextField("Disk GB", text: $runnerDiskSizeGB)
+                                        TextField("Timeout seconds", text: $runnerCompletionTimeoutSeconds)
+                                    }
+                                }
+                            }
+
                             TextField("Base macOS version", text: $baseMacOSVersion)
                                 .help("The macOS version installed in the base image")
                             TextField("Xcode version", text: $xcodeVersion)
@@ -770,7 +830,7 @@ private struct OrganizationFormSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 700, height: 720)
+        .frame(width: 720, height: 780)
         .onAppear {
             if let org = existing {
                 name = org.name
@@ -780,32 +840,16 @@ private struct OrganizationFormSheet: View {
                 scaleSetId = org.scaleSetId.map(String.init) ?? ""
                 labels = org.labels.joined(separator: ", ")
                 if let profile = org.imageProfile {
-                    imageProfileEnabled = true
-                    imageProfileName = profile.name
-                    baseMacOSVersion = profile.baseMacOSVersion
-                    xcodeVersion = profile.xcodeVersion
-                    developerDirectory = profile.developerDirectory
-                    commandLineToolsInstalled = profile.commandLineToolsInstalled
-                    let preparation = profile.preparation ?? BaseImagePreparation()
-                    baseImageIdentifier = preparation.baseImageIdentifier
-                    preparationSteps = preparation.steps
-                    commandLineToolsVersion = preparation.inventory.commandLineToolsVersion
-                    xcodeLicenseAccepted = preparation.inventory.xcodeLicenseAccepted
-                    flutterVersion = preparation.inventory.flutterVersion
-                    dartVersion = preparation.inventory.dartVersion
-                    nodeVersion = preparation.inventory.nodeVersion
-                    packageManagerList = formatPackageManagers(preparation.inventory.packageManagers)
-                    rubyVersion = preparation.inventory.rubyVersion
-                    cocoaPodsVersion = preparation.inventory.cocoaPodsVersion
-                    expoCLIVersion = preparation.inventory.expoCLIVersion
-                    easCLIVersion = preparation.inventory.easCLIVersion
-                    selectedCapabilities = Set(profile.capabilities)
-                    sdkList = formatSDKs(profile.sdks)
-                    simulatorRuntimeList = formatSimulatorRuntimes(profile.simulatorRuntimes)
+                    applyImageProfile(profile)
                 }
                 filterMode = org.filterMode
                 repositoryList = org.filteredRepositories.joined(separator: "\n")
                 hasKey = viewModel.hasPrivateKey(for: org)
+            } else {
+                runnerCPUCount = "\(viewModel.vmConfiguration.cpuCount)"
+                runnerMemorySizeGB = "\(viewModel.vmConfiguration.memorySizeGB)"
+                runnerDiskSizeGB = "\(viewModel.vmConfiguration.diskSizeGB)"
+                runnerCompletionTimeoutSeconds = "\(viewModel.vmConfiguration.runnerCompletionTimeoutSeconds)"
             }
         }
         .fileImporter(
@@ -904,6 +948,8 @@ private struct OrganizationFormSheet: View {
     private var currentImageProfile: RunnerImageProfile {
         RunnerImageProfile(
             name: imageProfileName,
+            baseImagePath: effectiveRunnerBaseImagePath,
+            vmConfiguration: overrideVMConfiguration ? currentRunnerVMConfiguration : nil,
             baseMacOSVersion: baseMacOSVersion,
             xcodeVersion: xcodeVersion,
             developerDirectory: developerDirectory,
@@ -916,6 +962,23 @@ private struct OrganizationFormSheet: View {
             },
             capabilities: AppleBuildCapability.allCases.filter { selectedCapabilities.contains($0) },
             preparation: currentPreparation
+        )
+    }
+
+    private var effectiveRunnerBaseImagePath: String {
+        let path = runnerBaseImagePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? viewModel.baseImagePath : path
+    }
+
+    private var currentRunnerVMConfiguration: VMConfiguration {
+        VMConfiguration(
+            cpuCount: parsedPositiveInt(runnerCPUCount, fallback: viewModel.vmConfiguration.cpuCount),
+            memorySizeGB: parsedPositiveInt(runnerMemorySizeGB, fallback: viewModel.vmConfiguration.memorySizeGB),
+            diskSizeGB: parsedPositiveInt(runnerDiskSizeGB, fallback: viewModel.vmConfiguration.diskSizeGB),
+            runnerCompletionTimeoutSeconds: parsedPositiveInt(
+                runnerCompletionTimeoutSeconds,
+                fallback: viewModel.vmConfiguration.runnerCompletionTimeoutSeconds
+            )
         )
     }
 
@@ -938,6 +1001,77 @@ private struct OrganizationFormSheet: View {
             ),
             updatedAt: Date()
         )
+    }
+
+    private func scanRunnerImage() {
+        imageProfileEnabled = true
+        imageScanInFlight = true
+        imageScanError = nil
+
+        let imagePath = effectiveRunnerBaseImagePath
+        let vmConfig = currentRunnerVMConfiguration
+        let scanName =
+            imageProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Detected Apple Platform"
+            : imageProfileName
+
+        Task {
+            do {
+                let report = try await viewModel.scanRunnerImage(
+                    baseImagePath: imagePath,
+                    vmConfiguration: vmConfig
+                )
+                let profile = RunnerImageProfile.automatic(
+                    from: report,
+                    baseImagePath: imagePath,
+                    vmConfiguration: overrideVMConfiguration ? vmConfig : nil,
+                    name: scanName
+                )
+                applyImageProfile(profile)
+            } catch {
+                imageScanError = error.localizedDescription
+            }
+            imageScanInFlight = false
+        }
+    }
+
+    private func applyImageProfile(_ profile: RunnerImageProfile) {
+        imageProfileEnabled = true
+        imageProfileName = profile.name
+        runnerBaseImagePath = profile.baseImagePath
+        if let vmConfiguration = profile.vmConfiguration {
+            overrideVMConfiguration = true
+            runnerCPUCount = "\(vmConfiguration.cpuCount)"
+            runnerMemorySizeGB = "\(vmConfiguration.memorySizeGB)"
+            runnerDiskSizeGB = "\(vmConfiguration.diskSizeGB)"
+            runnerCompletionTimeoutSeconds = "\(vmConfiguration.runnerCompletionTimeoutSeconds)"
+        } else {
+            overrideVMConfiguration = false
+            runnerCPUCount = "\(viewModel.vmConfiguration.cpuCount)"
+            runnerMemorySizeGB = "\(viewModel.vmConfiguration.memorySizeGB)"
+            runnerDiskSizeGB = "\(viewModel.vmConfiguration.diskSizeGB)"
+            runnerCompletionTimeoutSeconds = "\(viewModel.vmConfiguration.runnerCompletionTimeoutSeconds)"
+        }
+        baseMacOSVersion = profile.baseMacOSVersion
+        xcodeVersion = profile.xcodeVersion
+        developerDirectory = profile.developerDirectory
+        commandLineToolsInstalled = profile.commandLineToolsInstalled
+        let preparation = profile.preparation ?? BaseImagePreparation()
+        baseImageIdentifier = preparation.baseImageIdentifier
+        preparationSteps = preparation.steps
+        commandLineToolsVersion = preparation.inventory.commandLineToolsVersion
+        xcodeLicenseAccepted = preparation.inventory.xcodeLicenseAccepted
+        flutterVersion = preparation.inventory.flutterVersion
+        dartVersion = preparation.inventory.dartVersion
+        nodeVersion = preparation.inventory.nodeVersion
+        packageManagerList = formatPackageManagers(preparation.inventory.packageManagers)
+        rubyVersion = preparation.inventory.rubyVersion
+        cocoaPodsVersion = preparation.inventory.cocoaPodsVersion
+        expoCLIVersion = preparation.inventory.expoCLIVersion
+        easCLIVersion = preparation.inventory.easCLIVersion
+        selectedCapabilities = Set(profile.capabilities)
+        sdkList = formatSDKs(profile.sdks)
+        simulatorRuntimeList = formatSimulatorRuntimes(profile.simulatorRuntimes)
     }
 
     @ViewBuilder
@@ -1046,5 +1180,12 @@ private struct OrganizationFormSheet: View {
         packageManagers
             .map { "\($0.manager.rawValue)=\($0.version)" }
             .joined(separator: ", ")
+    }
+
+    private func parsedPositiveInt(_ text: String, fallback: Int) -> Int {
+        guard let value = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 else {
+            return fallback
+        }
+        return value
     }
 }

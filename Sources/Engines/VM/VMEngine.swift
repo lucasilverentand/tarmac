@@ -157,6 +157,64 @@ final class VMEngine: VMManagerProtocol {
         Log.vm.info("Base image verification succeeded")
     }
 
+    func scanRunnerImage(
+        baseImagePath overrideBaseImagePath: String? = nil,
+        config: VMConfiguration,
+        timeoutSeconds: Int = 300
+    ) async throws -> RunnerImageInventoryReport {
+        let sourceImageURL = baseImageURL(for: overrideBaseImagePath)
+        guard FileManager.default.fileExists(atPath: sourceImageURL.path) else {
+            throw VMEngineError.baseImageMissing
+        }
+
+        try storage.prepareBaseDirectories()
+        try storage.cleanupTransientFiles()
+        _ = try ensureStorageReadyForBoot(config: config, context: "runner image inventory scan")
+
+        let scanId = UUID()
+        let clonePath = storage.disksDirectory
+            .appendingPathComponent("inventory-\(scanId.uuidString).img")
+        let sharedDirectory = storage.jobsDirectory
+            .appendingPathComponent("inventory-\(scanId.uuidString)", isDirectory: true)
+
+        do {
+            let cloneMetrics = try diskManager.cloneDisk(from: sourceImageURL, to: clonePath)
+            logCloneFallbackIfNeeded(cloneMetrics, context: "runner image inventory scan")
+            try prepareInventorySharedDirectory(sharedDirectory)
+            try await lifecycle.bootVM(
+                vmConfig: config,
+                diskPath: clonePath,
+                platformStore: platformStore,
+                sharedDirectoryURL: sharedDirectory,
+                cacheDirectoryURL: nil
+            )
+
+            let result = try await waitForSharedCompletion(
+                in: sharedDirectory,
+                timeoutSeconds: timeoutSeconds,
+                context: "runner image inventory scan"
+            )
+            guard case .success = result else {
+                if case .failure(let reason) = result {
+                    throw VMEngineError.imageInventoryScanFailed(reason: reason)
+                }
+                throw VMEngineError.imageInventoryScanFailed(reason: "Inventory runner failed")
+            }
+
+            let inventoryURL = sharedDirectory.appendingPathComponent(Self.inventoryReportFileName)
+            let contents = try String(contentsOf: inventoryURL, encoding: .utf8)
+            try? await stopVM()
+            try? diskManager.deleteDisk(at: clonePath)
+            try? FileManager.default.removeItem(at: sharedDirectory)
+            return RunnerImageInventoryReport.parse(contents)
+        } catch {
+            try? await stopVM()
+            try? diskManager.deleteDisk(at: clonePath)
+            try? FileManager.default.removeItem(at: sharedDirectory)
+            throw error
+        }
+    }
+
     // MARK: - VM Lifecycle
 
     func bootVM(
@@ -164,6 +222,25 @@ final class VMEngine: VMManagerProtocol {
         config: VMConfiguration,
         sharedDirectory: URL
     ) async throws -> VMInstance {
+        try await bootVM(
+            for: jobId,
+            config: config,
+            sharedDirectory: sharedDirectory,
+            baseImagePath: nil
+        )
+    }
+
+    func bootVM(
+        for jobId: Int64,
+        config: VMConfiguration,
+        sharedDirectory: URL,
+        baseImagePath overrideBaseImagePath: String?
+    ) async throws -> VMInstance {
+        let sourceImageURL = baseImageURL(for: overrideBaseImagePath)
+        guard FileManager.default.fileExists(atPath: sourceImageURL.path) else {
+            throw VMEngineError.baseImageMissing
+        }
+
         try storage.prepareBaseDirectories()
         try storage.cleanupTransientFiles()
 
@@ -195,10 +272,10 @@ final class VMEngine: VMManagerProtocol {
         do {
             _ = try ensureStorageReadyForBoot(config: config, context: "job \(jobId) boot")
 
-            let cloneMetrics = try diskManager.cloneDisk(from: baseImageURL, to: clonedDiskPath)
+            let cloneMetrics = try diskManager.cloneDisk(from: sourceImageURL, to: clonedDiskPath)
             logCloneFallbackIfNeeded(cloneMetrics, context: "job \(jobId) boot")
             appendHostLifecycle(
-                "Cloned base disk to \(clonedDiskPath.lastPathComponent)",
+                "Cloned base disk \(sourceImageURL.lastPathComponent) to \(clonedDiskPath.lastPathComponent)",
                 jobId: jobId,
                 sharedDirectory: sharedDirectory
             )
@@ -264,7 +341,12 @@ final class VMEngine: VMManagerProtocol {
     // MARK: - Full Job Flow
 
     @discardableResult
-    func provisionAndRun(job: RunnerJob, config: VMConfiguration, runnerPath: URL) async throws -> VMInstance {
+    func provisionAndRun(
+        job: RunnerJob,
+        config: VMConfiguration,
+        runnerPath: URL,
+        baseImagePath overrideBaseImagePath: String? = nil
+    ) async throws -> VMInstance {
         guard let jitConfig = job.jitConfig else {
             throw VMEngineError.missingJITConfig
         }
@@ -282,7 +364,12 @@ final class VMEngine: VMManagerProtocol {
         )
 
         do {
-            return try await bootVM(for: job.id, config: config, sharedDirectory: sharedDir)
+            return try await bootVM(
+                for: job.id,
+                config: config,
+                sharedDirectory: sharedDir,
+                baseImagePath: overrideBaseImagePath
+            )
         } catch {
             try? sharedDirManager.cleanupJob(jobId: job.id)
             throw error
@@ -509,6 +596,53 @@ final class VMEngine: VMManagerProtocol {
 
         return .failure("Runner exited with code \(exitCode)")
     }
+
+    private func baseImageURL(for overridePath: String?) -> URL {
+        guard let overridePath,
+            !overridePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return baseImageURL
+        }
+        return URL(fileURLWithPath: overridePath)
+    }
+
+    private func prepareInventorySharedDirectory(_ sharedDirectory: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: sharedDirectory.path) {
+            try fm.removeItem(at: sharedDirectory)
+        }
+        let runnerDirectory = sharedDirectory.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
+        try fm.createDirectory(at: runnerDirectory, withIntermediateDirectories: true)
+        try "inventory-scan\n".write(
+            to: sharedDirectory.appendingPathComponent(GuestBootstrapContract.jitConfigFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runScriptURL = runnerDirectory.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
+        try Self.inventoryRunScript.write(to: runScriptURL, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runScriptURL.path)
+    }
+
+    private func waitForSharedCompletion(
+        in sharedDirectory: URL,
+        timeoutSeconds: Int,
+        context: String
+    ) async throws -> JobResult {
+        let markerURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName)
+        let exitCodeURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.exitCodeFileName)
+        let deadline = Date().addingTimeInterval(TimeInterval(max(1, timeoutSeconds)))
+
+        while Date() < deadline {
+            try Task.checkCancellation()
+            if FileManager.default.fileExists(atPath: markerURL.path) {
+                return readCompletionResult(exitCodeURL: exitCodeURL)
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
+
+        return .failure("Timed out waiting for \(context)")
+    }
 }
 
 enum VMEngineError: LocalizedError {
@@ -516,6 +650,7 @@ enum VMEngineError: LocalizedError {
     case baseImageMissing
     case verificationFailed(reason: String)
     case unsuitableStorage(reason: String)
+    case imageInventoryScanFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -527,8 +662,126 @@ enum VMEngineError: LocalizedError {
             "Base image verification failed: \(reason)"
         case .unsuitableStorage(let reason):
             "Storage is not suitable for VM work: \(reason)"
+        case .imageInventoryScanFailed(let reason):
+            "Runner image inventory scan failed: \(reason)"
         }
     }
+}
+
+private extension VMEngine {
+    static let inventoryReportFileName = "toolchain-inventory.tsv"
+
+    static let inventoryRunScript = """
+        #!/bin/bash
+        set -u -o pipefail
+
+        PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        OUT="\(GuestBootstrapContract.sharedMountPoint)/\(inventoryReportFileName)"
+        TMP="${OUT}.tmp"
+        : > "${TMP}"
+
+        trim() {
+            /usr/bin/sed -E 's/^[[:space:]]+//;s/[[:space:]]+$//'
+        }
+
+        emit2() {
+            /usr/bin/printf '%s\\t%s\\n' "$1" "$2" >> "${TMP}"
+        }
+
+        emit3() {
+            /usr/bin/printf '%s\\t%s\\t%s\\n' "$1" "$2" "$3" >> "${TMP}"
+        }
+
+        emit4() {
+            /usr/bin/printf '%s\\t%s\\t%s\\t%s\\n' "$1" "$2" "$3" "$4" >> "${TMP}"
+        }
+
+        first_line() {
+            "$@" 2>&1 | /usr/bin/head -n 1 | trim
+        }
+
+        emit2 "captured_at" "$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        emit2 "macos_version" "$(/usr/bin/sw_vers -productVersion 2>/dev/null | trim)"
+
+        developer_directory="$(/usr/bin/xcode-select --print-path 2>/dev/null | trim || true)"
+        emit2 "developer_directory" "${developer_directory}"
+
+        xcode_version="$(/usr/bin/xcodebuild -version 2>/dev/null | /usr/bin/awk '/^Xcode / { print $2; exit }')"
+        emit2 "xcode_version" "${xcode_version}"
+
+        if /usr/bin/xcodebuild -license check >/dev/null 2>&1; then
+            emit2 "xcode_license_accepted" "true"
+        else
+            emit2 "xcode_license_accepted" "false"
+        fi
+
+        clt_version="$(/usr/sbin/pkgutil --pkg-info=com.apple.pkg.CLTools_Executables 2>/dev/null | /usr/bin/awk -F': ' '/^version:/ { print $2; exit }')"
+        emit2 "command_line_tools_version" "${clt_version}"
+        if [[ -n "${clt_version}" || -n "${xcode_version}" ]]; then
+            emit2 "command_line_tools_installed" "true"
+        else
+            emit2 "command_line_tools_installed" "false"
+        fi
+
+        sdk_output="$(/usr/bin/mktemp)"
+        if /usr/bin/xcodebuild -showsdks > "${sdk_output}" 2>/dev/null; then
+            while IFS= read -r line; do
+                [[ "${line}" == *"-sdk "* ]] || continue
+                sdk="${line##*-sdk }"
+                platform=""
+                case "${sdk}" in
+                    macosx*) platform="macos" ;;
+                    iphoneos*|iphonesimulator*) platform="ios" ;;
+                    watchos*|watchsimulator*) platform="watchos" ;;
+                    appletvos*|appletvsimulator*) platform="tvos" ;;
+                    xros*|xrsimulator*) platform="visionos" ;;
+                esac
+                [[ -n "${platform}" ]] || continue
+                version="$(/usr/bin/printf '%s' "${sdk}" | /usr/bin/sed -E 's/^[^0-9]*//')"
+                [[ -n "${version}" ]] || continue
+                emit3 "sdk" "${platform}" "${version}"
+            done < "${sdk_output}"
+        fi
+        /bin/rm -f "${sdk_output}"
+
+        runtime_output="$(/usr/bin/mktemp)"
+        if /usr/bin/xcrun simctl list runtimes > "${runtime_output}" 2>/dev/null; then
+            while IFS= read -r line; do
+                platform=""
+                case "${line}" in
+                    iOS\\ *) platform="ios" ;;
+                    watchOS\\ *) platform="watchos" ;;
+                    tvOS\\ *) platform="tvos" ;;
+                    visionOS\\ *) platform="visionos" ;;
+                esac
+                [[ -n "${platform}" ]] || continue
+                version="$(/usr/bin/printf '%s' "${line}" | /usr/bin/awk '{ print $2 }')"
+                [[ -n "${version}" ]] || continue
+                available="true"
+                if [[ "${line}" == *"unavailable"* ]]; then
+                    available="false"
+                fi
+                emit4 "runtime" "${platform}" "${version}" "${available}"
+            done < "${runtime_output}"
+        fi
+        /bin/rm -f "${runtime_output}"
+
+        if command -v flutter >/dev/null 2>&1; then emit3 "tool" "flutter" "$(first_line flutter --version)"; fi
+        if command -v dart >/dev/null 2>&1; then emit3 "tool" "dart" "$(first_line dart --version)"; fi
+        if command -v node >/dev/null 2>&1; then emit3 "tool" "node" "$(first_line node --version)"; fi
+        if command -v ruby >/dev/null 2>&1; then emit3 "tool" "ruby" "$(first_line ruby --version)"; fi
+        if command -v pod >/dev/null 2>&1; then emit3 "tool" "cocoapods" "$(first_line pod --version)"; fi
+        if command -v expo >/dev/null 2>&1; then emit3 "tool" "expo" "$(first_line expo --version)"; fi
+        if command -v eas >/dev/null 2>&1; then emit3 "tool" "eas" "$(first_line eas --version)"; fi
+
+        for manager in npm yarn pnpm bun; do
+            if command -v "${manager}" >/dev/null 2>&1; then
+                emit3 "package_manager" "${manager}" "$(first_line "${manager}" --version)"
+            fi
+        done
+
+        /bin/mv "${TMP}" "${OUT}"
+        """
 }
 
 enum BaseImageVerificationState: Equatable, Sendable {

@@ -1,6 +1,6 @@
 import Foundation
 
-struct VMConfiguration: Codable, Sendable {
+struct VMConfiguration: Codable, Equatable, Hashable, Sendable {
     var cpuCount: Int = 4
     var memorySizeGB: Int = 8
     var diskSizeGB: Int = 80
