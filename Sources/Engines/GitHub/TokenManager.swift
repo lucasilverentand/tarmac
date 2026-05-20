@@ -34,6 +34,13 @@ actor TokenManager {
         return response.token
     }
 
+    func appJWT(appId: String, privateKeyData: Data) throws -> String {
+        guard !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw TokenError.noAppId
+        }
+        return try generateJWT(appId: appId, privateKeyData: privateKeyData)
+    }
+
     func invalidateTokens(for installationId: Int) {
         cachedTokens.removeValue(forKey: installationId)
     }

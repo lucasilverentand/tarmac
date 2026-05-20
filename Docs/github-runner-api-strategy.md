@@ -14,7 +14,8 @@ reopening the product/API decision.
 | Environment | First-version status | API path |
 | --- | --- | --- |
 | GitHub.com organization runners | Supported | `https://api.github.com/orgs/{org}/actions/...` with a GitHub App installation token. |
-| GitHub Enterprise Cloud organization runners | Supported when the organization uses the same GitHub.com org runner APIs and the app is installed on that org. |
+| GitHub Enterprise Cloud organization runners | Supported when the organization uses the same GitHub.com org runner APIs and the app is installed on that org. Enterprise-owned apps still need an organization installation for each runner organization. |
+| GitHub Enterprise Cloud enterprise-owned app setup | Supported as an app ownership source. Enterprise installation is optional control-plane setup and does not grant organization runner access. Tarmac runner accounts remain organization entries. |
 | GitHub Enterprise Cloud enterprise-level runners | Out of scope for the first version. Enterprise runner endpoints need a separate auth and product decision before Tarmac should depend on them. |
 | GitHub Enterprise Server organization runners | Out of scope for the first version. The API host, version support, auth model, and runner release compatibility need a separate compatibility pass. |
 | Repository-level runners | Out of scope unless a later issue adds repository-scoped configuration. The product model is organization-first. |
@@ -38,6 +39,14 @@ Setup checks may also read organization self-hosted runner policy through
 documented under organization `Administration` read permission rather than
 `Self-hosted runners`, so it should be treated as optional diagnostics unless the
 app explicitly asks users to grant that extra permission.
+
+Tarmac should not require users to copy the organization installation ID by hand.
+After the user imports the app private key, Tarmac can use the app JWT with
+`GET /orgs/{org}/installation` to discover the organization installation ID.
+Do not use an enterprise installation ID for this field. GitHub enterprise
+installations grant enterprise permissions only, so organization runner tokens
+still require the app to be installed on the organization that owns the runner
+scale set.
 
 Tarmac should not require a PAT for the supported GitHub.com org-runner path. A
 PAT fallback should only be introduced for a documented compatibility gap, and
@@ -93,14 +102,17 @@ scale-set sessions directly.
 
 ## Enterprise decisions
 
-Enterprise support needs a separate issue before implementation. The first
-version should not silently reinterpret enterprise requirements as organization
-support.
+Enterprise-level runner support needs a separate issue before implementation.
+The first version should not silently reinterpret enterprise runner requirements
+as organization support.
 
 Open decisions:
 
 - GitHub Enterprise Cloud enterprise-level runner support: whether Tarmac should
   manage runners at enterprise scope or require per-organization installations.
+- Enterprise-owned app control-plane support: whether Tarmac should install the
+  app into selected organizations with the enterprise `Enterprise organization
+  installations` permission, instead of asking users to install it on each org.
 - GitHub Enterprise Server support: minimum GHES version, API host configuration,
   runner binary download host, JIT endpoint availability, and auth type.
 - Enterprise PAT fallback: whether it is acceptable, which scopes are required,
@@ -118,5 +130,7 @@ Open decisions:
   <https://docs.github.com/en/rest/actions/permissions>
 - GitHub Actions docs: runner scale sets:
   <https://docs.github.com/en/actions/concepts/runners/runner-scale-sets>
+- GitHub Enterprise Cloud docs: installing a GitHub App on an enterprise:
+  <https://docs.github.com/en/enterprise-cloud@latest/apps/using-github-apps/installing-a-github-app-on-your-enterprise>
 - GitHub Enterprise Server REST docs: self-hosted runners:
   <https://docs.github.com/en/enterprise-server@3.21/rest/actions/self-hosted-runners>

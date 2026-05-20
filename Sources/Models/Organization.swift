@@ -9,9 +9,11 @@ enum GitHubAccountType: String, Codable, Sendable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .organization: "Organization"
-        case .enterprise: "Enterprise"
+        case .enterprise: "Enterprise (legacy)"
         }
     }
+
+    static let runnerAccountTypes: [GitHubAccountType] = [.organization]
 
     var apiPathPrefix: String {
         switch self {

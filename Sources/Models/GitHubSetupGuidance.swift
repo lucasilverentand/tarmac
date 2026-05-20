@@ -20,7 +20,7 @@ extension GitHubSetupGuidance {
         scope: .organization,
         title: "Use an organization runner scale set",
         detail:
-            "Install the GitHub App on the organization, enter the organization name, App ID, installation ID, and the Actions Runner Scale Set ID from that organization."
+            "Install the GitHub App on the organization, enter the organization name and App ID, import the private key, then let Tarmac find the organization installation ID."
     )
 
     static let repository = GitHubSetupGuidance(
@@ -32,9 +32,9 @@ extension GitHubSetupGuidance {
 
     static let enterprise = GitHubSetupGuidance(
         scope: .enterprise,
-        title: "Enterprise accounts use enterprise slugs",
+        title: "Enterprise setup still adds organizations",
         detail:
-            "For GitHub Enterprise Cloud, choose Enterprise and enter the slug from github.com/enterprises/<slug>. Tarmac will use the enterprise runner endpoints for JIT configuration."
+            "Enterprise-owned apps can also be installed on the enterprise, but that install only grants enterprise permissions. Tarmac runner accounts are still the organizations that own the runner scale sets."
     )
 
     static let permissions = GitHubSetupGuidance(
@@ -205,7 +205,7 @@ extension GitHubAppSetupGuide {
         accountType: .organization,
         title: "Create an organization-owned GitHub App",
         summary:
-            "Use this when Tarmac should receive jobs from one GitHub organization. Register the app under that organization, install it on the same organization, then copy the generated IDs and private key into Tarmac.",
+            "Use this when Tarmac should receive jobs from one GitHub organization. Register the app under that organization, install it on the same organization, then import the private key so Tarmac can find the installation ID.",
         registrationOwnerPath: "organizations",
         documentationURL:
             "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app",
@@ -238,7 +238,7 @@ extension GitHubAppSetupGuide {
                 kind: .installationId,
                 field: "Installation ID",
                 detail:
-                    "Install the app on the organization, open the installation settings page, and copy the number from /settings/installations/<id>."
+                    "Click Find Installation after the app is installed on the organization. Tarmac reads /orgs/<org>/installation with the app private key."
             ),
             TarmacAccountFieldGuide(
                 kind: .privateKey,
@@ -264,32 +264,32 @@ extension GitHubAppSetupGuide {
 
     static let enterprise = GitHubAppSetupGuide(
         accountType: .enterprise,
-        title: "Create an enterprise-owned GitHub App",
+        title: "Create an enterprise-owned app for organization installs",
         summary:
-            "Use this when Tarmac should receive jobs from an enterprise runner scale set. Register the app from Enterprise settings, install it for the enterprise scope, then copy the enterprise slug, generated IDs, and private key into Tarmac.",
+            "Use this when one enterprise-owned app should be installed into several runner organizations. An enterprise installation is control-plane only; Tarmac still needs the app installed on each runner organization.",
         registrationOwnerPath: "enterprises",
         documentationURL:
             "https://docs.github.com/en/enterprise-cloud@latest/admin/managing-github-apps-for-your-enterprise/creating-github-apps-for-your-enterprise",
         appFields: standardAppFields + [
             GitHubAppFormFieldGuide(
                 kind: .visibility,
-                field: "Installation target",
-                value: "Only enterprise organizations",
+                field: "Enterprise installation",
+                value: "Optional; not the runner installation ID",
                 detail:
-                    "Enterprise-owned apps are internal to the enterprise and can be installed only on that enterprise or organizations within it."
+                    "GitHub grants only enterprise permissions to enterprise installs. Runner tokens still come from the app installation on each organization."
             )
         ],
         tarmacFields: [
             TarmacAccountFieldGuide(
                 kind: .type,
                 field: "Type",
-                detail: "Choose Enterprise."
+                detail: "Choose Organization. Enterprise is not a runner account type in Tarmac."
             ),
             TarmacAccountFieldGuide(
                 kind: .accountName,
-                field: "Enterprise slug",
+                field: "Organization name",
                 detail:
-                    "Enter the slug from github.com/enterprises/<slug>. Do not enter an organization name here."
+                    "Enter the organization login that owns the runner scale set, even when the app itself is owned by the enterprise."
             ),
             TarmacAccountFieldGuide(
                 kind: .appId,
@@ -300,7 +300,7 @@ extension GitHubAppSetupGuide {
                 kind: .installationId,
                 field: "Installation ID",
                 detail:
-                    "Install the app for the enterprise runner scope, open the installation settings page, and copy the number from /settings/installations/<id>."
+                    "Install the app on the organization, then click Find Installation in Tarmac. Do not paste the enterprise installation ID; it cannot create organization runner tokens."
             ),
             TarmacAccountFieldGuide(
                 kind: .privateKey,
@@ -312,13 +312,13 @@ extension GitHubAppSetupGuide {
                 kind: .scaleSetId,
                 field: "Scale Set ID",
                 detail:
-                    "Enter the numeric enterprise runner scale set ID that Tarmac should poll for queued jobs."
+                    "Enter the numeric organization runner scale set ID that Tarmac should poll for queued jobs."
             ),
             TarmacAccountFieldGuide(
                 kind: .labels,
                 field: "Runner labels",
                 detail:
-                    "Keep self-hosted and add the labels enterprise workflows use in runs-on, such as macOS and ARM64."
+                    "Keep self-hosted and add the labels workflows use in runs-on, such as macOS and ARM64."
             ),
         ],
         afterCreationSteps: standardAfterCreationSteps
@@ -354,7 +354,7 @@ extension GitHubAppSetupGuide {
             field: "OAuth and device flow",
             value: "Leave disabled",
             detail:
-                "Tarmac uses installation access tokens generated from the App ID, installation ID, and private key."
+                "Tarmac uses the App ID and private key to find the org installation, then creates installation access tokens."
         ),
         GitHubAppFormFieldGuide(
             kind: .setupURL,
@@ -398,13 +398,13 @@ extension GitHubAppSetupGuide {
             number: 3,
             title: "Install the app",
             detail:
-                "Install it on the same organization or enterprise runner scope, then copy the installation ID from the installation settings URL."
+                "Install it on the organization that owns the runner scale set. If the app is enterprise-owned, install it into each runner organization."
         ),
         GitHubAppSetupStep(
             number: 4,
             title: "Finish in Tarmac",
             detail:
-                "Enter the account slug, App ID, installation ID, scale set ID, and labels. Import the .pem file before running Check Setup."
+                "Enter the organization name, App ID, scale set ID, and labels. Import the .pem file, click Find Installation, then run Check Setup."
         ),
     ]
 }

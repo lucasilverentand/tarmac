@@ -200,6 +200,16 @@ struct RunnerHostReadiness: Equatable, Sendable {
         }
 
         for org in enabled {
+            if org.accountType == .enterprise {
+                issues.append(
+                    .init(
+                        category: .github,
+                        message:
+                            "\(org.name): Enterprise runner accounts are not supported. Add each runner organization instead."
+                    )
+                )
+                continue
+            }
             if org.appId.isEmpty {
                 issues.append(.init(category: .github, message: "\(org.name): GitHub App ID is not configured."))
             }

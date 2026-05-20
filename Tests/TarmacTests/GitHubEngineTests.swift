@@ -80,6 +80,31 @@ struct GitHubEngineTests {
         #expect(count == 1)
     }
 
+    @Test("organizationInstallationId uses app JWT and org installation endpoint")
+    func organizationInstallationIdUsesOrgInstallationEndpoint() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"id":4242}
+                """.data(using: .utf8)!
+        )
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let engine = GitHubEngine(client: client, keychainService: PreviewKeychainService(), cacheDirectory: tempDir)
+        let id = try await engine.organizationInstallationId(
+            organizationName: "seventwo-studio",
+            appId: "12345",
+            privateKeyData: TestFactories.makeTestKeyData()
+        )
+
+        #expect(id == 4242)
+        let requests = await client.requests
+        #expect(requests.count == 1)
+        #expect(requests[0].method == "GET")
+        #expect(requests[0].path == "/orgs/seventwo-studio/installation")
+        #expect(requests[0].headers["Authorization"]?.hasPrefix("Bearer ") == true)
+    }
+
     @Test("Different installations trigger separate API calls")
     func differentInstallationsSeparateCalls() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
