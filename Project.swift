@@ -4,6 +4,7 @@ let project = Project(
     name: "Tarmac",
     settings: .settings(
         base: [
+            "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "SWIFT_VERSION": "6.2",
         ],
         configurations: [
@@ -32,9 +33,7 @@ let project = Project(
             product: .app,
             bundleId: "studio.seventwo.tarmac",
             deploymentTargets: .macOS("26.0"),
-            infoPlist: .extendingDefault(with: [
-                "LSUIElement": true,
-            ]),
+            infoPlist: .extendingDefault(with: [:]),
             sources: ["Sources/**"],
             resources: ["Resources/**"],
             entitlements: .file(path: "Tarmac.entitlements"),
