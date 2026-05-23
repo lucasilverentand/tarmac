@@ -558,7 +558,9 @@ private struct OrganizationFormSheet: View {
     @State private var simulatorRuntimeList = ""
     @State private var filterMode: RepositoryFilterMode = .all
     @State private var repositoryList: String = ""
-    @State private var hasKey: Bool = false
+    @State private var hasPrivateKey: Bool = false
+    @State private var hasAccessToken: Bool = false
+    @State private var accessToken: String = ""
     @State private var showingFileImporter = false
     @State private var importError: String?
     @State private var installationLookupInFlight = false
@@ -584,14 +586,20 @@ private struct OrganizationFormSheet: View {
     }
 
     private var availableAccountTypes: [GitHubAccountType] {
-        accountType == .enterprise ? [.organization, .enterprise] : GitHubAccountType.runnerAccountTypes
+        GitHubAccountType.runnerAccountTypes
     }
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && Int(installationId) != nil
-            && accountType == .organization
+        let hasAccountName = !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch accountType {
+        case .organization:
+            return hasAccountName
+                && !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && Int(installationId) != nil
+        case .enterprise:
+            return hasAccountName
+                && (hasAccessToken || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
     }
 
     private var locksAccountIdentity: Bool {
@@ -608,7 +616,7 @@ private struct OrganizationFormSheet: View {
             ScrollView {
                 Form {
                     Section("Account") {
-                        if isEditing && existing?.accountType == .enterprise {
+                        if !locksAccountIdentity {
                             Picker("Runner account", selection: $accountType) {
                                 ForEach(availableAccountTypes) { type in
                                     Text(type.displayName).tag(type)
@@ -617,37 +625,45 @@ private struct OrganizationFormSheet: View {
                             .pickerStyle(.segmented)
                             .disabled(locksAccountIdentity)
 
-                            GuidanceCallout(item: .enterprise)
+                            if accountType == .enterprise {
+                                GuidanceCallout(item: .enterprise)
+                            }
                         }
 
-                        TextField("Organization name", text: $name)
+                        TextField(accountType == .enterprise ? "Enterprise slug" : "Organization name", text: $name)
                             .disabled(locksAccountIdentity)
-                            .help("The organization login as shown in github.com/<name>")
+                            .help(
+                                accountType == .enterprise
+                                    ? "The enterprise slug as shown in github.com/enterprises/<slug>"
+                                    : "The organization login as shown in github.com/<name>"
+                            )
                         FieldInlineHint(text: tarmacFieldDetail(.accountName))
 
-                        HStack {
-                            TextField("Installation ID", text: $installationId)
-                                .help("The GitHub App installation ID for this organization")
+                        if accountType == .organization {
+                            HStack {
+                                TextField("Installation ID", text: $installationId)
+                                    .help("The GitHub App installation ID for this organization")
 
-                            Button {
-                                findInstallation()
-                            } label: {
-                                if installationLookupInFlight {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Label("Find Installation", systemImage: "magnifyingglass")
+                                Button {
+                                    findInstallation()
+                                } label: {
+                                    if installationLookupInFlight {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Label("Find Installation", systemImage: "magnifyingglass")
+                                    }
                                 }
+                                .controlSize(.small)
+                                .disabled(installationLookupInFlight)
                             }
-                            .controlSize(.small)
-                            .disabled(installationLookupInFlight || accountType != .organization)
-                        }
-                        FieldInlineHint(text: tarmacFieldDetail(.installationId))
-                        if let installationLookupError {
-                            Text(installationLookupError)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .fixedSize(horizontal: false, vertical: true)
+                            FieldInlineHint(text: tarmacFieldDetail(.installationId))
+                            if let installationLookupError {
+                                Text(installationLookupError)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
 
                         TextField("Scale Set ID", text: $scaleSetId)
@@ -655,65 +671,98 @@ private struct OrganizationFormSheet: View {
                         FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
                     }
 
-                    Section("GitHub App Credentials") {
-                        Picker("App owner", selection: $appOwnerType) {
-                            Text("Organization").tag(GitHubAccountType.organization)
-                            Text("Enterprise").tag(GitHubAccountType.enterprise)
-                        }
-                        .pickerStyle(.segmented)
+                    if accountType == .organization {
+                        Section("GitHub App Credentials") {
+                            Picker("App owner", selection: $appOwnerType) {
+                                Text("Organization").tag(GitHubAccountType.organization)
+                                Text("Enterprise").tag(GitHubAccountType.enterprise)
+                            }
+                            .pickerStyle(.segmented)
 
-                        if appOwnerType == .enterprise {
-                            TextField("Enterprise slug", text: $enterpriseSlug)
-                                .help("The enterprise slug as shown in github.com/enterprises/<slug>")
-                            FieldInlineHint(
-                                text:
-                                    "Use this when the GitHub App is created from Enterprise settings. The runner account above still stays as the organization; do not paste an enterprise installation ID."
-                            )
-                        }
-
-                        GitHubAppSetupGuideView(accountType: appOwnerType, accountName: setupGuideAccountName)
-
-                        TextField("App ID", text: $appId)
-                        FieldInlineHint(text: tarmacFieldDetail(.appId))
-
-                        HStack {
-                            if hasKey {
-                                Label("Private key imported", systemImage: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.subheadline)
-                            } else {
-                                Label("No key imported", systemImage: "xmark.circle")
-                                    .foregroundStyle(.secondary)
-                                    .font(.subheadline)
+                            if appOwnerType == .enterprise {
+                                TextField("Enterprise slug", text: $enterpriseSlug)
+                                    .help("The enterprise slug as shown in github.com/enterprises/<slug>")
+                                FieldInlineHint(
+                                    text:
+                                        "Use this when the GitHub App is created from Enterprise settings. The runner account above still stays as the organization; do not paste an enterprise installation ID."
+                                )
                             }
 
-                            Spacer()
+                            GitHubAppSetupGuideView(accountType: appOwnerType, accountName: setupGuideAccountName)
 
-                            if hasKey {
-                                Button("Remove", role: .destructive) {
-                                    if let org = existing {
-                                        viewModel.deletePrivateKey(for: org)
-                                    } else {
-                                        pendingKeyData = nil
+                            TextField("App ID", text: $appId)
+                            FieldInlineHint(text: tarmacFieldDetail(.appId))
+
+                            HStack {
+                                if hasPrivateKey {
+                                    Label("Private key imported", systemImage: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                        .font(.subheadline)
+                                } else {
+                                    Label("No key imported", systemImage: "xmark.circle")
+                                        .foregroundStyle(.secondary)
+                                        .font(.subheadline)
+                                }
+
+                                Spacer()
+
+                                if hasPrivateKey {
+                                    Button("Remove", role: .destructive) {
+                                        if let org = existing {
+                                            viewModel.deletePrivateKey(for: org)
+                                        } else {
+                                            pendingKeyData = nil
+                                        }
+                                        hasPrivateKey = false
+                                        installationLookupError = nil
                                     }
-                                    hasKey = false
-                                    installationLookupError = nil
+                                    .controlSize(.small)
+                                }
+
+                                Button("Import .pem file...") {
+                                    showingFileImporter = true
                                 }
                                 .controlSize(.small)
                             }
 
-                            Button("Import .pem file...") {
-                                showingFileImporter = true
+                            FieldInlineHint(text: tarmacFieldDetail(.privateKey))
+
+                            if let error = importError {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
                             }
-                            .controlSize(.small)
                         }
+                    } else {
+                        Section("Enterprise Access") {
+                            FieldInlineHint(
+                                text:
+                                    "Enterprise runner APIs require a classic PAT or OAuth token with manage_runners:enterprise. GitHub App installation tokens cannot manage enterprise runners."
+                            )
 
-                        FieldInlineHint(text: tarmacFieldDetail(.privateKey))
+                            if hasAccessToken {
+                                Label("Access token saved", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.subheadline)
+                            } else {
+                                Label("No access token saved", systemImage: "xmark.circle")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
 
-                        if let error = importError {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                            SecureField(hasAccessToken ? "Replace access token" : "Access token", text: $accessToken)
+                                .textContentType(.password)
+
+                            if hasAccessToken {
+                                Button("Remove saved token", role: .destructive) {
+                                    if let org = existing {
+                                        _ = viewModel.deleteAccessToken(for: org)
+                                    }
+                                    accessToken = ""
+                                    hasAccessToken = false
+                                }
+                                .controlSize(.small)
+                            }
                         }
                     }
 
@@ -913,7 +962,8 @@ private struct OrganizationFormSheet: View {
                 }
                 filterMode = org.filterMode
                 repositoryList = org.filteredRepositories.joined(separator: "\n")
-                hasKey = viewModel.hasPrivateKey(for: org)
+                hasPrivateKey = viewModel.hasPrivateKey(for: org)
+                hasAccessToken = viewModel.hasAccessToken(for: org)
             } else {
                 runnerCPUCount = "\(viewModel.vmConfiguration.cpuCount)"
                 runnerMemorySizeGB = "\(viewModel.vmConfiguration.memorySizeGB)"
@@ -938,7 +988,7 @@ private struct OrganizationFormSheet: View {
             if let org = existing {
                 do {
                     try viewModel.importPrivateKey(from: url, for: org)
-                    hasKey = true
+                    hasPrivateKey = true
                     importError = nil
                     installationLookupError = nil
                 } catch {
@@ -954,7 +1004,7 @@ private struct OrganizationFormSheet: View {
                     }
                     defer { url.stopAccessingSecurityScopedResource() }
                     pendingKeyData = try Data(contentsOf: url)
-                    hasKey = true
+                    hasPrivateKey = true
                     importError = nil
                     installationLookupError = nil
                 } catch {
@@ -969,7 +1019,19 @@ private struct OrganizationFormSheet: View {
     @State private var pendingKeyData: Data?
 
     private func tarmacFieldDetail(_ kind: TarmacAccountFieldGuide.Kind) -> String {
-        setupGuide.tarmacFields.first { $0.kind == kind }?.detail ?? ""
+        if accountType == .enterprise {
+            switch kind {
+            case .accountName:
+                return "Enter the enterprise slug as shown in github.com/enterprises/<slug>."
+            case .scaleSetId:
+                return "Enter the numeric enterprise runner scale set ID that Tarmac should poll."
+            case .labels:
+                return "Keep self-hosted and add the labels workflows use in runs-on, such as macOS and ARM64."
+            default:
+                return ""
+            }
+        }
+        return setupGuide.tarmacFields.first { $0.kind == kind }?.detail ?? ""
     }
 
     private func findInstallation() {
@@ -979,7 +1041,7 @@ private struct OrganizationFormSheet: View {
 
         guard accountType == .organization else {
             installationLookupError =
-                "Add the organization that owns the runner scale set. Enterprise runner accounts are not supported."
+                "Enterprise runner accounts use an access token and do not have an installation ID."
             return
         }
         guard !trimmedName.isEmpty else {
@@ -1025,7 +1087,14 @@ private struct OrganizationFormSheet: View {
 
     private func save() {
         let parsedLabels = labels.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let parsedInstallationId = Int(installationId) else { return }
+        let parsedInstallationId: Int
+        switch accountType {
+        case .organization:
+            guard let id = Int(installationId) else { return }
+            parsedInstallationId = id
+        case .enterprise:
+            parsedInstallationId = 0
+        }
         let parsedScaleSetId = Int(scaleSetId)
         let parsedImageProfile = imageProfileEnabled ? currentImageProfile : nil
         let parsedRepos =
@@ -1035,9 +1104,10 @@ private struct OrganizationFormSheet: View {
             .filter { !$0.isEmpty }
 
         if var org = existing {
+            let previousAccountType = org.accountType
             org.name = name
             org.accountType = accountType
-            org.appId = appId
+            org.appId = accountType == .organization ? appId : ""
             org.installationId = parsedInstallationId
             org.scaleSetId = parsedScaleSetId
             org.labels = parsedLabels
@@ -1045,11 +1115,18 @@ private struct OrganizationFormSheet: View {
             org.filterMode = filterMode
             org.filteredRepositories = parsedRepos
             viewModel.updateOrganization(org)
+            if accountType == .enterprise,
+                !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                _ = viewModel.saveAccessToken(accessToken, for: org)
+            } else if accountType == .organization && previousAccountType == .enterprise {
+                _ = viewModel.deleteAccessToken(for: org)
+            }
         } else {
             var org = Organization(
                 name: name,
                 accountType: accountType,
-                appId: appId,
+                appId: accountType == .organization ? appId : "",
                 installationId: parsedInstallationId,
                 labels: parsedLabels
             )
@@ -1062,6 +1139,9 @@ private struct OrganizationFormSheet: View {
             // Save pending key data for new org
             if let keyData = pendingKeyData {
                 _ = viewModel.configStore.savePrivateKey(keyData, for: org)
+            }
+            if accountType == .enterprise {
+                _ = viewModel.saveAccessToken(accessToken, for: org)
             }
         }
         dismiss()

@@ -24,6 +24,26 @@ struct ScaleSetPollerIntegrationTests {
         #expect(requests[0].path == "/orgs/my-org/actions/runners/42/sessions")
     }
 
+    @Test("createSession routes enterprise accounts to enterprise path")
+    func createSessionEnterprisePath() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"sessionId":"sess-1","ownerName":"acme","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+
+        let poller = ScaleSetPoller(client: client) { _ in "github_pat_enterprise" }
+        let org = TestFactories.makeOrg(name: "acme", accountType: .enterprise, scaleSetId: 42)
+
+        _ = try await poller.createSession(org: org, token: "github_pat_enterprise")
+
+        let requests = await client.requests
+        #expect(requests.count == 1)
+        #expect(requests[0].method == "POST")
+        #expect(requests[0].path == "/enterprises/acme/actions/runners/42/sessions")
+        #expect(requests[0].headers["Authorization"] == "Bearer github_pat_enterprise")
+    }
+
     @Test("createSession throws missingScaleSetId for org without scaleSetId")
     func createSessionMissingScaleSetId() async {
         let client = RecordingGitHubClient()

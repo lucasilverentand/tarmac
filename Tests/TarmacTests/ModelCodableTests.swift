@@ -280,7 +280,8 @@ struct ModelCodableTests {
         #expect(guidance.map(\.scope) == [.organization, .repository, .enterprise, .permissions])
         #expect(GitHubSetupGuidance.organization.detail.contains("find the organization installation ID"))
         #expect(GitHubSetupGuidance.repository.detail.contains("only decides which queued jobs Tarmac accepts"))
-        #expect(GitHubSetupGuidance.enterprise.detail.contains("only grants enterprise permissions"))
+        #expect(GitHubSetupGuidance.enterprise.detail.contains("enterprise slug"))
+        #expect(GitHubSetupGuidance.enterprise.detail.contains("access token"))
         #expect(GitHubSetupGuidance.permissions.detail.contains("organization self-hosted runner permission"))
     }
 

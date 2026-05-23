@@ -69,22 +69,48 @@ struct GitHubSetupCheckTests {
         #expect(result.issues.contains { $0.kind == .imageProfileNotReady && $0.message.contains("iOS SDK") })
     }
 
-    @Test("enterprise account type is reported as unsupported before API checks")
-    func enterpriseAccountTypeUnsupported() async throws {
+    @Test("enterprise account type uses enterprise token and enterprise endpoints")
+    func enterpriseAccountUsesEnterpriseToken() async throws {
         let org = TestFactories.makeOrg(name: "example-enterprise", accountType: .enterprise)
-        let (engine, client) = try await makeEngine(org: org)
+        let client = RecordingGitHubClient()
+        let keychain = PreviewKeychainService()
+        _ = keychain.save(key: org.accessTokenKeychainKey, data: Data("github_pat_enterprise".utf8))
+        await client.addResponse(
+            forPathContaining: "runner-groups",
+            json: """
+                {"runner_groups":[{"id":1,"name":"Default"}]}
+                """.data(using: .utf8)!
+        )
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let engine = GitHubEngine(client: client, keychainService: keychain, cacheDirectory: tempDir)
+
+        let result = await engine.runSetupCheck(for: org)
+
+        #expect(result.isReady)
+        let requests = await client.requests
+        #expect(requests.allSatisfy { $0.headers["Authorization"] == "Bearer github_pat_enterprise" })
+        #expect(requests.contains { $0.path == "/enterprises/example-enterprise/actions/runners/downloads" })
+        #expect(requests.contains { $0.path == "/enterprises/example-enterprise/actions/runner-groups" })
+        #expect(requests.contains { $0.path == "/enterprises/example-enterprise/actions/runner-scale-sets/42" })
+        #expect(!requests.contains { $0.path == "/installation/repositories" })
+    }
+
+    @Test("enterprise account type requires an access token")
+    func enterpriseAccountRequiresAccessToken() async throws {
+        let org = TestFactories.makeOrg(name: "example-enterprise", accountType: .enterprise)
+        let client = RecordingGitHubClient()
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let engine = GitHubEngine(client: client, keychainService: PreviewKeychainService(), cacheDirectory: tempDir)
 
         let result = await engine.runSetupCheck(for: org)
 
         #expect(!result.isReady)
         #expect(
-            result.issues == [
-                GitHubSetupCheckIssue(
-                    kind: .unsupportedAccountType,
-                    message:
-                        "example-enterprise: Enterprise runner accounts are not supported. Add the organization that owns the runner scale set."
-                )
-            ]
+            result.issues.contains {
+                $0.kind == .missingAccessToken && $0.message.contains("Enterprise access token")
+            }
         )
         #expect(await client.requestCount == 0)
     }

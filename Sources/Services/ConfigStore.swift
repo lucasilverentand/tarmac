@@ -61,6 +61,7 @@ final class ConfigStore {
 
     func removeOrganization(_ org: Organization) {
         _ = keychainService.delete(key: org.privateKeyKeychainKey)
+        _ = keychainService.delete(key: org.accessTokenKeychainKey)
         organizations.removeAll { $0.id == org.id }
         saveOrganizations()
     }
@@ -92,6 +93,32 @@ final class ConfigStore {
 
     func hasPrivateKey(for org: Organization) -> Bool {
         keychainService.load(key: org.privateKeyKeychainKey) != nil
+    }
+
+    // MARK: - Per-Account Access Tokens
+
+    func saveAccessToken(_ token: String, for org: Organization) -> Bool {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return keychainService.save(key: org.accessTokenKeychainKey, data: Data(trimmed.utf8))
+    }
+
+    func loadAccessToken(for org: Organization) -> String? {
+        guard let data = keychainService.load(key: org.accessTokenKeychainKey),
+            let token = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func deleteAccessToken(for org: Organization) -> Bool {
+        keychainService.delete(key: org.accessTokenKeychainKey)
+    }
+
+    func hasAccessToken(for org: Organization) -> Bool {
+        loadAccessToken(for: org) != nil
     }
 
     // MARK: - Apple Signing Assets

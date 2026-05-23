@@ -32,9 +32,9 @@ extension GitHubSetupGuidance {
 
     static let enterprise = GitHubSetupGuidance(
         scope: .enterprise,
-        title: "Enterprise setup still adds organizations",
+        title: "Enterprise runner accounts use access tokens",
         detail:
-            "Enterprise-owned apps can also be installed on the enterprise, but that install only grants enterprise permissions. Tarmac runner accounts are still the organizations that own the runner scale sets."
+            "Enterprise-level runner APIs are scoped to the enterprise account. Add the enterprise slug and save an access token with enterprise runner management permission."
     )
 
     static let permissions = GitHubSetupGuidance(
@@ -266,7 +266,7 @@ extension GitHubAppSetupGuide {
         accountType: .enterprise,
         title: "Create an enterprise-owned app for organization installs",
         summary:
-            "Use this when one enterprise-owned app should be installed into several runner organizations. An enterprise installation is control-plane only; Tarmac still needs the app installed on each runner organization.",
+            "Use this for organization runner accounts when one enterprise-owned app should be installed into several runner organizations. Enterprise-level runner accounts use an enterprise access token instead.",
         registrationOwnerPath: "enterprises",
         documentationURL:
             "https://docs.github.com/en/enterprise-cloud@latest/admin/managing-github-apps-for-your-enterprise/creating-github-apps-for-your-enterprise",
@@ -276,14 +276,15 @@ extension GitHubAppSetupGuide {
                 field: "Enterprise installation",
                 value: "Optional; not the runner installation ID",
                 detail:
-                    "GitHub grants only enterprise permissions to enterprise installs. Runner tokens still come from the app installation on each organization."
+                    "Use organization installs for organization runner accounts. Enterprise runner accounts do not use GitHub App installation tokens."
             )
         ],
         tarmacFields: [
             TarmacAccountFieldGuide(
                 kind: .type,
                 field: "Type",
-                detail: "Choose Organization. Enterprise is not a runner account type in Tarmac."
+                detail:
+                    "Choose Organization when using this GitHub App flow. Choose Enterprise only when configuring enterprise-level runners with an access token."
             ),
             TarmacAccountFieldGuide(
                 kind: .accountName,

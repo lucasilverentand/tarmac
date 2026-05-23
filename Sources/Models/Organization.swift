@@ -9,11 +9,11 @@ enum GitHubAccountType: String, Codable, Sendable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .organization: "Organization"
-        case .enterprise: "Enterprise (legacy)"
+        case .enterprise: "Enterprise"
         }
     }
 
-    static let runnerAccountTypes: [GitHubAccountType] = [.organization]
+    static let runnerAccountTypes: [GitHubAccountType] = [.organization, .enterprise]
 
     var apiPathPrefix: String {
         switch self {
@@ -39,6 +39,19 @@ struct Organization: Identifiable, Codable, Hashable, Sendable {
     /// Keychain key for this org's private key
     var privateKeyKeychainKey: String {
         "github-app-private-key-\(id.uuidString)"
+    }
+
+    /// Keychain key for an enterprise-level runner access token.
+    var accessTokenKeychainKey: String {
+        "github-enterprise-access-token-\(id.uuidString)"
+    }
+
+    var requiresGitHubAppCredentials: Bool {
+        accountType == .organization
+    }
+
+    var requiresEnterpriseAccessToken: Bool {
+        accountType == .enterprise
     }
 
     /// Base path for GitHub API calls scoped to this account (`/orgs/<name>` or `/enterprises/<name>`).

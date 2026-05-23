@@ -36,8 +36,30 @@ actor GitHubEngine {
         return try await tokenManager.installationToken(for: org, privateKeyData: keyData)
     }
 
+    func authorizationToken(for org: Organization) async throws -> String {
+        switch org.accountType {
+        case .organization:
+            return try await installationToken(for: org)
+        case .enterprise:
+            guard let token = enterpriseAccessToken(for: org) else {
+                throw GitHubEnterpriseTokenError.noAccessToken
+            }
+            return token
+        }
+    }
+
+    private func enterpriseAccessToken(for org: Organization) -> String? {
+        guard let data = keychainService.load(key: org.accessTokenKeychainKey),
+            let token = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     func ensureRunner(for org: Organization) async throws -> URL {
-        let token = try await installationToken(for: org)
+        let token = try await authorizationToken(for: org)
         return try await runnerProvider.ensureRunner(token: token, accountPath: org.accountPath)
     }
 
@@ -67,7 +89,7 @@ actor GitHubEngine {
     }
 
     func generateJITConfig(for org: Organization, runnerName: String) async throws -> String {
-        let token = try await installationToken(for: org)
+        let token = try await authorizationToken(for: org)
         return try await runnerProvider.generateJITConfig(
             token: token,
             accountPath: org.accountPath,
@@ -77,7 +99,7 @@ actor GitHubEngine {
     }
 
     func listOrganizationRunners(for org: Organization) async throws -> [GitHubRunner] {
-        let token = try await installationToken(for: org)
+        let token = try await authorizationToken(for: org)
         var runners: [GitHubRunner] = []
         var page = 1
 
@@ -101,7 +123,7 @@ actor GitHubEngine {
     }
 
     func deleteOrganizationRunner(id runnerId: Int64, for org: Organization) async throws {
-        let token = try await installationToken(for: org)
+        let token = try await authorizationToken(for: org)
         let (data, response) = try await client.requestRaw(
             method: "DELETE",
             path: "\(org.accountPath)/actions/runners/\(runnerId)",
@@ -187,6 +209,16 @@ actor GitHubEngine {
 
         let leaseLabels = Set(lease.runner.labels)
         return leaseLabels.isSubset(of: runner.labelNames)
+    }
+}
+
+enum GitHubEnterpriseTokenError: Error, LocalizedError, Sendable {
+    case noAccessToken
+
+    var errorDescription: String? {
+        switch self {
+        case .noAccessToken: "No enterprise access token found in Keychain"
+        }
     }
 }
 

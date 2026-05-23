@@ -152,6 +152,38 @@ struct GitHubEngineTests {
         }
     }
 
+    @Test("enterprise authorizationToken loads access token without app token request")
+    func enterpriseAuthorizationTokenUsesSavedAccessToken() async throws {
+        let client = RecordingGitHubClient()
+        let keychain = PreviewKeychainService()
+        let org = TestFactories.makeOrg(name: "acme", accountType: .enterprise)
+        _ = keychain.save(key: org.accessTokenKeychainKey, data: Data("github_pat_enterprise".utf8))
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let engine = GitHubEngine(client: client, keychainService: keychain, cacheDirectory: tempDir)
+
+        let token = try await engine.authorizationToken(for: org)
+
+        #expect(token == "github_pat_enterprise")
+        #expect(await client.requestCount == 0)
+    }
+
+    @Test("enterprise authorizationToken requires saved access token")
+    func enterpriseAuthorizationTokenRequiresToken() async throws {
+        let client = RecordingGitHubClient()
+        let keychain = PreviewKeychainService()
+        let org = TestFactories.makeOrg(name: "acme", accountType: .enterprise)
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let engine = GitHubEngine(client: client, keychainService: keychain, cacheDirectory: tempDir)
+
+        await #expect(throws: GitHubEnterpriseTokenError.noAccessToken) {
+            _ = try await engine.authorizationToken(for: org)
+        }
+    }
+
     @Test("generateJITConfig returns encoded config from response")
     func generateJITConfigReturns() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))

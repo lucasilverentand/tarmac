@@ -60,6 +60,24 @@ final class SettingsViewModel {
         Log.config.info("Private key deleted for org \(org.name)")
     }
 
+    func hasAccessToken(for org: Organization) -> Bool {
+        configStore.hasAccessToken(for: org)
+    }
+
+    func saveAccessToken(_ token: String, for org: Organization) -> Bool {
+        let saved = configStore.saveAccessToken(token, for: org)
+        if saved {
+            Log.config.info("Access token saved for account \(org.name)")
+        }
+        return saved
+    }
+
+    func deleteAccessToken(for org: Organization) -> Bool {
+        let deleted = configStore.deleteAccessToken(for: org)
+        Log.config.info("Access token deleted for account \(org.name)")
+        return deleted
+    }
+
     func findOrganizationInstallationId(
         organizationName: String,
         appId: String,

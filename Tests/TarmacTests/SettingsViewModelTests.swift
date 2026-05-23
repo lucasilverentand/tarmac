@@ -74,6 +74,18 @@ struct SettingsViewModelTests {
         #expect(!vm.hasPrivateKey(for: org))
     }
 
+    @Test("Enterprise access token methods pass through ConfigStore")
+    func enterpriseAccessTokenPassthrough() {
+        let (vm, _, _) = makeVM()
+        let org = TestFactories.makeOrg(name: "acme", accountType: .enterprise, appId: "", installationId: 0)
+
+        #expect(!vm.hasAccessToken(for: org))
+        #expect(vm.saveAccessToken("github_pat_enterprise", for: org))
+        #expect(vm.hasAccessToken(for: org))
+        #expect(vm.deleteAccessToken(for: org))
+        #expect(!vm.hasAccessToken(for: org))
+    }
+
     @Test("validateConfiguration returns empty when fully configured")
     func validateFullyConfigured() throws {
         let (vm, _, keychain) = makeVM()
