@@ -356,6 +356,13 @@ struct ModelCodableTests {
             displayName: "iOS Distribution",
             teamId: "TEAM12345",
             bundleIdentifierPattern: "com.example.*",
+            selection: AppleSigningSelection(
+                mode: .selectedJobs,
+                organizationNames: ["SevenTwo"],
+                repositoryNames: ["Tarmac"],
+                runnerImageProfileNames: ["Xcode 17"],
+                workflowNames: ["Release"]
+            ),
             certificateCommonName: "Apple Distribution",
             provisioningProfileUUID: "profile-uuid",
             certificateExpiresAt: Date(timeIntervalSince1970: 4_102_444_800),
@@ -371,6 +378,29 @@ struct ModelCodableTests {
         #expect(decoded.certificateKeychainKey == "apple-signing-certificate-p12-\(asset.id.uuidString)")
         #expect(decoded.passphraseKeychainKey == "apple-signing-certificate-passphrase-\(asset.id.uuidString)")
         #expect(decoded.provisioningProfileKeychainKey == "apple-signing-provisioning-profile-\(asset.id.uuidString)")
+    }
+
+    @Test("AppleSigningAsset decodes legacy assets as disabled")
+    func appleSigningAssetLegacyDecodeDefaultsSelection() throws {
+        let data = """
+            {
+              "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+              "displayName": "iOS Distribution",
+              "teamId": "TEAM12345",
+              "bundleIdentifierPattern": "com.example.*",
+              "certificateCommonName": "Apple Distribution",
+              "provisioningProfileUUID": "profile-uuid",
+              "createdAt": "2026-05-24T10:00:00Z",
+              "updatedAt": "2026-05-24T11:00:00Z"
+            }
+            """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AppleSigningAsset.self, from: data)
+
+        #expect(decoded.selection.mode == .disabled)
+        #expect(!decoded.selection.matches(job: TestFactories.makeJob(), organization: TestFactories.makeOrg()))
     }
 
     @Test("AppleSigningAsset bundle matching supports exact, wildcard, and prefix patterns")

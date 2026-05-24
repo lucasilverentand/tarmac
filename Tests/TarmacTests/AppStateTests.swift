@@ -184,6 +184,97 @@ struct AppStateTests {
         #expect(appState.vmStatusViewModel.baseImageExists == false)
         #expect(appState.vmStatusViewModel.readyForJobs == false)
     }
+
+    @Test("Apple signing injection resolves selected dispatch asset")
+    @MainActor
+    func appleSigningInjectionResolvesSelectedAsset() throws {
+        let org = TestFactories.makeOrg(
+            name: "SevenTwo",
+            imageProfile: RunnerImageProfile(name: "Xcode 17")
+        )
+        let (appState, _) = try makeAppState(orgs: [org])
+        let asset = AppleSigningAsset(
+            displayName: "Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            selection: AppleSigningSelection(
+                mode: .selectedJobs,
+                organizationNames: ["seventwo"],
+                repositoryNames: ["tarmac"],
+                runnerImageProfileNames: ["xcode 17"],
+                workflowNames: ["release"]
+            )
+        )
+        #expect(
+            appState.configStore.saveAppleSigningAsset(
+                asset,
+                certificateData: Data([0x01]),
+                certificatePassphrase: "secret",
+                provisioningProfileData: Data([0x02])
+            )
+        )
+
+        let job = TestFactories.makeJob(
+            id: 42,
+            org: "SevenTwo",
+            workflowName: "Release",
+            repositoryName: "Tarmac"
+        )
+
+        let injection = try appState.appleSigningInjection(for: job, organization: org)
+        #expect(injection?.asset.id == asset.id)
+        #expect(injection?.certificateData == Data([0x01]))
+    }
+
+    @Test("Apple signing injection skips unselected assets")
+    @MainActor
+    func appleSigningInjectionSkipsUnselectedAsset() throws {
+        let org = TestFactories.makeOrg(name: "SevenTwo")
+        let (appState, _) = try makeAppState(orgs: [org])
+        let asset = AppleSigningAsset(
+            displayName: "Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*"
+        )
+        #expect(
+            appState.configStore.saveAppleSigningAsset(
+                asset,
+                certificateData: Data([0x01]),
+                certificatePassphrase: "secret",
+                provisioningProfileData: Data([0x02])
+            )
+        )
+
+        let job = TestFactories.makeJob(id: 42, org: "SevenTwo")
+        #expect(try appState.appleSigningInjection(for: job, organization: org) == nil)
+    }
+
+    @Test("Apple signing injection blocks invalid selected assets")
+    @MainActor
+    func appleSigningInjectionBlocksInvalidAsset() throws {
+        let org = TestFactories.makeOrg(name: "SevenTwo")
+        let (appState, _) = try makeAppState(orgs: [org])
+        let asset = AppleSigningAsset(
+            displayName: "Expired Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            selection: AppleSigningSelection(mode: .allJobs),
+            certificateExpiresAt: Date(timeIntervalSince1970: 1_000)
+        )
+        #expect(
+            appState.configStore.saveAppleSigningAsset(
+                asset,
+                certificateData: Data([0x01]),
+                certificatePassphrase: "secret",
+                provisioningProfileData: Data([0x02])
+            )
+        )
+
+        let job = TestFactories.makeJob(id: 42, org: "SevenTwo")
+        #expect(throws: AppleSigningDispatchError.self) {
+            try appState.appleSigningInjection(for: job, organization: org)
+        }
+    }
 }
 
 private struct AppStateSetupFailureGitHubClient: GitHubClientProtocol {

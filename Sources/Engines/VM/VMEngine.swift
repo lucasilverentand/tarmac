@@ -345,7 +345,8 @@ final class VMEngine: VMManagerProtocol {
         job: RunnerJob,
         config: VMConfiguration,
         runnerPath: URL,
-        baseImagePath overrideBaseImagePath: String? = nil
+        baseImagePath overrideBaseImagePath: String? = nil,
+        signingInjection: AppleSigningInjection? = nil
     ) async throws -> VMInstance {
         guard let jitConfig = job.jitConfig else {
             throw VMEngineError.missingJITConfig
@@ -354,7 +355,8 @@ final class VMEngine: VMManagerProtocol {
         let sharedDir = try sharedDirManager.prepareForJob(
             jobId: job.id,
             runnerPath: runnerPath,
-            jitConfig: jitConfig
+            jitConfig: jitConfig,
+            signingInjection: signingInjection
         )
         diagnosticsContexts[job.id] = JobDiagnosticsContext(job: job, runnerName: job.runnerName)
         appendHostLifecycle(

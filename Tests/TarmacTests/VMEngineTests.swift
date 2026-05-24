@@ -136,6 +136,68 @@ struct VMEngineTests {
         #expect(engine.currentInstance?.jobId == 99)
     }
 
+    @Test("provisionAndRun writes signing injection into shared job directory")
+    @MainActor
+    func provisionAndRunWritesSigningInjection() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerPath = tempDir.appendingPathComponent("runner")
+        try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
+        try writeExecutableRunScript(in: runnerPath)
+
+        var job = TestFactories.makeJob(id: 109)
+        job.jitConfig = "test-jit-config"
+        let asset = AppleSigningAsset(
+            displayName: "Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            certificateCommonName: "Apple Distribution",
+            provisioningProfileUUID: "profile-uuid"
+        )
+        let injection = AppleSigningInjection(
+            asset: asset,
+            certificateData: Data([0x01, 0x02]),
+            certificatePassphrase: "secret",
+            provisioningProfileData: Data([0x03, 0x04])
+        )
+
+        try await engine.provisionAndRun(
+            job: job,
+            config: VMConfiguration(),
+            runnerPath: runnerPath,
+            signingInjection: injection
+        )
+
+        let signingDir = StorageManager(rootPath: tempDir.path)
+            .jobsDirectory
+            .appendingPathComponent("109")
+            .appendingPathComponent(GuestBootstrapContract.appleSigningDirectoryName)
+
+        #expect(
+            try Data(
+                contentsOf: signingDir.appendingPathComponent(
+                    GuestBootstrapContract.appleSigningCertificateFileName
+                )
+            ) == Data([0x01, 0x02])
+        )
+        #expect(
+            try Data(
+                contentsOf: signingDir.appendingPathComponent(
+                    GuestBootstrapContract.appleSigningProvisioningProfileFileName
+                )
+            ) == Data([0x03, 0x04])
+        )
+        let environment = try String(
+            contentsOf: signingDir.appendingPathComponent(
+                GuestBootstrapContract.appleSigningEnvironmentFileName
+            ),
+            encoding: .utf8
+        )
+        #expect(environment.contains("TARMAC_APPLE_TEAM_ID='TEAM12345'"))
+        #expect(environment.contains("TARMAC_APPLE_CERTIFICATE_PASSPHRASE='secret'"))
+    }
+
     @Test("provisionAndRun can boot from runner-specific image")
     @MainActor
     func provisionAndRunUsesRunnerImageOverride() async throws {

@@ -240,11 +240,13 @@ final class AppState {
             runnableJob.runnerLease = lease
             runnableJob.status = .running
             let runnerVMConfiguration = org.runnerVMConfiguration(defaultConfiguration: configStore.vmConfiguration)
+            let signingInjection = try appleSigningInjection(for: runnableJob, organization: org)
             let instance = try await vmEngine.provisionAndRun(
                 job: runnableJob,
                 config: runnerVMConfiguration,
                 runnerPath: runnerPath,
-                baseImagePath: org.runnerBaseImagePath(defaultPath: configStore.resolvedBaseImagePath)
+                baseImagePath: org.runnerBaseImagePath(defaultPath: configStore.resolvedBaseImagePath),
+                signingInjection: signingInjection
             )
             let sharedDirectoryPath = StorageManager(rootPath: configStore.storageRootPath)
                 .jobsDirectory
@@ -304,6 +306,13 @@ final class AppState {
             }
             await queueEngine.tryDispatch()
         }
+    }
+
+    func appleSigningInjection(
+        for job: RunnerJob,
+        organization: Organization
+    ) throws -> AppleSigningInjection? {
+        try configStore.loadAppleSigningInjection(for: job, organization: organization)
     }
 
     private func startCompletionMonitor(

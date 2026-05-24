@@ -152,6 +152,16 @@ final class ConfigStore {
         return deletedCertificate && deletedPassphrase && deletedProfile
     }
 
+    func updateAppleSigningAssetSelection(assetId: UUID, selection: AppleSigningSelection) -> Bool {
+        guard let index = appleSigningAssets.firstIndex(where: { $0.id == assetId }) else {
+            return false
+        }
+        appleSigningAssets[index].selection = selection
+        appleSigningAssets[index].updatedAt = Date()
+        saveAppleSigningAssets()
+        return true
+    }
+
     func loadAppleSigningInjection(for asset: AppleSigningAsset) -> AppleSigningInjection? {
         guard let certificateData = keychainService.load(key: asset.certificateKeychainKey),
             let passphraseData = keychainService.load(key: asset.passphraseKeychainKey),
@@ -167,6 +177,31 @@ final class ConfigStore {
             certificatePassphrase: passphrase,
             provisioningProfileData: provisioningProfileData
         )
+    }
+
+    func loadAppleSigningInjection(
+        for job: RunnerJob,
+        organization: Organization,
+        now: Date = Date()
+    ) throws -> AppleSigningInjection? {
+        guard
+            let asset = appleSigningAssets.first(where: { asset in
+                asset.selection.matches(job: job, organization: organization)
+            })
+        else {
+            return nil
+        }
+
+        let validation = validateAppleSigningAsset(asset, now: now)
+        guard validation.isReady else {
+            throw AppleSigningDispatchError.invalidAsset(assetName: asset.displayName, issues: validation.issues)
+        }
+
+        guard let injection = loadAppleSigningInjection(for: asset) else {
+            throw AppleSigningDispatchError.missingMaterial(assetName: asset.displayName)
+        }
+
+        return injection
     }
 
     func validateAppleSigningAsset(
