@@ -231,6 +231,44 @@ struct ConfigStoreTests {
         #expect(store.organizations.isEmpty)
     }
 
+    @Test("Enterprise access tokens are stored in keychain")
+    func enterpriseAccessTokensRoundTrip() {
+        let (store, _) = makeStore()
+        let org = Organization(
+            name: "acme",
+            accountType: .enterprise,
+            appId: "",
+            installationId: 0,
+            labels: []
+        )
+
+        #expect(!store.hasAccessToken(for: org))
+        #expect(store.saveAccessToken("  github_pat_enterprise  ", for: org))
+        #expect(store.hasAccessToken(for: org))
+        #expect(store.loadAccessToken(for: org) == "github_pat_enterprise")
+        #expect(store.deleteAccessToken(for: org))
+        #expect(!store.hasAccessToken(for: org))
+    }
+
+    @Test("Removing organization deletes enterprise access token")
+    func removeOrganizationDeletesAccessToken() {
+        let (store, _) = makeStore()
+        let org = Organization(
+            name: "acme",
+            accountType: .enterprise,
+            appId: "",
+            installationId: 0,
+            labels: []
+        )
+        store.addOrganization(org)
+        #expect(store.saveAccessToken("github_pat_enterprise", for: org))
+
+        store.removeOrganization(org)
+
+        #expect(store.organizations.isEmpty)
+        #expect(!store.hasAccessToken(for: org))
+    }
+
     @Test("Update organization")
     func updateOrganization() {
         let (store, _) = makeStore()

@@ -57,7 +57,7 @@ actor QueueEngine {
             let poller = ScaleSetPoller(
                 client: client,
                 tokenProvider: { [github] org in
-                    try await github.installationToken(for: org)
+                    try await github.authorizationToken(for: org)
                 }
             )
             pollers[org.name] = poller
@@ -130,7 +130,7 @@ actor QueueEngine {
 
         // Create session
         do {
-            let token = try await github.installationToken(for: org)
+            let token = try await github.authorizationToken(for: org)
             guard let scaleSetId = org.scaleSetId else {
                 throw ScaleSetPollerError.missingScaleSetId(org: org.name)
             }
@@ -205,7 +205,7 @@ actor QueueEngine {
         // Cleanup session on exit
         if let sessionId = sessions[org.name] {
             do {
-                let token = try await github.installationToken(for: org)
+                let token = try await github.authorizationToken(for: org)
                 try await poller.deleteSession(org: org, token: token, sessionId: sessionId)
                 sessionStore.remove(orgName: org.name)
             } catch {

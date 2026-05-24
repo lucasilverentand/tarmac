@@ -98,8 +98,8 @@ struct RunnerHostReadinessTests {
         #expect(readiness.issues.contains { $0.category == .github && $0.message.contains("Private key") })
     }
 
-    @Test("enterprise account entries block startup with migration guidance")
-    func enterpriseAccountsBlockStartup() throws {
+    @Test("enterprise account entries are ready with an access token")
+    func enterpriseAccountsReadyWithAccessToken() throws {
         let (store, _) = TestFactories.makeConfigStore()
         let root = try TestFactories.makeTempDir()
         defer { TestFactories.cleanup(root) }
@@ -108,7 +108,26 @@ struct RunnerHostReadinessTests {
         try TestFactories.prepareReadyRunnerHostStorage(for: store)
         let org = TestFactories.makeOrg(name: "example-enterprise", accountType: .enterprise)
         store.addOrganization(org)
-        _ = store.savePrivateKey(Data([0x01]), for: org)
+        _ = store.saveAccessToken("github_pat_enterprise", for: org)
+
+        let readiness = RunnerHostReadiness.evaluate(
+            configStore: store,
+            hostCapability: Self.supportedHost
+        )
+
+        #expect(readiness.isReady)
+    }
+
+    @Test("enterprise account entries require an access token")
+    func enterpriseAccountsRequireAccessToken() throws {
+        let (store, _) = TestFactories.makeConfigStore()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        try store.configureStorage(at: root)
+        try TestFactories.prepareReadyRunnerHostStorage(for: store)
+        let org = TestFactories.makeOrg(name: "example-enterprise", accountType: .enterprise)
+        store.addOrganization(org)
 
         let readiness = RunnerHostReadiness.evaluate(
             configStore: store,
@@ -116,7 +135,7 @@ struct RunnerHostReadinessTests {
         )
 
         #expect(!readiness.isReady)
-        #expect(readiness.issues.contains { $0.message.contains("Enterprise runner accounts are not supported") })
+        #expect(readiness.issues.contains { $0.message.contains("Enterprise access token") })
     }
 
     @Test("image profile readiness failures block startup")

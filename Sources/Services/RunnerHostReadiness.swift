@@ -200,17 +200,7 @@ struct RunnerHostReadiness: Equatable, Sendable {
         }
 
         for org in enabled {
-            if org.accountType == .enterprise {
-                issues.append(
-                    .init(
-                        category: .github,
-                        message:
-                            "\(org.name): Enterprise runner accounts are not supported. Add each runner organization instead."
-                    )
-                )
-                continue
-            }
-            if org.appId.isEmpty {
+            if org.requiresGitHubAppCredentials && org.appId.isEmpty {
                 issues.append(.init(category: .github, message: "\(org.name): GitHub App ID is not configured."))
             }
             if org.scaleSetId == nil {
@@ -219,8 +209,16 @@ struct RunnerHostReadiness: Equatable, Sendable {
             for profileIssue in org.imageProfileReadinessIssues {
                 issues.append(.init(category: .github, message: "\(org.name): \(profileIssue.message)"))
             }
-            if !configStore.hasPrivateKey(for: org) {
+            if org.requiresGitHubAppCredentials && !configStore.hasPrivateKey(for: org) {
                 issues.append(.init(category: .github, message: "\(org.name): Private key is not imported."))
+            }
+            if org.requiresEnterpriseAccessToken && !configStore.hasAccessToken(for: org) {
+                issues.append(
+                    .init(
+                        category: .github,
+                        message: "\(org.name): Enterprise access token is not configured."
+                    )
+                )
             }
         }
     }

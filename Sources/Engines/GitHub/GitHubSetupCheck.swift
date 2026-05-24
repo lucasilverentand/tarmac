@@ -38,6 +38,7 @@ struct GitHubSetupCheckIssue: Equatable, Identifiable, Sendable {
 enum GitHubSetupCheckIssueKind: String, Sendable {
     case missingAppId
     case missingPrivateKey
+    case missingAccessToken
     case missingScaleSet
     case imageProfileNotReady
     case labelMismatch
@@ -55,18 +56,7 @@ extension GitHubEngine {
         var runnerGroups: [String] = []
         let labels = Self.normalizedLabels(org.runnerLabels)
 
-        if org.accountType == .enterprise {
-            issues.append(
-                .init(
-                    kind: .unsupportedAccountType,
-                    message:
-                        "\(org.name): Enterprise runner accounts are not supported. Add the organization that owns the runner scale set."
-                )
-            )
-            return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
-        }
-
-        if org.appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if org.requiresGitHubAppCredentials && org.appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(
                 .init(
                     kind: .missingAppId,
@@ -109,34 +99,52 @@ extension GitHubEngine {
             }
         )
 
-        guard let keyData = keychainService.load(key: org.privateKeyKeychainKey) else {
-            issues.append(
-                .init(
-                    kind: .missingPrivateKey,
-                    message: "\(org.name): Private key is not imported."
-                )
-            )
-            return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
-        }
-
         let token: String
-        do {
-            token = try await tokenManager.installationToken(for: org, privateKeyData: keyData)
-        } catch {
-            issues.append(Self.issue(for: error, org: org.name, capability: "GitHub App installation access"))
-            return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
+        if org.requiresEnterpriseAccessToken {
+            guard let tokenData = keychainService.load(key: org.accessTokenKeychainKey),
+                let loadedToken = String(data: tokenData, encoding: .utf8),
+                !loadedToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                issues.append(
+                    .init(
+                        kind: .missingAccessToken,
+                        message: "\(org.name): Enterprise access token is not configured."
+                    )
+                )
+                return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
+            }
+            token = loadedToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            guard let keyData = keychainService.load(key: org.privateKeyKeychainKey) else {
+                issues.append(
+                    .init(
+                        kind: .missingPrivateKey,
+                        message: "\(org.name): Private key is not imported."
+                    )
+                )
+                return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
+            }
+
+            do {
+                token = try await tokenManager.installationToken(for: org, privateKeyData: keyData)
+            } catch {
+                issues.append(Self.issue(for: error, org: org.name, capability: "GitHub App installation access"))
+                return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
+            }
         }
 
-        await Self.appendRawCheck(
-            to: &issues,
-            client: client,
-            method: "GET",
-            path: "/installation/repositories",
-            token: token,
-            org: org.name,
-            capability: "GitHub App installation access",
-            notFoundMessage: "\(org.name): GitHub App installation was not found."
-        )
+        if org.requiresGitHubAppCredentials {
+            await Self.appendRawCheck(
+                to: &issues,
+                client: client,
+                method: "GET",
+                path: "/installation/repositories",
+                token: token,
+                org: org.name,
+                capability: "GitHub App installation access",
+                notFoundMessage: "\(org.name): GitHub App installation was not found."
+            )
+        }
 
         await Self.appendRawCheck(
             to: &issues,
@@ -146,7 +154,8 @@ extension GitHubEngine {
             token: token,
             org: org.name,
             capability: "Actions runner downloads",
-            notFoundMessage: "\(org.name): Actions runner downloads are unavailable for this organization."
+            notFoundMessage:
+                "\(org.name): Actions runner downloads are unavailable for this \(org.accountType.displayName.lowercased())."
         )
 
         let groupData = await Self.rawCheckData(
@@ -157,7 +166,8 @@ extension GitHubEngine {
             token: token,
             org: org.name,
             capability: "Runner group access",
-            notFoundMessage: "\(org.name): Runner groups are unavailable for this organization.",
+            notFoundMessage:
+                "\(org.name): Runner groups are unavailable for this \(org.accountType.displayName.lowercased()).",
             kind: .runnerGroupUnavailable
         )
         if let groupData,
