@@ -33,7 +33,7 @@ struct TarmacApp: App {
                 .onAppear {
                     Log.app.info("Dashboard window opened")
                     NSApp.activate()
-                    centerAndFloatDashboard()
+                    centerDashboard()
                 }
         }
         .windowResizability(.contentMinSize)
@@ -53,7 +53,7 @@ struct TarmacApp: App {
         .windowResizability(.contentMinSize)
     }
 
-    private func centerAndFloatDashboard() {
+    private func centerDashboard() {
         DispatchQueue.main.async {
             guard
                 let window = NSApp.windows.first(where: {
@@ -61,8 +61,8 @@ struct TarmacApp: App {
                         || ($0.title == "Dashboard" && $0.level == .normal)
                 })
             else { return }
+            window.level = .normal
             window.center()
-            window.level = .floating
         }
     }
 }
