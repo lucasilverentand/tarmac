@@ -297,6 +297,89 @@ struct ConfigStoreTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    @Test("Apple signing dispatch loads only explicitly selected assets")
+    func appleSigningDispatchSelection() throws {
+        let (store, defaults) = makeStore()
+        defer { defaults.removePersistentDomain(forName: "test-config") }
+
+        let org = Organization(
+            name: "SevenTwo",
+            appId: "APP1",
+            installationId: 12345,
+            imageProfile: RunnerImageProfile(name: "Xcode 17")
+        )
+        let asset = AppleSigningAsset(
+            displayName: "Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            selection: AppleSigningSelection(
+                mode: .selectedJobs,
+                organizationNames: ["seventwo"],
+                repositoryNames: ["tarmac"],
+                runnerImageProfileNames: ["xcode 17"],
+                workflowNames: ["release"]
+            )
+        )
+        #expect(
+            store.saveAppleSigningAsset(
+                asset,
+                certificateData: Data([0x01]),
+                certificatePassphrase: "secret",
+                provisioningProfileData: Data([0x02])
+            )
+        )
+
+        let matchingJob = TestFactories.makeJob(
+            id: 42,
+            org: "SevenTwo",
+            workflowName: "Release",
+            repositoryName: "Tarmac"
+        )
+        let skippedJob = TestFactories.makeJob(
+            id: 43,
+            org: "SevenTwo",
+            workflowName: "CI",
+            repositoryName: "Tarmac"
+        )
+
+        let injection = try store.loadAppleSigningInjection(for: matchingJob, organization: org)
+        #expect(injection?.asset.id == asset.id)
+        #expect(injection?.certificatePassphrase == "secret")
+        #expect(try store.loadAppleSigningInjection(for: skippedJob, organization: org) == nil)
+    }
+
+    @Test("Apple signing dispatch blocks selected invalid assets")
+    func appleSigningDispatchBlocksInvalidSelection() {
+        let (store, defaults) = makeStore()
+        defer { defaults.removePersistentDomain(forName: "test-config") }
+
+        let org = Organization(name: "SevenTwo", appId: "APP1", installationId: 12345)
+        let asset = AppleSigningAsset(
+            displayName: "Expired Distribution",
+            teamId: "TEAM12345",
+            bundleIdentifierPattern: "com.example.*",
+            selection: AppleSigningSelection(mode: .allJobs),
+            certificateExpiresAt: Date(timeIntervalSince1970: 1_000)
+        )
+        #expect(
+            store.saveAppleSigningAsset(
+                asset,
+                certificateData: Data([0x01]),
+                certificatePassphrase: "secret",
+                provisioningProfileData: Data([0x02])
+            )
+        )
+
+        let job = TestFactories.makeJob(id: 42, org: "SevenTwo")
+        #expect(throws: AppleSigningDispatchError.self) {
+            try store.loadAppleSigningInjection(
+                for: job,
+                organization: org,
+                now: Date(timeIntervalSince1970: 2_000)
+            )
+        }
+    }
+
     @Test("Apple signing validation catches missing material, expiry, and bundle mismatch")
     func appleSigningValidationIssues() {
         let (store, defaults) = makeStore()
