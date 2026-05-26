@@ -517,10 +517,117 @@ private struct FieldInlineHint: View {
     }
 }
 
+private enum AccountSetupStep: String, CaseIterable, Identifiable {
+    case account
+    case credentials
+    case runner
+    case image
+    case repositories
+    case review
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .account: "Account"
+        case .credentials: "Access"
+        case .runner: "Runner"
+        case .image: "Image"
+        case .repositories: "Repositories"
+        case .review: "Review"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .account: "Choose the GitHub account Tarmac should poll."
+        case .credentials: "Connect the app or enterprise token used for runner APIs."
+        case .runner: "Set the scale set and labels workflows will target."
+        case .image: "Advertise optional Apple build capabilities."
+        case .repositories: "Limit which queued jobs this account accepts."
+        case .review: "Check the setup before saving the account."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .account: "building.2"
+        case .credentials: "key"
+        case .runner: "server.rack"
+        case .image: "desktopcomputer"
+        case .repositories: "line.3.horizontal.decrease.circle"
+        case .review: "checklist"
+        }
+    }
+
+    var next: AccountSetupStep? {
+        guard let index = Self.allCases.firstIndex(of: self) else { return nil }
+        let nextIndex = Self.allCases.index(after: index)
+        return nextIndex < Self.allCases.endIndex ? Self.allCases[nextIndex] : nil
+    }
+
+    var previous: AccountSetupStep? {
+        guard let index = Self.allCases.firstIndex(of: self), index > Self.allCases.startIndex else { return nil }
+        return Self.allCases[Self.allCases.index(before: index)]
+    }
+}
+
+private struct AccountSetupProgressView: View {
+    let currentStep: AccountSetupStep
+    let canSelectStep: (AccountSetupStep) -> Bool
+    let onSelectStep: (AccountSetupStep) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Account Setup")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(AccountSetupStep.allCases) { step in
+                Button {
+                    onSelectStep(step)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: step.systemImage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(step == currentStep ? .white : .secondary)
+                            .frame(width: 22, height: 22)
+                            .background(
+                                Circle()
+                                    .fill(step == currentStep ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                            )
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(step.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(step.detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSelectStep(step))
+                .opacity(canSelectStep(step) ? 1 : 0.45)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 private struct OrganizationFormSheet: View {
     let viewModel: SettingsViewModel
     var existing: Organization?
 
+    @State private var setupStep: AccountSetupStep = .account
     @State private var name: String = ""
     @State private var accountType: GitHubAccountType = .organization
     @State private var appOwnerType: GitHubAccountType = .organization
@@ -606,6 +713,45 @@ private struct OrganizationFormSheet: View {
         isEditing && existing?.accountType != .enterprise
     }
 
+    private var usesGuidedSetup: Bool {
+        !isEditing
+    }
+
+    private var canContinueCurrentStep: Bool {
+        switch setupStep {
+        case .account:
+            !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .credentials:
+            switch accountType {
+            case .organization:
+                !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && Int(installationId) != nil
+                    && hasPrivateKey
+            case .enterprise:
+                hasAccessToken || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        case .runner:
+            Int(scaleSetId) != nil
+                && !labels
+                    .split(separator: ",")
+                    .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                    .filter({ !$0.isEmpty })
+                    .isEmpty
+        case .image, .repositories:
+            true
+        case .review:
+            canSave
+        }
+    }
+
+    private func shouldShow(_ step: AccountSetupStep) -> Bool {
+        !usesGuidedSetup || setupStep == step
+    }
+
+    private func canSelectSetupStep(_ step: AccountSetupStep) -> Bool {
+        !usesGuidedSetup || step == setupStep || setupStepCanBeEntered(step)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(isEditing ? "Edit Account" : "Add Account")
@@ -615,31 +761,64 @@ private struct OrganizationFormSheet: View {
 
             ScrollView {
                 Form {
-                    Section("Account") {
-                        if !locksAccountIdentity {
-                            Picker("Runner account", selection: $accountType) {
-                                ForEach(availableAccountTypes) { type in
-                                    Text(type.displayName).tag(type)
+                    if usesGuidedSetup {
+                        AccountSetupProgressView(
+                            currentStep: setupStep,
+                            canSelectStep: canSelectSetupStep,
+                            onSelectStep: { setupStep = $0 }
+                        )
+                    }
+
+                    if shouldShow(.account) {
+                        Section("Account") {
+                            if !locksAccountIdentity {
+                                Picker("Runner account", selection: $accountType) {
+                                    ForEach(availableAccountTypes) { type in
+                                        Text(type.displayName).tag(type)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .disabled(locksAccountIdentity)
+
+                                if accountType == .enterprise {
+                                    GuidanceCallout(item: .enterprise)
                                 }
                             }
-                            .pickerStyle(.segmented)
-                            .disabled(locksAccountIdentity)
 
-                            if accountType == .enterprise {
-                                GuidanceCallout(item: .enterprise)
-                            }
+                            TextField(accountType == .enterprise ? "Enterprise slug" : "Organization name", text: $name)
+                                .disabled(locksAccountIdentity)
+                                .help(
+                                    accountType == .enterprise
+                                        ? "The enterprise slug as shown in github.com/enterprises/<slug>"
+                                        : "The organization login as shown in github.com/<name>"
+                                )
+                            FieldInlineHint(text: tarmacFieldDetail(.accountName))
+
                         }
+                    }
 
-                        TextField(accountType == .enterprise ? "Enterprise slug" : "Organization name", text: $name)
-                            .disabled(locksAccountIdentity)
-                            .help(
-                                accountType == .enterprise
-                                    ? "The enterprise slug as shown in github.com/enterprises/<slug>"
-                                    : "The organization login as shown in github.com/<name>"
-                            )
-                        FieldInlineHint(text: tarmacFieldDetail(.accountName))
+                    if accountType == .organization && shouldShow(.credentials) {
+                        Section("GitHub App Credentials") {
+                            Picker("App owner", selection: $appOwnerType) {
+                                Text("Organization").tag(GitHubAccountType.organization)
+                                Text("Enterprise").tag(GitHubAccountType.enterprise)
+                            }
+                            .pickerStyle(.segmented)
 
-                        if accountType == .organization {
+                            if appOwnerType == .enterprise {
+                                TextField("Enterprise slug", text: $enterpriseSlug)
+                                    .help("The enterprise slug as shown in github.com/enterprises/<slug>")
+                                FieldInlineHint(
+                                    text:
+                                        "Use this when the GitHub App is created from Enterprise settings. The runner account above still stays as the organization; do not paste an enterprise installation ID."
+                                )
+                            }
+
+                            GitHubAppSetupGuideView(accountType: appOwnerType, accountName: setupGuideAccountName)
+
+                            TextField("App ID", text: $appId)
+                            FieldInlineHint(text: tarmacFieldDetail(.appId))
+
                             HStack {
                                 TextField("Installation ID", text: $installationId)
                                     .help("The GitHub App installation ID for this organization")
@@ -664,34 +843,6 @@ private struct OrganizationFormSheet: View {
                                     .foregroundStyle(.red)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                        }
-
-                        TextField("Scale Set ID", text: $scaleSetId)
-                            .help("The numeric ID of your Actions Runner Scale Set for this account")
-                        FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
-                    }
-
-                    if accountType == .organization {
-                        Section("GitHub App Credentials") {
-                            Picker("App owner", selection: $appOwnerType) {
-                                Text("Organization").tag(GitHubAccountType.organization)
-                                Text("Enterprise").tag(GitHubAccountType.enterprise)
-                            }
-                            .pickerStyle(.segmented)
-
-                            if appOwnerType == .enterprise {
-                                TextField("Enterprise slug", text: $enterpriseSlug)
-                                    .help("The enterprise slug as shown in github.com/enterprises/<slug>")
-                                FieldInlineHint(
-                                    text:
-                                        "Use this when the GitHub App is created from Enterprise settings. The runner account above still stays as the organization; do not paste an enterprise installation ID."
-                                )
-                            }
-
-                            GitHubAppSetupGuideView(accountType: appOwnerType, accountName: setupGuideAccountName)
-
-                            TextField("App ID", text: $appId)
-                            FieldInlineHint(text: tarmacFieldDetail(.appId))
 
                             HStack {
                                 if hasPrivateKey {
@@ -733,7 +884,7 @@ private struct OrganizationFormSheet: View {
                                     .foregroundStyle(.red)
                             }
                         }
-                    } else {
+                    } else if accountType == .enterprise && shouldShow(.credentials) {
                         Section("Enterprise Access") {
                             FieldInlineHint(
                                 text:
@@ -766,159 +917,218 @@ private struct OrganizationFormSheet: View {
                         }
                     }
 
-                    Section("Runner Labels") {
-                        TextField("Labels (comma-separated)", text: $labels)
-                            .help("e.g. self-hosted, macOS, ARM64")
-                        FieldInlineHint(text: tarmacFieldDetail(.labels))
+                    if shouldShow(.runner) {
+                        Section("Runner Scale Set") {
+                            TextField("Scale Set ID", text: $scaleSetId)
+                                .help("The numeric ID of your Actions Runner Scale Set for this account")
+                            FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
+                        }
+
+                        Section("Runner Labels") {
+                            TextField("Labels (comma-separated)", text: $labels)
+                                .help("e.g. self-hosted, macOS, ARM64")
+                            FieldInlineHint(text: tarmacFieldDetail(.labels))
+                        }
                     }
 
-                    Section("Runner Image Profile") {
-                        Toggle("Advertise Apple build capabilities", isOn: $imageProfileEnabled)
+                    if shouldShow(.image) {
+                        Section("Runner Image Profile") {
+                            Toggle("Advertise Apple build capabilities", isOn: $imageProfileEnabled)
 
-                        if imageProfileEnabled {
-                            TextField("Profile name", text: $imageProfileName)
-                            TextField("Runner image path", text: $runnerBaseImagePath)
-                                .help("Leave blank to use the managed base image.")
+                            if imageProfileEnabled {
+                                TextField("Profile name", text: $imageProfileName)
+                                TextField("Runner image path", text: $runnerBaseImagePath)
+                                    .help("Leave blank to use the managed base image.")
 
-                            HStack {
-                                Button("Use Managed Image") {
-                                    runnerBaseImagePath = viewModel.baseImagePath
-                                }
-                                .controlSize(.small)
-
-                                Button {
-                                    scanRunnerImage()
-                                } label: {
-                                    if imageScanInFlight {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Label("Scan Image", systemImage: "waveform.path.ecg")
+                                HStack {
+                                    Button("Use Managed Image") {
+                                        runnerBaseImagePath = viewModel.baseImagePath
                                     }
-                                }
-                                .controlSize(.small)
-                                .disabled(imageScanInFlight)
-                            }
+                                    .controlSize(.small)
 
-                            Text(
-                                "Scanning boots a temporary clone of this image, records the installed Apple toolchain, and updates the advertised labels from what is actually present."
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                            if let imageScanError {
-                                Text(imageScanError)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            Toggle("Override VM resources for this runner image", isOn: $overrideVMConfiguration)
-
-                            if overrideVMConfiguration {
-                                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                                    GridRow {
-                                        TextField("CPU", text: $runnerCPUCount)
-                                        TextField("Memory GB", text: $runnerMemorySizeGB)
+                                    Button {
+                                        scanRunnerImage()
+                                    } label: {
+                                        if imageScanInFlight {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Label("Scan Image", systemImage: "waveform.path.ecg")
+                                        }
                                     }
-                                    GridRow {
-                                        TextField("Disk GB", text: $runnerDiskSizeGB)
-                                        TextField("Timeout seconds", text: $runnerCompletionTimeoutSeconds)
-                                    }
+                                    .controlSize(.small)
+                                    .disabled(imageScanInFlight)
                                 }
-                            }
 
-                            TextField("Base macOS version", text: $baseMacOSVersion)
-                                .help("The macOS version installed in the base image")
-                            TextField("Xcode version", text: $xcodeVersion)
-                            TextField("Developer directory", text: $developerDirectory)
-                                .help("Usually /Applications/Xcode.app/Contents/Developer")
-                            Toggle("Command-line tools installed", isOn: $commandLineToolsInstalled)
-
-                            preparationSection
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Capabilities")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], spacing: 8)
-                                {
-                                    ForEach(AppleBuildCapability.allCases) { capability in
-                                        Toggle(
-                                            capability.displayName,
-                                            isOn: Binding(
-                                                get: { selectedCapabilities.contains(capability) },
-                                                set: { enabled in
-                                                    if enabled {
-                                                        selectedCapabilities.insert(capability)
-                                                    } else {
-                                                        selectedCapabilities.remove(capability)
-                                                    }
-                                                }
-                                            )
-                                        )
-                                        .toggleStyle(.checkbox)
-                                    }
-                                }
-                            }
-
-                            TextField("SDKs", text: $sdkList)
-                                .help("Use platform=version entries, e.g. macos=15.0, ios=18.0")
-                            TextField("Simulator runtimes", text: $simulatorRuntimeList)
-                                .help("Use platform=version entries, e.g. ios=18.0, watchos=11.0")
-
-                            let previewProfile = currentImageProfile
-                            if !previewProfile.readinessIssues.isEmpty {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(previewProfile.readinessIssues, id: \.message) { issue in
-                                        Label(issue.message, systemImage: "exclamationmark.triangle.fill")
-                                            .font(.caption)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                            } else if !previewProfile.advertisedLabels.isEmpty {
-                                Label(
-                                    "Adds \(previewProfile.advertisedLabels.joined(separator: ", ")) labels",
-                                    systemImage: "tag"
+                                Text(
+                                    "Scanning boots a temporary clone of this image, records the installed Apple toolchain, and updates the advertised labels from what is actually present."
                                 )
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                                if let imageScanError {
+                                    Text(imageScanError)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Toggle("Override VM resources for this runner image", isOn: $overrideVMConfiguration)
+
+                                if overrideVMConfiguration {
+                                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                                        GridRow {
+                                            TextField("CPU", text: $runnerCPUCount)
+                                            TextField("Memory GB", text: $runnerMemorySizeGB)
+                                        }
+                                        GridRow {
+                                            TextField("Disk GB", text: $runnerDiskSizeGB)
+                                            TextField("Timeout seconds", text: $runnerCompletionTimeoutSeconds)
+                                        }
+                                    }
+                                }
+
+                                TextField("Base macOS version", text: $baseMacOSVersion)
+                                    .help("The macOS version installed in the base image")
+                                TextField("Xcode version", text: $xcodeVersion)
+                                TextField("Developer directory", text: $developerDirectory)
+                                    .help("Usually /Applications/Xcode.app/Contents/Developer")
+                                Toggle("Command-line tools installed", isOn: $commandLineToolsInstalled)
+
+                                preparationSection
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Capabilities")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    LazyVGrid(
+                                        columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
+                                        spacing: 8
+                                    ) {
+                                        ForEach(AppleBuildCapability.allCases) { capability in
+                                            Toggle(
+                                                capability.displayName,
+                                                isOn: Binding(
+                                                    get: { selectedCapabilities.contains(capability) },
+                                                    set: { enabled in
+                                                        if enabled {
+                                                            selectedCapabilities.insert(capability)
+                                                        } else {
+                                                            selectedCapabilities.remove(capability)
+                                                        }
+                                                    }
+                                                )
+                                            )
+                                            .toggleStyle(.checkbox)
+                                        }
+                                    }
+                                }
+
+                                TextField("SDKs", text: $sdkList)
+                                    .help("Use platform=version entries, e.g. macos=15.0, ios=18.0")
+                                TextField("Simulator runtimes", text: $simulatorRuntimeList)
+                                    .help("Use platform=version entries, e.g. ios=18.0, watchos=11.0")
+
+                                let previewProfile = currentImageProfile
+                                if !previewProfile.readinessIssues.isEmpty {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        ForEach(previewProfile.readinessIssues, id: \.message) { issue in
+                                            Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                                                .font(.caption)
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                } else if !previewProfile.advertisedLabels.isEmpty {
+                                    Label(
+                                        "Adds \(previewProfile.advertisedLabels.joined(separator: ", ")) labels",
+                                        systemImage: "tag"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
 
-                    Section("Repository Filter") {
-                        GuidanceCallout(item: .repository)
+                    if shouldShow(.repositories) {
+                        Section("Repository Filter") {
+                            GuidanceCallout(item: .repository)
 
-                        Picker("Filter mode", selection: $filterMode) {
-                            ForEach(RepositoryFilterMode.allCases, id: \.self) { mode in
-                                Text(mode.label).tag(mode)
+                            Picker("Filter mode", selection: $filterMode) {
+                                ForEach(RepositoryFilterMode.allCases, id: \.self) { mode in
+                                    Text(mode.label).tag(mode)
+                                }
+                            }
+
+                            if filterMode != .all {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Repositories (one per line)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    TextEditor(text: $repositoryList)
+                                        .font(.body.monospaced())
+                                        .frame(height: 80)
+                                        .scrollContentBackground(.hidden)
+                                        .padding(6)
+                                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                                }
+
+                                Text(
+                                    filterMode == .include
+                                        ? "Only jobs from these repositories will be accepted."
+                                        : "Jobs from these repositories will be ignored."
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                             }
                         }
+                    }
 
-                        if filterMode != .all {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Repositories (one per line)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    if shouldShow(.review) {
+                        Section("Ready to Save") {
+                            setupReviewRow(
+                                title: accountType.displayName,
+                                detail: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                                systemImage: accountType == .enterprise ? "building.columns" : "building.2",
+                                isReady: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            )
 
-                                TextEditor(text: $repositoryList)
-                                    .font(.body.monospaced())
-                                    .frame(height: 80)
-                                    .scrollContentBackground(.hidden)
-                                    .padding(6)
-                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                            if accountType == .organization {
+                                setupReviewRow(
+                                    title: "GitHub App",
+                                    detail:
+                                        "App \(appId.isEmpty ? "missing" : appId), installation \(installationId.isEmpty ? "missing" : installationId)",
+                                    systemImage: "key",
+                                    isReady: !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                        && Int(installationId) != nil
+                                        && hasPrivateKey
+                                )
+                            } else {
+                                setupReviewRow(
+                                    title: "Enterprise token",
+                                    detail: hasAccessToken ? "Saved token" : "New token ready to save",
+                                    systemImage: "key",
+                                    isReady: hasAccessToken
+                                        || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                )
                             }
 
-                            Text(
-                                filterMode == .include
-                                    ? "Only jobs from these repositories will be accepted."
-                                    : "Jobs from these repositories will be ignored."
+                            setupReviewRow(
+                                title: "Runner scale set",
+                                detail: scaleSetId.isEmpty ? "Missing scale set ID" : "Scale set \(scaleSetId)",
+                                systemImage: "server.rack",
+                                isReady: Int(scaleSetId) != nil
                             )
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+
+                            setupReviewRow(
+                                title: "Repository filter",
+                                detail: filterMode.label,
+                                systemImage: "line.3.horizontal.decrease.circle",
+                                isReady: true
+                            )
                         }
                     }
                 }
@@ -940,9 +1150,23 @@ private struct OrganizationFormSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
 
-                Button(isEditing ? "Save" : "Add") { save() }
+                if usesGuidedSetup, let previousStep = setupStep.previous {
+                    Button("Back") {
+                        setupStep = previousStep
+                    }
+                }
+
+                if usesGuidedSetup, let nextStep = setupStep.next {
+                    Button("Continue") {
+                        setupStep = nextStep
+                    }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!canSave)
+                    .disabled(!canContinueCurrentStep)
+                } else {
+                    Button(isEditing ? "Save" : "Add Account") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!canSave)
+                }
             }
             .padding(16)
         }
@@ -977,6 +1201,61 @@ private struct OrganizationFormSheet: View {
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)
+        }
+    }
+
+    private func setupStepCanBeEntered(_ step: AccountSetupStep) -> Bool {
+        switch step {
+        case .account:
+            true
+        case .credentials:
+            !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .runner:
+            setupStepCanBeEntered(.credentials) && credentialsAreReady
+        case .image:
+            setupStepCanBeEntered(.runner) && runnerSettingsAreReady
+        case .repositories:
+            setupStepCanBeEntered(.image)
+        case .review:
+            setupStepCanBeEntered(.repositories)
+        }
+    }
+
+    private var credentialsAreReady: Bool {
+        switch accountType {
+        case .organization:
+            return !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && Int(installationId) != nil
+                && hasPrivateKey
+        case .enterprise:
+            return hasAccessToken || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private var runnerSettingsAreReady: Bool {
+        Int(scaleSetId) != nil
+            && !labels
+                .split(separator: ",")
+                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                .filter({ !$0.isEmpty })
+                .isEmpty
+    }
+
+    private func setupReviewRow(title: String, detail: String, systemImage: String, isReady: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(isReady ? .green : .orange)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Label(title, systemImage: systemImage)
+                    .font(.subheadline.weight(.medium))
+
+                Text(detail.isEmpty ? "Missing required value" : detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
