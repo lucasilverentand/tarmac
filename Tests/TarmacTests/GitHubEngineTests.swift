@@ -105,6 +105,124 @@ struct GitHubEngineTests {
         #expect(requests[0].headers["Authorization"]?.hasPrefix("Bearer ") == true)
     }
 
+    @Test("enterpriseInstallationId uses app JWT and enterprise installation endpoint")
+    func enterpriseInstallationIdUsesEnterpriseInstallationEndpoint() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"id":9876}
+                """.data(using: .utf8)!
+        )
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let engine = GitHubEngine(client: client, keychainService: PreviewKeychainService(), cacheDirectory: tempDir)
+        let id = try await engine.enterpriseInstallationId(
+            enterpriseSlug: "acme",
+            appId: "12345",
+            privateKeyData: TestFactories.makeTestKeyData()
+        )
+
+        #expect(id == 9876)
+        let requests = await client.requests
+        #expect(requests.count == 1)
+        #expect(requests[0].method == "GET")
+        #expect(requests[0].path == "/enterprises/acme/installation")
+        #expect(requests[0].headers["Authorization"]?.hasPrefix("Bearer ") == true)
+        #expect(requests[0].headers["X-GitHub-Api-Version"] == "2026-03-10")
+    }
+
+    @Test("listEnterpriseInstallableOrganizations uses enterprise installation token")
+    func listEnterpriseInstallableOrganizationsUsesEnterpriseInstallationToken() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_enterprise","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "installable_organizations",
+            json: """
+                [
+                  {"id":1,"login":"one"},
+                  {"id":2,"login":"two"}
+                ]
+                """.data(using: .utf8)!
+        )
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let engine = GitHubEngine(client: client, keychainService: PreviewKeychainService(), cacheDirectory: tempDir)
+        let organizations = try await engine.listEnterpriseInstallableOrganizations(
+            enterpriseSlug: "acme",
+            enterpriseInstallationId: 9876,
+            appId: "12345",
+            privateKeyData: TestFactories.makeTestKeyData()
+        )
+
+        #expect(organizations.map(\.login) == ["one", "two"])
+        let requests = await client.requests
+        #expect(requests[0].path == "/app/installations/9876/access_tokens")
+        #expect(requests[1].path == "/enterprises/acme/apps/installable_organizations?per_page=100&page=1")
+        #expect(requests[1].headers["Authorization"] == "Bearer ghs_enterprise")
+        #expect(requests[1].headers["X-GitHub-Api-Version"] == "2026-03-10")
+    }
+
+    @Test("installEnterpriseGitHubApp posts selected organization install request")
+    func installEnterpriseGitHubAppPostsInstallRequest() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_enterprise","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/enterprises/acme/apps/organizations/octo-org/installations",
+            json: """
+                {"id":4242,"app_slug":"seventwo/tarmac","repository_selection":"none"}
+                """.data(using: .utf8)!
+        )
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let engine = GitHubEngine(client: client, keychainService: PreviewKeychainService(), cacheDirectory: tempDir)
+        let installation = try await engine.installEnterpriseGitHubApp(
+            enterpriseSlug: "acme",
+            organizationName: "octo-org",
+            enterpriseInstallationId: 9876,
+            appId: "12345",
+            clientId: "Iv1.client",
+            privateKeyData: TestFactories.makeTestKeyData(),
+            repositorySelection: .none,
+            repositories: []
+        )
+
+        #expect(installation.id == 4242)
+        let requests = await client.requests
+        let installRequest = try #require(requests.last)
+        #expect(installRequest.method == "POST")
+        #expect(installRequest.path == "/enterprises/acme/apps/organizations/octo-org/installations")
+        #expect(installRequest.headers["Authorization"] == "Bearer ghs_enterprise")
+        #expect(installRequest.headers["X-GitHub-Api-Version"] == "2026-03-10")
+
+        struct InstallBody: Decodable {
+            let clientId: String
+            let repositorySelection: String
+
+            enum CodingKeys: String, CodingKey {
+                case clientId = "client_id"
+                case repositorySelection = "repository_selection"
+            }
+        }
+        let bodyData = try #require(installRequest.bodyData)
+        let body = try JSONDecoder().decode(InstallBody.self, from: bodyData)
+        #expect(body.clientId == "Iv1.client")
+        #expect(body.repositorySelection == "none")
+    }
+
     @Test("Different installations trigger separate API calls")
     func differentInstallationsSeparateCalls() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))

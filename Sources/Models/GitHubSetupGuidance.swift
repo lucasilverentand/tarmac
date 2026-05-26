@@ -95,6 +95,8 @@ struct GitHubAppSetupGuide: Equatable, Sendable {
 
         if accountType == .organization {
             queryItems.append(URLQueryItem(name: "public", value: "false"))
+        } else {
+            queryItems.append(URLQueryItem(name: "enterprise_organization_installations", value: "write"))
         }
 
         components.queryItems = queryItems
@@ -150,6 +152,7 @@ struct GitHubAppFormFieldGuide: Identifiable, Equatable, Sendable {
         case setupURL
         case webhooks
         case permissions
+        case enterprisePermissions
         case events
         case visibility
     }
@@ -271,13 +274,14 @@ extension GitHubAppSetupGuide {
         documentationURL:
             "https://docs.github.com/en/enterprise-cloud@latest/admin/managing-github-apps-for-your-enterprise/creating-github-apps-for-your-enterprise",
         appFields: standardAppFields + [
+            enterpriseControlPlanePermission,
             GitHubAppFormFieldGuide(
                 kind: .visibility,
                 field: "Enterprise installation",
-                value: "Optional; not the runner installation ID",
+                value: "Required for control-plane automation; not the runner installation ID",
                 detail:
-                    "Use organization installs for organization runner accounts. Enterprise runner accounts do not use GitHub App installation tokens."
-            )
+                    "Install the app on the enterprise so Tarmac can use the enterprise installation token to list organizations and install the app into selected runner organizations."
+            ),
         ],
         tarmacFields: [
             TarmacAccountFieldGuide(
@@ -301,7 +305,7 @@ extension GitHubAppSetupGuide {
                 kind: .installationId,
                 field: "Installation ID",
                 detail:
-                    "Install the app on the organization, then click Find Installation in Tarmac. Do not paste the enterprise installation ID; it cannot create organization runner tokens."
+                    "Use the enterprise installation ID only in the enterprise control-plane setup tools. The saved runner account must use the organization installation ID found after the app is installed into the organization."
             ),
             TarmacAccountFieldGuide(
                 kind: .privateKey,
@@ -383,6 +387,14 @@ extension GitHubAppSetupGuide {
             detail: "No webhook events are needed when webhooks are inactive."
         ),
     ]
+
+    private static let enterpriseControlPlanePermission = GitHubAppFormFieldGuide(
+        kind: .enterprisePermissions,
+        field: "Enterprise permissions",
+        value: "Enterprise organization installations: Read & write",
+        detail:
+            "This lets the enterprise installation token list enterprise-owned organizations and install or update this app on selected organizations."
+    )
 
     private static let standardAfterCreationSteps: [GitHubAppSetupStep] = [
         GitHubAppSetupStep(
