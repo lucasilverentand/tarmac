@@ -333,17 +333,25 @@ struct ModelCodableTests {
         #expect(queryItems["url"] == "https://github.com/enterprises/acme")
         #expect(queryItems["public"] == nil)
         #expect(queryItems["organization_self_hosted_runners"] == "write")
+        #expect(queryItems["enterprise_organization_installations"] == "write")
         #expect(
             guide.tarmacFields.first { $0.kind == .accountName }?.detail.contains("organization login")
                 == true
         )
         #expect(
             guide.appFields.contains {
-                $0.field == "Enterprise installation" && $0.value == "Optional; not the runner installation ID"
+                $0.field == "Enterprise permissions"
+                    && $0.value == "Enterprise organization installations: Read & write"
             }
         )
         #expect(
-            guide.tarmacFields.first { $0.kind == .installationId }?.detail.contains("Do not paste the enterprise")
+            guide.appFields.contains {
+                $0.field == "Enterprise installation"
+                    && $0.value == "Required for control-plane automation; not the runner installation ID"
+            }
+        )
+        #expect(
+            guide.tarmacFields.first { $0.kind == .installationId }?.detail.contains("saved runner account")
                 == true
         )
     }

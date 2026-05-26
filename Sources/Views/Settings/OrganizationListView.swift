@@ -632,6 +632,12 @@ private struct OrganizationFormSheet: View {
     @State private var accountType: GitHubAccountType = .organization
     @State private var appOwnerType: GitHubAccountType = .organization
     @State private var enterpriseSlug: String = ""
+    @State private var enterpriseInstallationId: String = ""
+    @State private var enterpriseClientId: String = ""
+    @State private var enterpriseRepositorySelection: EnterpriseGitHubAppInstallRepositorySelection = .none
+    @State private var enterpriseRepositoryList: String = ""
+    @State private var enterpriseOrganizations: [EnterpriseInstallableOrganization] = []
+    @State private var selectedEnterpriseOrganizationIDs: Set<Int64> = []
     @State private var appId: String = ""
     @State private var installationId: String = ""
     @State private var scaleSetId: String = ""
@@ -672,6 +678,9 @@ private struct OrganizationFormSheet: View {
     @State private var importError: String?
     @State private var installationLookupInFlight = false
     @State private var installationLookupError: String?
+    @State private var enterpriseControlInFlight = false
+    @State private var enterpriseControlMessage: String?
+    @State private var enterpriseControlError: String?
     @State private var imageScanInFlight = false
     @State private var imageScanError: String?
 
@@ -882,6 +891,10 @@ private struct OrganizationFormSheet: View {
                                 Text(error)
                                     .font(.caption)
                                     .foregroundStyle(.red)
+                            }
+
+                            if appOwnerType == .enterprise {
+                                enterpriseControlPlaneSection
                             }
                         }
                     } else if accountType == .enterprise && shouldShow(.credentials) {
@@ -1297,6 +1310,121 @@ private struct OrganizationFormSheet: View {
 
     @State private var pendingKeyData: Data?
 
+    @ViewBuilder
+    private var enterpriseControlPlaneSection: some View {
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Enterprise organization installs", systemImage: "building.columns")
+                .font(.subheadline.weight(.medium))
+
+            FieldInlineHint(
+                text:
+                    "Use the enterprise installation only to install or update the app on runner organizations. The saved Tarmac account remains the organization above and still needs its own organization installation ID."
+            )
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow {
+                    TextField("Enterprise installation ID", text: $enterpriseInstallationId)
+                        .help("The app installation ID for the enterprise account")
+
+                    TextField("Client ID", text: $enterpriseClientId)
+                        .help("The GitHub App Client ID, for example Iv1...")
+                }
+            }
+
+            HStack {
+                Button {
+                    findEnterpriseInstallation()
+                } label: {
+                    if enterpriseControlInFlight {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Find Enterprise Installation", systemImage: "magnifyingglass")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(enterpriseControlInFlight)
+
+                Button {
+                    loadEnterpriseOrganizations()
+                } label: {
+                    Label("Load Organizations", systemImage: "building.2.crop.circle")
+                }
+                .controlSize(.small)
+                .disabled(enterpriseControlInFlight || Int(enterpriseInstallationId) == nil)
+            }
+
+            Picker("Repository access", selection: $enterpriseRepositorySelection) {
+                ForEach(EnterpriseGitHubAppInstallRepositorySelection.allCases) { selection in
+                    Text(selection.displayName).tag(selection)
+                }
+            }
+
+            if enterpriseRepositorySelection == .selected {
+                TextEditor(text: $enterpriseRepositoryList)
+                    .font(.body.monospaced())
+                    .frame(height: 72)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .help("Repository names only, one per line or comma-separated. Use repo, not org/repo.")
+            }
+
+            if !enterpriseOrganizations.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Organizations")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(enterpriseOrganizations) { organization in
+                        Toggle(
+                            organization.login,
+                            isOn: Binding(
+                                get: { selectedEnterpriseOrganizationIDs.contains(organization.id) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedEnterpriseOrganizationIDs.insert(organization.id)
+                                    } else {
+                                        selectedEnterpriseOrganizationIDs.remove(organization.id)
+                                    }
+                                }
+                            )
+                        )
+                        .toggleStyle(.checkbox)
+                    }
+
+                    Button {
+                        installEnterpriseAppOnSelectedOrganizations()
+                    } label: {
+                        if enterpriseControlInFlight {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Install or Update Selected", systemImage: "square.and.arrow.down")
+                        }
+                    }
+                    .controlSize(.small)
+                    .disabled(enterpriseControlInFlight || selectedEnterpriseOrganizationIDs.isEmpty)
+                }
+            }
+
+            if let enterpriseControlMessage {
+                Text(enterpriseControlMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let enterpriseControlError {
+                Text(enterpriseControlError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private func tarmacFieldDetail(_ kind: TarmacAccountFieldGuide.Kind) -> String {
         if accountType == .enterprise {
             switch kind {
@@ -1352,6 +1480,140 @@ private struct OrganizationFormSheet: View {
             }
             installationLookupInFlight = false
         }
+    }
+
+    private func findEnterpriseInstallation() {
+        enterpriseControlMessage = nil
+        enterpriseControlError = nil
+
+        let trimmedEnterpriseSlug = enterpriseSlug.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAppId = appId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEnterpriseSlug.isEmpty else {
+            enterpriseControlError = "Enter the enterprise slug first."
+            return
+        }
+        guard !trimmedAppId.isEmpty else {
+            enterpriseControlError = "Enter the App ID first."
+            return
+        }
+        guard let keyData = lookupPrivateKeyData else {
+            enterpriseControlError = "Import the GitHub App private key before finding the enterprise installation."
+            return
+        }
+
+        enterpriseControlInFlight = true
+        Task {
+            do {
+                let id = try await viewModel.findEnterpriseInstallationId(
+                    enterpriseSlug: trimmedEnterpriseSlug,
+                    appId: trimmedAppId,
+                    privateKeyData: keyData
+                )
+                enterpriseInstallationId = "\(id)"
+                enterpriseControlMessage = "Found enterprise installation \(id)."
+            } catch {
+                enterpriseControlError =
+                    "Could not find the enterprise installation. Confirm the app is installed on the enterprise and the App ID/private key match."
+            }
+            enterpriseControlInFlight = false
+        }
+    }
+
+    private func loadEnterpriseOrganizations() {
+        enterpriseControlMessage = nil
+        enterpriseControlError = nil
+
+        guard let enterpriseInstallationId = Int(enterpriseInstallationId) else {
+            enterpriseControlError = "Enter or find the enterprise installation ID first."
+            return
+        }
+        guard let keyData = lookupPrivateKeyData else {
+            enterpriseControlError = "Import the GitHub App private key before loading organizations."
+            return
+        }
+
+        enterpriseControlInFlight = true
+        Task {
+            do {
+                let organizations = try await viewModel.listEnterpriseInstallableOrganizations(
+                    enterpriseSlug: enterpriseSlug,
+                    enterpriseInstallationId: enterpriseInstallationId,
+                    appId: appId,
+                    privateKeyData: keyData
+                )
+                enterpriseOrganizations = organizations
+                if let current = organizations.first(where: {
+                    $0.login.localizedCaseInsensitiveCompare(name.trimmingCharacters(in: .whitespacesAndNewlines))
+                        == .orderedSame
+                }) {
+                    selectedEnterpriseOrganizationIDs.insert(current.id)
+                }
+                enterpriseControlMessage = "Loaded \(organizations.count) enterprise-owned organization(s)."
+            } catch {
+                enterpriseControlError = error.localizedDescription
+            }
+            enterpriseControlInFlight = false
+        }
+    }
+
+    private func installEnterpriseAppOnSelectedOrganizations() {
+        enterpriseControlMessage = nil
+        enterpriseControlError = nil
+
+        guard let enterpriseInstallationId = Int(enterpriseInstallationId) else {
+            enterpriseControlError = "Enter or find the enterprise installation ID first."
+            return
+        }
+        guard let keyData = lookupPrivateKeyData else {
+            enterpriseControlError = "Import the GitHub App private key before installing the app."
+            return
+        }
+
+        let selectedOrganizations = enterpriseOrganizations.filter {
+            selectedEnterpriseOrganizationIDs.contains($0.id)
+        }
+        let repositories = parsedEnterpriseRepositories
+
+        enterpriseControlInFlight = true
+        Task {
+            do {
+                var installedCount = 0
+                var currentOrganizationInstallationId: Int?
+                for organization in selectedOrganizations {
+                    let installation = try await viewModel.installEnterpriseGitHubApp(
+                        enterpriseSlug: enterpriseSlug,
+                        organizationName: organization.login,
+                        enterpriseInstallationId: enterpriseInstallationId,
+                        appId: appId,
+                        clientId: enterpriseClientId,
+                        privateKeyData: keyData,
+                        repositorySelection: enterpriseRepositorySelection,
+                        repositories: repositories
+                    )
+                    installedCount += 1
+                    if organization.login.localizedCaseInsensitiveCompare(
+                        name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ) == .orderedSame {
+                        currentOrganizationInstallationId = installation.id
+                    }
+                }
+                if let currentOrganizationInstallationId {
+                    installationId = "\(currentOrganizationInstallationId)"
+                }
+                enterpriseControlMessage =
+                    "Installed or updated \(installedCount) organization(s).\(currentOrganizationInstallationId == nil ? "" : " Updated the organization installation ID above.")"
+            } catch {
+                enterpriseControlError = error.localizedDescription
+            }
+            enterpriseControlInFlight = false
+        }
+    }
+
+    private var parsedEnterpriseRepositories: [String] {
+        enterpriseRepositoryList
+            .split { $0 == "," || $0 == "\n" }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private var lookupPrivateKeyData: Data? {

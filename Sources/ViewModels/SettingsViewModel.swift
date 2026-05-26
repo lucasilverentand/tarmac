@@ -94,6 +94,66 @@ final class SettingsViewModel {
         )
     }
 
+    func findEnterpriseInstallationId(
+        enterpriseSlug: String,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> Int {
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+        return try await engine.enterpriseInstallationId(
+            enterpriseSlug: enterpriseSlug,
+            appId: appId,
+            privateKeyData: privateKeyData
+        )
+    }
+
+    func listEnterpriseInstallableOrganizations(
+        enterpriseSlug: String,
+        enterpriseInstallationId: Int,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> [EnterpriseInstallableOrganization] {
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+        return try await engine.listEnterpriseInstallableOrganizations(
+            enterpriseSlug: enterpriseSlug,
+            enterpriseInstallationId: enterpriseInstallationId,
+            appId: appId,
+            privateKeyData: privateKeyData
+        )
+    }
+
+    func installEnterpriseGitHubApp(
+        enterpriseSlug: String,
+        organizationName: String,
+        enterpriseInstallationId: Int,
+        appId: String,
+        clientId: String,
+        privateKeyData: Data,
+        repositorySelection: EnterpriseGitHubAppInstallRepositorySelection,
+        repositories: [String]
+    ) async throws -> EnterpriseOrganizationInstallation {
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+        return try await engine.installEnterpriseGitHubApp(
+            enterpriseSlug: enterpriseSlug,
+            organizationName: organizationName,
+            enterpriseInstallationId: enterpriseInstallationId,
+            appId: appId,
+            clientId: clientId,
+            privateKeyData: privateKeyData,
+            repositorySelection: repositorySelection,
+            repositories: repositories
+        )
+    }
+
     // MARK: - VM Configuration
 
     var vmConfiguration: VMConfiguration {

@@ -10,15 +10,29 @@ actor TokenManager {
     }
 
     func installationToken(for org: Organization, privateKeyData: Data) async throws -> String {
-        if let cached = cachedTokens[org.installationId], !cached.isExpiringSoon {
+        try await installationToken(
+            installationId: org.installationId,
+            appId: org.appId,
+            privateKeyData: privateKeyData,
+            logSubject: org.name
+        )
+    }
+
+    func installationToken(
+        installationId: Int,
+        appId: String,
+        privateKeyData: Data,
+        logSubject: String
+    ) async throws -> String {
+        if let cached = cachedTokens[installationId], !cached.isExpiringSoon {
             return cached.token
         }
 
-        let jwt = try generateJWT(appId: org.appId, privateKeyData: privateKeyData)
+        let jwt = try generateJWT(appId: appId, privateKeyData: privateKeyData)
 
         let response: InstallationTokenResponse = try await client.request(
             method: "POST",
-            path: "/app/installations/\(org.installationId)/access_tokens",
+            path: "/app/installations/\(installationId)/access_tokens",
             body: nil as String?,
             headers: ["Authorization": "Bearer \(jwt)"],
             timeoutInterval: 30
@@ -28,9 +42,9 @@ actor TokenManager {
             token: response.token,
             expiresAt: response.expiresAt
         )
-        cachedTokens[org.installationId] = tokenInfo
+        cachedTokens[installationId] = tokenInfo
 
-        Log.token.info("Obtained installation token for \(org.name) (installation \(org.installationId))")
+        Log.token.info("Obtained installation token for \(logSubject) (installation \(installationId))")
         return response.token
     }
 

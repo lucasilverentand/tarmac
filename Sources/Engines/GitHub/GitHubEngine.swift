@@ -88,6 +88,149 @@ actor GitHubEngine {
         return response.id
     }
 
+    func enterpriseInstallationId(
+        enterpriseSlug: String,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> Int {
+        struct InstallationResponse: Decodable, Sendable {
+            let id: Int
+        }
+
+        let enterprise = enterpriseSlug.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !enterprise.isEmpty else {
+            throw GitHubInstallationDiscoveryError.missingEnterpriseSlug
+        }
+
+        let jwt = try await tokenManager.appJWT(appId: appId, privateKeyData: privateKeyData)
+        let response: InstallationResponse = try await client.request(
+            method: "GET",
+            path: "/enterprises/\(enterprise)/installation",
+            body: nil,
+            headers: enterpriseControlPlaneHeaders(token: jwt),
+            timeoutInterval: 30
+        )
+        return response.id
+    }
+
+    func listEnterpriseInstallableOrganizations(
+        enterpriseSlug: String,
+        enterpriseInstallationId: Int,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> [EnterpriseInstallableOrganization] {
+        let enterprise = try normalizedEnterpriseSlug(enterpriseSlug)
+        let token = try await enterpriseInstallationToken(
+            enterpriseSlug: enterprise,
+            enterpriseInstallationId: enterpriseInstallationId,
+            appId: appId,
+            privateKeyData: privateKeyData
+        )
+        var organizations: [EnterpriseInstallableOrganization] = []
+        var page = 1
+
+        while true {
+            let pageOrganizations: [EnterpriseInstallableOrganization] = try await client.request(
+                method: "GET",
+                path: "/enterprises/\(enterprise)/apps/installable_organizations?per_page=100&page=\(page)",
+                body: nil,
+                headers: enterpriseControlPlaneHeaders(token: token),
+                timeoutInterval: 30
+            )
+            organizations.append(contentsOf: pageOrganizations)
+
+            if pageOrganizations.count < 100 {
+                break
+            }
+            page += 1
+        }
+
+        return organizations
+    }
+
+    func installEnterpriseGitHubApp(
+        enterpriseSlug: String,
+        organizationName: String,
+        enterpriseInstallationId: Int,
+        appId: String,
+        clientId: String,
+        privateKeyData: Data,
+        repositorySelection: EnterpriseGitHubAppInstallRepositorySelection,
+        repositories: [String]
+    ) async throws -> EnterpriseOrganizationInstallation {
+        let enterprise = try normalizedEnterpriseSlug(enterpriseSlug)
+        let org = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !org.isEmpty else {
+            throw GitHubInstallationDiscoveryError.missingOrganizationName
+        }
+        let trimmedClientId = clientId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedClientId.isEmpty else {
+            throw GitHubEnterpriseControlPlaneError.missingClientId
+        }
+        if repositorySelection == .selected && repositories.isEmpty {
+            throw GitHubEnterpriseControlPlaneError.missingRepositories
+        }
+
+        struct InstallRequest: Encodable, Sendable {
+            let clientId: String
+            let repositorySelection: String
+            let repositories: [String]?
+
+            enum CodingKeys: String, CodingKey {
+                case clientId = "client_id"
+                case repositorySelection = "repository_selection"
+                case repositories
+            }
+        }
+
+        let token = try await enterpriseInstallationToken(
+            enterpriseSlug: enterprise,
+            enterpriseInstallationId: enterpriseInstallationId,
+            appId: appId,
+            privateKeyData: privateKeyData
+        )
+        return try await client.request(
+            method: "POST",
+            path: "/enterprises/\(enterprise)/apps/organizations/\(org)/installations",
+            body: InstallRequest(
+                clientId: trimmedClientId,
+                repositorySelection: repositorySelection.rawValue,
+                repositories: repositorySelection == .selected ? repositories : nil
+            ),
+            headers: enterpriseControlPlaneHeaders(token: token),
+            timeoutInterval: 30
+        )
+    }
+
+    private func enterpriseInstallationToken(
+        enterpriseSlug: String,
+        enterpriseInstallationId: Int,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> String {
+        try await tokenManager.installationToken(
+            installationId: enterpriseInstallationId,
+            appId: appId,
+            privateKeyData: privateKeyData,
+            logSubject: enterpriseSlug
+        )
+    }
+
+    private func normalizedEnterpriseSlug(_ enterpriseSlug: String) throws -> String {
+        let enterprise = enterpriseSlug.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !enterprise.isEmpty else {
+            throw GitHubInstallationDiscoveryError.missingEnterpriseSlug
+        }
+        return enterprise
+    }
+
+    private func enterpriseControlPlaneHeaders(token: String) -> [String: String] {
+        [
+            "Authorization": "Bearer \(token)",
+            "X-GitHub-Api-Version": "2026-03-10",
+        ]
+    }
+
     func generateJITConfig(for org: Organization, runnerName: String) async throws -> String {
         let token = try await authorizationToken(for: org)
         return try await runnerProvider.generateJITConfig(
@@ -224,10 +367,24 @@ enum GitHubEnterpriseTokenError: Error, LocalizedError, Sendable {
 
 enum GitHubInstallationDiscoveryError: Error, LocalizedError, Sendable {
     case missingOrganizationName
+    case missingEnterpriseSlug
 
     var errorDescription: String? {
         switch self {
         case .missingOrganizationName: "Enter the organization name before finding the installation."
+        case .missingEnterpriseSlug: "Enter the enterprise slug before using the enterprise setup path."
+        }
+    }
+}
+
+enum GitHubEnterpriseControlPlaneError: Error, LocalizedError, Sendable {
+    case missingClientId
+    case missingRepositories
+
+    var errorDescription: String? {
+        switch self {
+        case .missingClientId: "Enter the GitHub App Client ID before installing it into organizations."
+        case .missingRepositories: "Enter at least one repository when repository access is set to selected."
         }
     }
 }
