@@ -190,6 +190,25 @@ final class SettingsViewModel {
         }
     }
 
+    var vmControlConfiguration: VMControlConfiguration {
+        get { configStore.vmControlConfiguration }
+        set {
+            var updated = newValue
+            if updated.isEnabled {
+                updated.ensureAuthToken()
+            }
+            configStore.vmControlConfiguration = updated
+            configStore.save()
+        }
+    }
+
+    func rotateVMControlToken() {
+        var configuration = configStore.vmControlConfiguration
+        configuration.rotateAuthToken()
+        configStore.vmControlConfiguration = configuration
+        configStore.save()
+    }
+
     var keepInstallerAfterVerification: Bool {
         get { configStore.keepInstallerAfterVerification }
         set {

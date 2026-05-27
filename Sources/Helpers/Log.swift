@@ -15,4 +15,5 @@ enum Log {
     static let config = Logger(subsystem: subsystem, category: "config")
     static let runner = Logger(subsystem: subsystem, category: "runner")
     static let cache = Logger(subsystem: subsystem, category: "cache")
+    static let vmControl = Logger(subsystem: subsystem, category: "vm-control")
 }

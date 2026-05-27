@@ -12,6 +12,7 @@ final class ConfigStore {
     var cacheConfig: CacheConfiguration = CacheConfiguration()
     var warmRunnerConfig: WarmRunnerConfiguration = WarmRunnerConfiguration()
     var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration = DiagnosticsRetentionConfiguration()
+    var vmControlConfiguration: VMControlConfiguration = VMControlConfiguration()
     var keepInstallerAfterVerification: Bool = false
     var storageDirectoryPath: String = ""
     var baseImagePath: String = ""
@@ -317,6 +318,9 @@ final class ConfigStore {
         if let data = try? JSONEncoder().encode(diagnosticsRetentionConfig) {
             defaults.set(data, forKey: "diagnosticsRetentionConfiguration")
         }
+        if let data = try? JSONEncoder().encode(vmControlConfiguration) {
+            defaults.set(data, forKey: "vmControlConfiguration")
+        }
         defaults.set(keepInstallerAfterVerification, forKey: "keepInstallerAfterVerification")
         defaults.set(storageDirectoryPath, forKey: "storageDirectoryPath")
         defaults.set(baseImagePath, forKey: "baseImagePath")
@@ -357,6 +361,11 @@ final class ConfigStore {
             let config = try? JSONDecoder().decode(DiagnosticsRetentionConfiguration.self, from: data)
         {
             diagnosticsRetentionConfig = config
+        }
+        if let data = defaults.data(forKey: "vmControlConfiguration"),
+            let config = try? JSONDecoder().decode(VMControlConfiguration.self, from: data)
+        {
+            vmControlConfiguration = config
         }
         keepInstallerAfterVerification = defaults.bool(forKey: "keepInstallerAfterVerification")
         storageDirectoryPath = defaults.string(forKey: "storageDirectoryPath") ?? ""

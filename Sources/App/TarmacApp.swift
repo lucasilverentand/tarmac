@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct TarmacApp: App {
+    @NSApplicationDelegateAdaptor(TarmacAppDelegate.self) private var appDelegate
     @State private var appState = AppState()
 
     @Environment(\.openWindow) private var openWindow
@@ -23,7 +24,9 @@ struct TarmacApp: App {
                 vmStatusViewModel: appState.vmStatusViewModel
             )
             .task {
+                appDelegate.appState = appState
                 await appState.start()
+                appState.syncVMControlServer()
             }
         }
         .menuBarExtraStyle(.window)
@@ -53,6 +56,24 @@ struct TarmacApp: App {
         .windowResizability(.contentMinSize)
     }
 
+}
+
+@MainActor
+final class TarmacAppDelegate: NSObject, NSApplicationDelegate {
+    weak var appState: AppState?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        guard let appState else { return }
+        let semaphore = DispatchSemaphore(value: 0)
+        Task { @MainActor in
+            await appState.shutdownForTermination()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 30)
+    }
+}
+
+extension TarmacApp {
     private func centerDashboard() {
         DispatchQueue.main.async {
             guard
