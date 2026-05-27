@@ -108,11 +108,34 @@ struct ConfigStoreTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    @Test("Save and load warm runner configuration")
+    func warmRunnerConfigRoundTrip() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+
+        let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
+        store1.warmRunnerConfig = WarmRunnerConfiguration(
+            isEnabled: true,
+            idleShutdownSeconds: 1_200,
+            maxConsecutiveJobs: 5
+        )
+        store1.save()
+
+        let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
+        #expect(store2.warmRunnerConfig.isEnabled)
+        #expect(store2.warmRunnerConfig.idleShutdownSeconds == 1_200)
+        #expect(store2.warmRunnerConfig.maxConsecutiveJobs == 5)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("Default values are set")
     func defaultValues() {
         let (store, defaults) = makeStore()
 
         #expect(store.organizations.isEmpty)
+        #expect(!store.warmRunnerConfig.isEnabled)
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)

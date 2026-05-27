@@ -78,6 +78,31 @@ struct CacheSettingsView: View {
                 }
             }
 
+            Section("Warm Runner") {
+                Toggle("Keep VM running between jobs", isOn: $viewModel.warmRunnerConfig.isEnabled)
+
+                if viewModel.warmRunnerConfig.isEnabled {
+                    Stepper(
+                        "Idle shutdown: \(viewModel.warmRunnerConfig.idleShutdownSeconds / 60) min",
+                        value: $viewModel.warmRunnerConfig.idleShutdownSeconds,
+                        in: 60...7_200,
+                        step: 60
+                    )
+
+                    Stepper(
+                        "Recycle after: \(warmRunnerRecycleLabel)",
+                        value: $viewModel.warmRunnerConfig.maxConsecutiveJobs,
+                        in: 0...100
+                    )
+
+                    Text(
+                        "When enabled, Tarmac reuses the same booted VM for back-to-back jobs instead of cloning and booting a fresh VM each time. The guest runner waits in the warm directory at \(GuestBootstrapContract.sharedMountPoint) for the next job."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
+            }
+
             Section("Diagnostics") {
                 Toggle(
                     "Keep full logs for successful jobs",

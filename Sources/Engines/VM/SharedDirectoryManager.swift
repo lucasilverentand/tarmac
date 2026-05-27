@@ -55,6 +55,91 @@ struct SharedDirectoryManager: Sendable {
         Log.vm.info("Cleaned up shared directory for job \(jobId)")
     }
 
+    var warmRunnerDirectory: URL {
+        jobsDirectory.appendingPathComponent(GuestBootstrapContract.warmRunnerJobDirectoryName, isDirectory: true)
+    }
+
+    func prepareWarmRunnerJob(
+        jobId: Int64,
+        runnerPath: URL,
+        jitConfig: String,
+        signingInjection: AppleSigningInjection? = nil
+    ) throws -> URL {
+        let jobDir = warmRunnerDirectory
+        let fm = FileManager.default
+
+        try validateRunner(at: runnerPath, fileManager: fm)
+        guard !jitConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SharedDirectoryError.emptyJITConfig
+        }
+
+        try fm.createDirectory(at: jobDir, withIntermediateDirectories: true)
+        try clearWarmRunnerJobArtifacts(in: jobDir, fileManager: fm)
+
+        let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
+        if fm.fileExists(atPath: runnerDestination.path) {
+            try fm.removeItem(at: runnerDestination)
+        }
+        try fm.copyItem(at: runnerPath, to: runnerDestination)
+
+        let jitConfigPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
+        try jitConfig.write(to: jitConfigPath, atomically: true, encoding: .utf8)
+
+        if let signingInjection {
+            try writeSigningInjection(signingInjection, in: jobDir, fileManager: fm)
+        } else {
+            let signingDir = jobDir.appendingPathComponent(
+                GuestBootstrapContract.appleSigningDirectoryName,
+                isDirectory: true
+            )
+            if fm.fileExists(atPath: signingDir.path) {
+                try fm.removeItem(at: signingDir)
+            }
+        }
+
+        try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
+
+        Log.vm.info("Warm runner shared directory prepared for job \(jobId) at \(jobDir.path)")
+        return jobDir
+    }
+
+    func enableWarmMode(in directory: URL) throws {
+        let warmModeURL = directory.appendingPathComponent(GuestBootstrapContract.warmModeFileName)
+        try "1\n".write(to: warmModeURL, atomically: true, encoding: .utf8)
+    }
+
+    func signalJobReady(in directory: URL) throws {
+        let jobReadyURL = directory.appendingPathComponent(GuestBootstrapContract.jobReadyFileName)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: jobReadyURL.path) {
+            try fm.removeItem(at: jobReadyURL)
+        }
+        fm.createFile(atPath: jobReadyURL.path, contents: Data())
+    }
+
+    func requestWarmShutdown(in directory: URL) throws {
+        let shutdownURL = directory.appendingPathComponent(GuestBootstrapContract.warmShutdownFileName)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: shutdownURL.path) {
+            try fm.removeItem(at: shutdownURL)
+        }
+        fm.createFile(atPath: shutdownURL.path, contents: Data())
+    }
+
+    func clearWarmRunnerJobArtifacts(in directory: URL, fileManager: FileManager = .default) throws {
+        for fileName in [
+            GuestBootstrapContract.completionMarkerFileName,
+            GuestBootstrapContract.exitCodeFileName,
+            GuestBootstrapContract.jobReadyFileName,
+            GuestBootstrapContract.warmShutdownFileName,
+        ] {
+            let url = directory.appendingPathComponent(fileName)
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+        }
+    }
+
     // MARK: - Paths
 
     private var jobsDirectory: URL {

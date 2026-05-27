@@ -174,6 +174,14 @@ final class SettingsViewModel {
         }
     }
 
+    var warmRunnerConfig: WarmRunnerConfiguration {
+        get { configStore.warmRunnerConfig }
+        set {
+            configStore.warmRunnerConfig = newValue
+            configStore.save()
+        }
+    }
+
     var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration {
         get { configStore.diagnosticsRetentionConfig }
         set {

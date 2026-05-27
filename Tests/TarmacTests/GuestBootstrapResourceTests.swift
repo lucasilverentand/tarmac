@@ -70,6 +70,11 @@ struct GuestBootstrapResourceTests {
         #expect(contents.contains("exit-code"))
         #expect(contents.contains("completion.json"))
         #expect(contents.contains("/sbin/shutdown -h now"))
+        #expect(contents.contains("run_warm_loop"))
+        #expect(contents.contains("warm-mode"))
+        #expect(contents.contains("job-ready"))
+        #expect(contents.contains("warm-shutdown"))
+        #expect(contents.contains("TARMAC_SKIP_SHUTDOWN=1"))
     }
 
     private func resourceDirectory() -> URL {

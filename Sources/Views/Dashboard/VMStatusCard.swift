@@ -98,7 +98,7 @@ struct VMStatusCard: View {
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(vmStatusViewModel.activeVM == nil ? "Idle" : "Running")
+                Text(vmHeroStatusTitle)
                     .font(.headline)
 
                 Text(readinessSubtitle)
