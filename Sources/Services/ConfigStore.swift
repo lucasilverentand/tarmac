@@ -10,6 +10,7 @@ final class ConfigStore {
     private(set) var appleSigningAssets: [AppleSigningAsset] = []
     var vmConfiguration: VMConfiguration = VMConfiguration()
     var cacheConfig: CacheConfiguration = CacheConfiguration()
+    var warmRunnerConfig: WarmRunnerConfiguration = WarmRunnerConfiguration()
     var diagnosticsRetentionConfig: DiagnosticsRetentionConfiguration = DiagnosticsRetentionConfiguration()
     var keepInstallerAfterVerification: Bool = false
     var storageDirectoryPath: String = ""
@@ -310,6 +311,9 @@ final class ConfigStore {
         if let data = try? JSONEncoder().encode(cacheConfig) {
             defaults.set(data, forKey: "cacheConfiguration")
         }
+        if let data = try? JSONEncoder().encode(warmRunnerConfig) {
+            defaults.set(data, forKey: "warmRunnerConfiguration")
+        }
         if let data = try? JSONEncoder().encode(diagnosticsRetentionConfig) {
             defaults.set(data, forKey: "diagnosticsRetentionConfiguration")
         }
@@ -343,6 +347,11 @@ final class ConfigStore {
             let config = try? JSONDecoder().decode(CacheConfiguration.self, from: data)
         {
             cacheConfig = config
+        }
+        if let data = defaults.data(forKey: "warmRunnerConfiguration"),
+            let config = try? JSONDecoder().decode(WarmRunnerConfiguration.self, from: data)
+        {
+            warmRunnerConfig = config
         }
         if let data = defaults.data(forKey: "diagnosticsRetentionConfiguration"),
             let config = try? JSONDecoder().decode(DiagnosticsRetentionConfiguration.self, from: data)

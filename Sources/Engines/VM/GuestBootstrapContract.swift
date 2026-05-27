@@ -19,4 +19,9 @@ enum GuestBootstrapContract {
     static let exitCodeFileName = "exit-code"
     static let completionMarkerFileName = "completion.json"
     static let cacheEnvironmentFileName = "cache-env"
+
+    static let warmRunnerJobDirectoryName = "_warm"
+    static let warmModeFileName = "warm-mode"
+    static let jobReadyFileName = "job-ready"
+    static let warmShutdownFileName = "warm-shutdown"
 }

@@ -15,12 +15,18 @@ final class VMEngine: VMManagerProtocol {
     private var diagnosticsStore: DiagnosticsBundleStore
 
     private(set) var currentInstance: VMInstance?
+    private(set) var warmRunnerState: WarmRunnerState?
     private(set) var verificationState: BaseImageVerificationState = .notStarted
     private var cacheConfig: CacheConfiguration
+    private var warmRunnerConfig: WarmRunnerConfiguration = WarmRunnerConfiguration()
     private var diagnosticsContexts: [Int64: JobDiagnosticsContext] = [:]
     private var diagnosticsBundleURLs: [Int64: URL] = [:]
 
     var isRunning: Bool { currentInstance?.state == .running }
+
+    var hasWarmRunner: Bool {
+        warmRunnerState != nil && lifecycle.isBooted
+    }
 
     var baseImageExists: Bool {
         FileManager.default.fileExists(atPath: baseImageURL.path)
@@ -352,6 +358,34 @@ final class VMEngine: VMManagerProtocol {
             throw VMEngineError.missingJITConfig
         }
 
+        let sourceImagePath = baseImageURL(for: overrideBaseImagePath).path
+        if warmRunnerConfig.isEnabled,
+            let warmState = warmRunnerState,
+            canReuseWarmRunner(config: config, baseImagePath: sourceImagePath, warmState: warmState)
+        {
+            return try await reuseWarmRunner(
+                job: job,
+                runnerPath: runnerPath,
+                jitConfig: jitConfig,
+                signingInjection: signingInjection,
+                warmState: warmState
+            )
+        }
+
+        if warmRunnerConfig.isEnabled {
+            if warmRunnerState != nil {
+                try await releaseWarmRunner()
+            }
+            return try await provisionWarmRunner(
+                job: job,
+                config: config,
+                runnerPath: runnerPath,
+                jitConfig: jitConfig,
+                baseImagePath: overrideBaseImagePath,
+                signingInjection: signingInjection
+            )
+        }
+
         let sharedDir = try sharedDirManager.prepareForJob(
             jobId: job.id,
             runnerPath: runnerPath,
@@ -383,7 +417,7 @@ final class VMEngine: VMManagerProtocol {
         timeoutSeconds: Int,
         pollIntervalSeconds: TimeInterval = 2
     ) async throws -> JobResult {
-        let sharedDirectory = storage.jobsDirectory.appendingPathComponent("\(jobId)", isDirectory: true)
+        let sharedDirectory = sharedDirectory(forJobId: jobId)
         let markerURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName)
         let exitCodeURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.exitCodeFileName)
         let timeout = max(1, timeoutSeconds)
@@ -417,13 +451,34 @@ final class VMEngine: VMManagerProtocol {
         return .failure(reason)
     }
 
-    func teardown(outcome: JobDiagnosticsOutcome = .unknown()) async throws {
+    func teardown(
+        outcome: JobDiagnosticsOutcome = .unknown(),
+        policy: VMTeardownPolicy = .full
+    ) async throws {
         let diskPath = currentInstance?.diskImagePath
         let jobId = currentInstance?.jobId
-        let sharedDirectory = jobId.map { storage.jobsDirectory.appendingPathComponent("\($0)", isDirectory: true) }
+        let sharedDirectory = jobId.map { sharedDirectory(forJobId: $0) }
+
+        if policy == .keepWarmRunner, warmRunnerConfig.isEnabled, warmRunnerState != nil {
+            if let jobId, let sharedDirectory {
+                updateDiagnosticsContext(jobId: jobId) { context in
+                    context.completedAt = Date()
+                }
+                preserveDiagnosticsIfNeeded(jobId: jobId, sharedDirectory: sharedDirectory, outcome: outcome)
+                try? sharedDirManager.clearWarmRunnerJobArtifacts(in: sharedDirectory)
+                appendHostLifecycle("Teardown kept warm runner running", jobId: jobId, sharedDirectory: sharedDirectory)
+            }
+            warmRunnerState?.lastActivityAt = Date()
+            Log.vm.info("Warm runner kept running after job \(jobId.map(String.init) ?? "unknown")")
+            return
+        }
+
+        if let warmDirectory = warmRunnerState?.sharedDirectory {
+            try? sharedDirManager.requestWarmShutdown(in: warmDirectory)
+        }
 
         if let jobId, let sharedDirectory {
-            appendHostLifecycle("Teardown requested", jobId: jobId, sharedDirectory: sharedDirectory)
+            appendHostLifecycle("Teardown requested (full)", jobId: jobId, sharedDirectory: sharedDirectory)
         }
         do {
             try await stopVM()
@@ -461,18 +516,27 @@ final class VMEngine: VMManagerProtocol {
             try diskManager.deleteDisk(at: diskPath)
         }
 
-        if let jobId {
+        if let jobId, warmRunnerState == nil {
             try sharedDirManager.cleanupJob(jobId: jobId)
         }
 
         currentInstance = nil
+        warmRunnerState = nil
         Log.vm.info("VM teardown complete")
+    }
+
+    func releaseWarmRunner() async throws {
+        try await teardown(policy: .full)
     }
 
     // MARK: - Cache
 
     func updateCacheConfig(_ config: CacheConfiguration) {
         self.cacheConfig = config
+    }
+
+    func updateWarmRunnerConfig(_ config: WarmRunnerConfiguration) {
+        warmRunnerConfig = config
     }
 
     func updateDiagnosticsRetentionConfig(_ config: DiagnosticsRetentionConfiguration) {
@@ -608,6 +672,109 @@ final class VMEngine: VMManagerProtocol {
         return URL(fileURLWithPath: overridePath)
     }
 
+
+    private func sharedDirectory(forJobId jobId: Int64) -> URL {
+        if warmRunnerConfig.isEnabled, warmRunnerState != nil {
+            return sharedDirManager.warmRunnerDirectory
+        }
+        return storage.jobsDirectory.appendingPathComponent("\(jobId)", isDirectory: true)
+    }
+
+    private func canReuseWarmRunner(
+        config: VMConfiguration,
+        baseImagePath: String,
+        warmState: WarmRunnerState
+    ) -> Bool {
+        guard lifecycle.isBooted else { return false }
+        guard warmState.vmConfiguration == config else { return false }
+        guard warmState.baseImagePath == baseImagePath else { return false }
+        guard !warmRunnerConfig.shouldRecycleWarmRunner(jobsServed: warmState.jobsServed) else { return false }
+        return true
+    }
+
+    private func provisionWarmRunner(
+        job: RunnerJob,
+        config: VMConfiguration,
+        runnerPath: URL,
+        jitConfig: String,
+        baseImagePath overrideBaseImagePath: String?,
+        signingInjection: AppleSigningInjection?
+    ) async throws -> VMInstance {
+        let sharedDir = try sharedDirManager.prepareWarmRunnerJob(
+            jobId: job.id,
+            runnerPath: runnerPath,
+            jitConfig: jitConfig,
+            signingInjection: signingInjection
+        )
+        try sharedDirManager.enableWarmMode(in: sharedDir)
+        diagnosticsContexts[job.id] = JobDiagnosticsContext(job: job, runnerName: job.runnerName)
+        appendHostLifecycle(
+            "Prepared warm runner shared directory with runner \(runnerPath.lastPathComponent)",
+            jobId: job.id,
+            sharedDirectory: sharedDir
+        )
+
+        do {
+            let instance = try await bootVM(
+                for: job.id,
+                config: config,
+                sharedDirectory: sharedDir,
+                baseImagePath: overrideBaseImagePath
+            )
+            warmRunnerState = WarmRunnerState(
+                instanceId: instance.id,
+                sharedDirectory: sharedDir,
+                vmConfiguration: config,
+                baseImagePath: baseImageURL(for: overrideBaseImagePath).path,
+                jobsServed: 0,
+                lastActivityAt: Date()
+            )
+            try sharedDirManager.signalJobReady(in: sharedDir)
+            appendHostLifecycle("Signaled warm runner job ready", jobId: job.id, sharedDirectory: sharedDir)
+            return instance
+        } catch {
+            try? FileManager.default.removeItem(at: sharedDir)
+            warmRunnerState = nil
+            throw error
+        }
+    }
+
+    private func reuseWarmRunner(
+        job: RunnerJob,
+        runnerPath: URL,
+        jitConfig: String,
+        signingInjection: AppleSigningInjection?,
+        warmState: WarmRunnerState
+    ) async throws -> VMInstance {
+        let sharedDir = try sharedDirManager.prepareWarmRunnerJob(
+            jobId: job.id,
+            runnerPath: runnerPath,
+            jitConfig: jitConfig,
+            signingInjection: signingInjection
+        )
+        diagnosticsContexts[job.id] = JobDiagnosticsContext(job: job, runnerName: job.runnerName)
+        appendHostLifecycle(
+            "Reusing warm runner VM for job \(job.id)",
+            jobId: job.id,
+            sharedDirectory: sharedDir
+        )
+
+        guard var instance = currentInstance, instance.id == warmState.instanceId else {
+            throw VMEngineError.warmRunnerUnavailable
+        }
+
+        instance.jobId = job.id
+        instance.state = .running
+        currentInstance = instance
+        warmRunnerState?.jobsServed += 1
+        warmRunnerState?.lastActivityAt = Date()
+        warmRunnerState?.sharedDirectory = sharedDir
+
+        try sharedDirManager.signalJobReady(in: sharedDir)
+        appendHostLifecycle("Signaled warm runner job ready", jobId: job.id, sharedDirectory: sharedDir)
+        return instance
+    }
+
     private func prepareInventorySharedDirectory(_ sharedDirectory: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: sharedDirectory.path) {
@@ -653,6 +820,7 @@ enum VMEngineError: LocalizedError {
     case verificationFailed(reason: String)
     case unsuitableStorage(reason: String)
     case imageInventoryScanFailed(reason: String)
+    case warmRunnerUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -666,8 +834,24 @@ enum VMEngineError: LocalizedError {
             "Storage is not suitable for VM work: \(reason)"
         case .imageInventoryScanFailed(let reason):
             "Runner image inventory scan failed: \(reason)"
+        case .warmRunnerUnavailable:
+            "Warm runner VM is not available for reuse"
         }
     }
+}
+
+enum VMTeardownPolicy: Equatable, Sendable {
+    case full
+    case keepWarmRunner
+}
+
+struct WarmRunnerState: Equatable, Sendable {
+    let instanceId: UUID
+    var sharedDirectory: URL
+    let vmConfiguration: VMConfiguration
+    let baseImagePath: String
+    var jobsServed: Int
+    var lastActivityAt: Date
 }
 
 private extension VMEngine {

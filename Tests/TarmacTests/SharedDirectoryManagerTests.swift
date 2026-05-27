@@ -227,6 +227,28 @@ struct SharedDirectoryManagerTests {
         }
     }
 
+    @Test("prepareWarmRunnerJob writes warm mode and job-ready signaling files")
+    func prepareWarmRunnerJobWritesArtifacts() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try makeRunnerPackage(at: runnerDir)
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+        let warmDir = try manager.prepareWarmRunnerJob(
+            jobId: 99,
+            runnerPath: runnerDir,
+            jitConfig: "warm-config"
+        )
+        try manager.enableWarmMode(in: warmDir)
+        try manager.signalJobReady(in: warmDir)
+
+        #expect(warmDir.lastPathComponent == GuestBootstrapContract.warmRunnerJobDirectoryName)
+        #expect(FileManager.default.fileExists(atPath: warmDir.appendingPathComponent(GuestBootstrapContract.warmModeFileName).path))
+        #expect(FileManager.default.fileExists(atPath: warmDir.appendingPathComponent(GuestBootstrapContract.jobReadyFileName).path))
+    }
+
     private func makeRunnerPackage(at runnerDir: URL) throws {
         try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
         let runScript = runnerDir.appendingPathComponent("run.sh")

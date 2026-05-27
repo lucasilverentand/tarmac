@@ -237,6 +237,97 @@ run_runner() {
     return "$?"
 }
 
+write_job_result() {
+    local exit_code="$1"
+    if [[ -n "${EXIT_CODE_FILE}" ]]; then
+        echo "${exit_code}" > "${EXIT_CODE_FILE}"
+    fi
+    if [[ -n "${COMPLETION_MARKER_FILE}" ]]; then
+        printf '{"exitCode":%s,"completedAt":"%s"}\n' "${exit_code}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "${COMPLETION_MARKER_FILE}"
+    fi
+    log "Job finished with exit code ${exit_code}"
+}
+
+reset_job_artifacts() {
+    /bin/rm -f "${SHARED_MOUNT}/exit-code" "${SHARED_MOUNT}/completion.json" "${SHARED_MOUNT}/job-ready" 2>> "${LOCAL_LOG}" || true
+    : > "${RUNNER_LOG}"
+}
+
+warm_mode_enabled() {
+    [[ -f "${SHARED_MOUNT}/warm-mode" ]]
+}
+
+warm_shutdown_requested() {
+    [[ -f "${SHARED_MOUNT}/warm-shutdown" ]]
+}
+
+wait_for_job_ready() {
+    local timeout_seconds="${1:-86400}"
+    local deadline=$(( $(/bin/date +%s) + timeout_seconds ))
+
+    while [[ $(/bin/date +%s) -lt "${deadline}" ]]; do
+        if warm_shutdown_requested; then
+            log "Warm shutdown requested by host"
+            return 2
+        fi
+        if [[ -f "${SHARED_MOUNT}/job-ready" ]]; then
+            log "Host signaled job-ready"
+            return 0
+        fi
+        /bin/sleep 2
+    done
+
+    log "Timed out waiting for job-ready"
+    return 1
+}
+
+run_single_job() {
+    if ! validate_job_payload; then
+        return 12
+    fi
+
+    run_runner
+    local runner_exit_code="$?"
+    log "Runner exited with code ${runner_exit_code}"
+    write_job_result "${runner_exit_code}"
+    return "${runner_exit_code}"
+}
+
+run_warm_loop() {
+    log "Warm runner mode enabled"
+    export TARMAC_SKIP_SHUTDOWN=1
+
+    while true; do
+        reset_job_artifacts
+        wait_for_job_ready 86400
+        local wait_status="$?"
+        if [[ "${wait_status}" -eq 2 ]]; then
+            finish 0
+        fi
+        if [[ "${wait_status}" -ne 0 ]]; then
+            finish 14
+        fi
+
+        /bin/rm -f "${SHARED_MOUNT}/job-ready" 2>> "${LOCAL_LOG}" || true
+
+        if warm_shutdown_requested; then
+            finish 0
+        fi
+
+        if ! configure_apple_signing; then
+            write_job_result 13
+            continue
+        fi
+
+        run_single_job
+
+        if ! warm_mode_enabled; then
+            shutdown_guest
+            exit "$?"
+        fi
+    done
+}
+
 main() {
     log "Tarmac guest bootstrap starting"
 
@@ -250,17 +341,17 @@ main() {
 
     mount_optional_virtiofs "${CACHE_TAG}" "${CACHE_MOUNT}"
     configure_cache_paths
+
+    if warm_mode_enabled; then
+        run_warm_loop
+    fi
+
     if ! configure_apple_signing; then
         finish 13
     fi
 
-    if ! validate_job_payload; then
-        finish 12
-    fi
-
-    run_runner
+    run_single_job
     local runner_exit_code="$?"
-    log "Runner exited with code ${runner_exit_code}"
     finish "${runner_exit_code}"
 }
 

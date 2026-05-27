@@ -619,6 +619,36 @@ struct VMEngineTests {
         #expect(verifyClones.isEmpty)
     }
 
+    @Test("teardown with keepWarmRunner policy leaves VM booted")
+    @MainActor
+    func teardownKeepWarmRunnerLeavesVMBooted() async throws {
+        let (engine, mock, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        engine.updateWarmRunnerConfig(WarmRunnerConfiguration(isEnabled: true))
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try writeExecutableRunScript(in: runnerDir)
+
+        var job = TestFactories.makeJob(id: 88)
+        job.jitConfig = "jit"
+        _ = try await engine.provisionAndRun(
+            job: job,
+            config: VMConfiguration(),
+            runnerPath: runnerDir
+        )
+
+        #expect(mock.bootCallCount == 1)
+        try await engine.teardown(outcome: .succeeded, policy: .keepWarmRunner)
+        #expect(mock.stopCallCount == 0)
+        #expect(engine.hasWarmRunner)
+        #expect(engine.isRunning)
+
+        try await engine.releaseWarmRunner()
+        #expect(mock.stopCallCount == 1)
+        #expect(!engine.hasWarmRunner)
+    }
+
     @Test("baseImageReady requires both file presence and verified marker")
     @MainActor
     func baseImageReadyGating() throws {

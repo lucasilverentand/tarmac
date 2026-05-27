@@ -2,7 +2,7 @@ import Foundation
 
 struct VMInstance: Sendable {
     let id: UUID
-    let jobId: Int64
+    var jobId: Int64
     let diskImagePath: URL
     let startedAt: Date
     var state: VMState
