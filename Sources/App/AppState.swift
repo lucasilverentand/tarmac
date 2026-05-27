@@ -44,7 +44,6 @@ final class AppState {
     private var vmEngine: VMEngine?
     private var syncTask: Task<Void, Never>?
     private var completionMonitorTasks: [Int64: Task<Void, Never>] = [:]
-    private var warmRunnerIdleReleaseTask: Task<Void, Never>?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
     private let vmEngineFactory:
@@ -176,8 +175,6 @@ final class AppState {
     func stop() async {
         syncTask?.cancel()
         syncTask = nil
-        warmRunnerIdleReleaseTask?.cancel()
-        warmRunnerIdleReleaseTask = nil
         for task in completionMonitorTasks.values {
             task.cancel()
         }
@@ -188,9 +185,9 @@ final class AppState {
         }
         queueViewModel.stopPolling()
 
-        if let vmEngine, vmEngine.isRunning || vmEngine.hasWarmRunner {
+        if let vmEngine, vmEngine.isRunning {
             do {
-                try await vmEngine.releaseWarmRunner()
+                try await vmEngine.teardown()
             } catch {
                 Log.app.error("Failed to teardown VM on stop: \(error.localizedDescription)")
             }
@@ -397,8 +394,34 @@ final class AppState {
             await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
         }
         queueViewModel.updateJobStatus(id: job.id, status: result.jobStatus)
-        vmStatusViewModel.activeVM = nil
+        if !vmEngine.hasWarmRunner {
+            vmStatusViewModel.activeVM = nil
+        }
         completionMonitorTasks[job.id] = nil
+    }
+
+    private func scheduleWarmRunnerIdleRelease(using vmEngine: VMEngine) {
+        warmRunnerIdleReleaseTask?.cancel()
+        let idleSeconds = configStore.warmRunnerConfig.normalizedIdleShutdownSeconds
+        warmRunnerIdleReleaseTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(idleSeconds))
+            } catch {
+                return
+            }
+            guard let self, let vmEngine = self.vmEngine else { return }
+            guard vmEngine.hasWarmRunner else { return }
+            guard await self.queueEngine?.jobStore.activeJob == nil else { return }
+
+            Log.app.info("Releasing warm runner after \(idleSeconds)s idle")
+            do {
+                try await vmEngine.releaseWarmRunner()
+            } catch {
+                Log.app.error("Failed to release idle warm runner: \(error.localizedDescription)")
+            }
+            self.vmStatusViewModel.activeVM = nil
+            self.warmRunnerIdleReleaseTask = nil
+        }
     }
 
     // MARK: - Job Store Sync

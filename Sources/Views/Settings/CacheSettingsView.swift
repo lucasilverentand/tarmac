@@ -132,4 +132,10 @@ struct CacheSettingsView: View {
         }
         .formStyle(.grouped)
     }
+
+    private var warmRunnerRecycleLabel: String {
+        viewModel.warmRunnerConfig.maxConsecutiveJobs == 0
+            ? "never"
+            : "\(viewModel.warmRunnerConfig.maxConsecutiveJobs) jobs"
+    }
 }

@@ -457,16 +457,16 @@ final class VMEngine: VMManagerProtocol {
     ) async throws {
         let diskPath = currentInstance?.diskImagePath
         let jobId = currentInstance?.jobId
-        let sharedDirectory = jobId.map { sharedDirectory(forJobId: $0) }
+        let jobSharedDirectory = jobId.map { self.sharedDirectory(forJobId: $0) }
 
         if policy == .keepWarmRunner, warmRunnerConfig.isEnabled, warmRunnerState != nil {
             if let jobId, let sharedDirectory {
                 updateDiagnosticsContext(jobId: jobId) { context in
                     context.completedAt = Date()
                 }
-                preserveDiagnosticsIfNeeded(jobId: jobId, sharedDirectory: sharedDirectory, outcome: outcome)
-                try? sharedDirManager.clearWarmRunnerJobArtifacts(in: sharedDirectory)
-                appendHostLifecycle("Teardown kept warm runner running", jobId: jobId, sharedDirectory: sharedDirectory)
+                preserveDiagnosticsIfNeeded(jobId: jobId, sharedDirectory: jobSharedDirectory, outcome: outcome)
+                try? sharedDirManager.clearWarmRunnerJobArtifacts(in: jobSharedDirectory)
+                appendHostLifecycle("Teardown kept warm runner running", jobId: jobId, sharedDirectory: jobSharedDirectory)
             }
             warmRunnerState?.lastActivityAt = Date()
             Log.vm.info("Warm runner kept running after job \(jobId.map { String($0) } ?? "unknown")")
@@ -478,7 +478,7 @@ final class VMEngine: VMManagerProtocol {
         }
 
         if let jobId, let sharedDirectory {
-            appendHostLifecycle("Teardown requested (full)", jobId: jobId, sharedDirectory: sharedDirectory)
+            appendHostLifecycle("Teardown requested (full)", jobId: jobId, sharedDirectory: jobSharedDirectory)
         }
         do {
             try await stopVM()
@@ -487,11 +487,11 @@ final class VMEngine: VMManagerProtocol {
                 appendHostLifecycle(
                     "VM stop failed: \(error.localizedDescription)",
                     jobId: jobId,
-                    sharedDirectory: sharedDirectory
+                    sharedDirectory: jobSharedDirectory
                 )
                 preserveDiagnosticsIfNeeded(
                     jobId: jobId,
-                    sharedDirectory: sharedDirectory,
+                    sharedDirectory: jobSharedDirectory,
                     outcome: .failed(reason: "VM stop failed: \(error.localizedDescription)")
                 )
             }
@@ -501,15 +501,15 @@ final class VMEngine: VMManagerProtocol {
             updateDiagnosticsContext(jobId: jobId) { context in
                 context.completedAt = Date()
             }
-            appendHostLifecycle("VM stop completed", jobId: jobId, sharedDirectory: sharedDirectory)
+            appendHostLifecycle("VM stop completed", jobId: jobId, sharedDirectory: jobSharedDirectory)
             if let diskPath {
                 appendHostLifecycle(
                     "Deleting cloned disk \(diskPath.lastPathComponent)",
                     jobId: jobId,
-                    sharedDirectory: sharedDirectory
+                    sharedDirectory: jobSharedDirectory
                 )
             }
-            preserveDiagnosticsIfNeeded(jobId: jobId, sharedDirectory: sharedDirectory, outcome: outcome)
+            preserveDiagnosticsIfNeeded(jobId: jobId, sharedDirectory: jobSharedDirectory, outcome: outcome)
         }
 
         if let diskPath {
