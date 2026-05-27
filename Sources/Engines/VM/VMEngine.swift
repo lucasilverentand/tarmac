@@ -469,7 +469,7 @@ final class VMEngine: VMManagerProtocol {
                 appendHostLifecycle("Teardown kept warm runner running", jobId: jobId, sharedDirectory: sharedDirectory)
             }
             warmRunnerState?.lastActivityAt = Date()
-            Log.vm.info("Warm runner kept running after job \(jobId.map(String.init) ?? "unknown")")
+            Log.vm.info("Warm runner kept running after job \(jobId.map { String($0) } ?? "unknown")")
             return
         }
 
