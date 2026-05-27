@@ -139,6 +139,7 @@ final class AppState {
             configStore.diagnosticsRetentionConfig
         )
         self.vmEngine = vmEngine
+        vmEngine.updateWarmRunnerConfig(configStore.warmRunnerConfig)
         vmStatusViewModel.baseImageExists = vmEngine.baseImageExists
         vmStatusViewModel.baseImageVerified = vmEngine.baseImageVerified
         refreshReadiness()
@@ -175,6 +176,8 @@ final class AppState {
     func stop() async {
         syncTask?.cancel()
         syncTask = nil
+        warmRunnerIdleReleaseTask?.cancel()
+        warmRunnerIdleReleaseTask = nil
         for task in completionMonitorTasks.values {
             task.cancel()
         }
@@ -185,9 +188,9 @@ final class AppState {
         }
         queueViewModel.stopPolling()
 
-        if let vmEngine, vmEngine.isRunning {
+        if let vmEngine, vmEngine.isRunning || vmEngine.hasWarmRunner {
             do {
-                try await vmEngine.teardown()
+                try await vmEngine.releaseWarmRunner()
             } catch {
                 Log.app.error("Failed to teardown VM on stop: \(error.localizedDescription)")
             }
@@ -219,6 +222,9 @@ final class AppState {
                 await queueEngine.tryDispatch()
                 return
             }
+
+            warmRunnerIdleReleaseTask?.cancel()
+            warmRunnerIdleReleaseTask = nil
 
             // Update status to provisioning
             queueViewModel.updateJobStatus(id: job.id, status: .provisioning)
@@ -363,10 +369,21 @@ final class AppState {
                 .failed(reason: reason)
             }
 
+        let teardownPolicy: VMTeardownPolicy =
+            configStore.warmRunnerConfig.isEnabled ? .keepWarmRunner : .full
+
         do {
-            try await vmEngine.teardown(outcome: outcome)
+            try await vmEngine.teardown(outcome: outcome, policy: teardownPolicy)
         } catch {
             Log.app.error("Failed to teardown completed job \(job.id): \(error.localizedDescription)")
+        }
+
+        if teardownPolicy == .keepWarmRunner, vmEngine.hasWarmRunner {
+            scheduleWarmRunnerIdleRelease(using: vmEngine)
+            vmStatusViewModel.activeVM = vmEngine.currentInstance
+        } else {
+            warmRunnerIdleReleaseTask?.cancel()
+            warmRunnerIdleReleaseTask = nil
         }
 
         let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path
