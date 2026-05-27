@@ -44,6 +44,7 @@ final class AppState {
     private var vmEngine: VMEngine?
     private var syncTask: Task<Void, Never>?
     private var completionMonitorTasks: [Int64: Task<Void, Never>] = [:]
+    private var warmRunnerIdleReleaseTask: Task<Void, Never>?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
     private let vmEngineFactory:
