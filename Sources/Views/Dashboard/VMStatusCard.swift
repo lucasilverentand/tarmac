@@ -78,6 +78,14 @@ struct VMStatusCard: View {
         }
     }
 
+    private var vmHeroStatusTitle: String {
+        guard vmStatusViewModel.activeVM != nil else { return "Idle" }
+        if settingsViewModel.warmRunnerConfig.isEnabled {
+            return "Warm"
+        }
+        return "Running"
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Virtual Machine")
