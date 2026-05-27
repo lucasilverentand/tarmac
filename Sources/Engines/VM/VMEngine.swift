@@ -672,7 +672,6 @@ final class VMEngine: VMManagerProtocol {
         return URL(fileURLWithPath: overridePath)
     }
 
-
     private func sharedDirectory(forJobId jobId: Int64) -> URL {
         if warmRunnerConfig.isEnabled, warmRunnerState != nil {
             return sharedDirManager.warmRunnerDirectory
