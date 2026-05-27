@@ -245,8 +245,10 @@ struct SharedDirectoryManagerTests {
         try manager.signalJobReady(in: warmDir)
 
         #expect(warmDir.lastPathComponent == GuestBootstrapContract.warmRunnerJobDirectoryName)
-        #expect(FileManager.default.fileExists(atPath: warmDir.appendingPathComponent(GuestBootstrapContract.warmModeFileName).path))
-        #expect(FileManager.default.fileExists(atPath: warmDir.appendingPathComponent(GuestBootstrapContract.jobReadyFileName).path))
+        let warmModeURL = warmDir.appendingPathComponent(GuestBootstrapContract.warmModeFileName)
+        let jobReadyURL = warmDir.appendingPathComponent(GuestBootstrapContract.jobReadyFileName)
+        #expect(FileManager.default.fileExists(atPath: warmModeURL.path))
+        #expect(FileManager.default.fileExists(atPath: jobReadyURL.path))
     }
 
     private func makeRunnerPackage(at runnerDir: URL) throws {
