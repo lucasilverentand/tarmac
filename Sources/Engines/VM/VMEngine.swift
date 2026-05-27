@@ -460,13 +460,17 @@ final class VMEngine: VMManagerProtocol {
         let jobSharedDirectory = jobId.map { self.sharedDirectory(forJobId: $0) }
 
         if policy == .keepWarmRunner, warmRunnerConfig.isEnabled, warmRunnerState != nil {
-            if let jobId, let sharedDirectory {
+            if let jobId, let jobSharedDirectory {
                 updateDiagnosticsContext(jobId: jobId) { context in
                     context.completedAt = Date()
                 }
                 preserveDiagnosticsIfNeeded(jobId: jobId, sharedDirectory: jobSharedDirectory, outcome: outcome)
                 try? sharedDirManager.clearWarmRunnerJobArtifacts(in: jobSharedDirectory)
-                appendHostLifecycle("Teardown kept warm runner running", jobId: jobId, sharedDirectory: jobSharedDirectory)
+                appendHostLifecycle(
+                    "Teardown kept warm runner running",
+                    jobId: jobId,
+                    sharedDirectory: jobSharedDirectory
+                )
             }
             warmRunnerState?.lastActivityAt = Date()
             Log.vm.info("Warm runner kept running after job \(jobId.map { String($0) } ?? "unknown")")
@@ -477,13 +481,13 @@ final class VMEngine: VMManagerProtocol {
             try? sharedDirManager.requestWarmShutdown(in: warmDirectory)
         }
 
-        if let jobId, let sharedDirectory {
+        if let jobId, let jobSharedDirectory {
             appendHostLifecycle("Teardown requested (full)", jobId: jobId, sharedDirectory: jobSharedDirectory)
         }
         do {
             try await stopVM()
         } catch {
-            if let jobId, let sharedDirectory {
+            if let jobId, let jobSharedDirectory {
                 appendHostLifecycle(
                     "VM stop failed: \(error.localizedDescription)",
                     jobId: jobId,
@@ -497,7 +501,7 @@ final class VMEngine: VMManagerProtocol {
             }
             throw error
         }
-        if let jobId, let sharedDirectory {
+        if let jobId, let jobSharedDirectory {
             updateDiagnosticsContext(jobId: jobId) { context in
                 context.completedAt = Date()
             }
