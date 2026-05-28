@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 enum VMControlHTTPRouter {
     static func handle(
         request: VMControlHTTPRequest,
@@ -60,7 +61,10 @@ enum VMControlHTTPRouter {
         do {
             return .json(try await operation())
         } catch let error as VMControlError {
-            return .error(error.localizedDescription ?? "VM control failed", statusCode: statusCode(for: error))
+            return .error(
+                error.errorDescription ?? "VM control failed",
+                statusCode: statusCode(for: error)
+            )
         } catch {
             return .error(error.localizedDescription, statusCode: 500)
         }
@@ -89,10 +93,15 @@ enum VMControlHTTPRouter {
     }
 
     static func parseRequest(from data: Data) -> VMControlHTTPRequest? {
-        guard let headerSection = String(data: data, encoding: .utf8) else { return nil }
-        guard let headerEnd = headerSection.range(of: "\r\n\r\n") else { return nil }
+        guard let headerEndRange = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
 
-        let headerLines = headerSection[..<headerEnd.lowerBound].split(separator: "\r\n", omittingEmptySubsequences: false)
+        let headerData = data.subdata(in: 0..<headerEndRange.lowerBound)
+        guard let headerSection = String(data: headerData, encoding: .utf8) else { return nil }
+
+        let headerLines = headerSection.split(
+            separator: "\r\n",
+            omittingEmptySubsequences: false
+        )
         guard let requestLine = headerLines.first else { return nil }
 
         let parts = requestLine.split(separator: " ", maxSplits: 2)
@@ -109,7 +118,7 @@ enum VMControlHTTPRouter {
             headers[name.lowercased()] = value
         }
 
-        let bodyStart = data.distance(from: data.startIndex, to: headerEnd.upperBound)
+        let bodyStart = headerEndRange.upperBound
         let body = bodyStart < data.count ? data.subdata(in: bodyStart..<data.count) : Data()
 
         return VMControlHTTPRequest(method: method, path: path, headers: headers, body: body)

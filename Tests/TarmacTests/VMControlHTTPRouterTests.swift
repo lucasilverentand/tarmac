@@ -147,14 +147,16 @@ struct VMControlHTTPRouterTests {
 
     @Test("HTTP request parser reads headers and body")
     func requestParser() {
-        let raw = """
-        POST /vm/boot HTTP/1.1\r
-        Host: 127.0.0.1\r
-        Authorization: Bearer token\r
-        Content-Length: 4\r
-        \r
-        test
-        """.data(using: .utf8)!
+        let raw = Data(
+            [
+                "POST /vm/boot HTTP/1.1",
+                "Host: 127.0.0.1",
+                "Authorization: Bearer token",
+                "Content-Length: 4",
+                "",
+                "test",
+            ].joined(separator: "\r\n").utf8
+        )
 
         let request = VMControlHTTPRouter.parseRequest(from: raw)
         #expect(request?.method == "POST")

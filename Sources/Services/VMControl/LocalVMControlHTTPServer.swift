@@ -36,14 +36,14 @@ final class LocalVMControlHTTPServer {
         )
 
         let listener = try NWListener(using: parameters, on: port)
-        let port = configuration.normalizedPort
+        let logPort = configuration.normalizedPort
         listener.stateUpdateHandler = { state in
             switch state {
             case .failed(let error):
                 Log.vmControl.error("VM control listener failed: \(error.localizedDescription)")
             case .ready:
                 Log.vmControl.info(
-                    "VM control REST listening on \(VMControlConfiguration.loopbackHost, privacy: .public):\(port, privacy: .public)"
+                    "VM control REST listening on \(VMControlConfiguration.loopbackHost, privacy: .public):\(logPort, privacy: .public)"
                 )
             default:
                 break
@@ -94,7 +94,10 @@ final class LocalVMControlHTTPServer {
     }
 
     private func receive(on connection: NWConnection, accumulated: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, error in
+        connection.receive(
+            minimumIncompleteLength: 1,
+            maximumLength: 65_536
+        ) { [weak self] data, _, isComplete, error in
             guard let self else { return }
 
             Task { @MainActor in
@@ -138,12 +141,13 @@ final class LocalVMControlHTTPServer {
             return isComplete
         }
 
-        let contentLength = headers
+        let contentLength =
+            headers
             .split(separator: "\r\n")
             .compactMap { line -> Int? in
                 let lower = line.lowercased()
                 guard lower.hasPrefix("content-length:") else { return nil }
-                let value = lower.split(separator: ":", maxSplits: 1).last?
+                let value = lower.split(separator: ":", maxSplits: 1).last
                 return value.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
             }
             .first ?? 0
