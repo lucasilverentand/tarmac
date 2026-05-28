@@ -65,6 +65,9 @@ struct GuestBootstrapResourceTests {
         }
         #expect(contents.contains("/sbin/mount_virtiofs"))
         #expect(contents.contains("./run.sh --jitconfig"))
+        #expect(contents.contains("registration-token"))
+        #expect(contents.contains("./config.sh"))
+        #expect(contents.contains("--unattended"))
         #expect(contents.contains("bootstrap.log"))
         #expect(contents.contains("runner.log"))
         #expect(contents.contains("exit-code"))

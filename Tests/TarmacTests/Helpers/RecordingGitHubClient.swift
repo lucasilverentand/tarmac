@@ -88,6 +88,10 @@ actor RecordingGitHubClient: GitHubClientProtocol {
         timeoutInterval: TimeInterval
     ) async throws -> T {
         let response = await recordAndRespond(method: method, path: path, body: body, headers: headers)
+        guard (200..<300).contains(response.statusCode) else {
+            let message = String(data: response.data, encoding: .utf8) ?? "Unknown error"
+            throw GitHubAPIError.httpError(statusCode: response.statusCode, message: message)
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(T.self, from: response.data)

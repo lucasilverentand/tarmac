@@ -7,6 +7,10 @@ enum GuestBootstrapContract {
     static let runnerDirectoryName = "runner"
     static let runnerEntrypointName = "run.sh"
     static let jitConfigFileName = "jitconfig"
+    static let registrationTokenFileName = "registration-token"
+    static let runnerURLFileName = "runner-url"
+    static let runnerNameFileName = "runner-name"
+    static let runnerLabelsFileName = "runner-labels"
 
     static let appleSigningDirectoryName = "apple-signing"
     static let appleSigningCertificateFileName = "certificate.p12"

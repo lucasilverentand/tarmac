@@ -16,16 +16,14 @@ struct SharedDirectoryManager: Sendable {
     func prepareForJob(
         jobId: Int64,
         runnerPath: URL,
-        jitConfig: String,
+        guestConfig: RunnerGuestConfig,
         signingInjection: AppleSigningInjection? = nil
     ) throws -> URL {
         let jobDir = jobDirectory(for: jobId)
         let fm = FileManager.default
 
         try validateRunner(at: runnerPath, fileManager: fm)
-        guard !jitConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw SharedDirectoryError.emptyJITConfig
-        }
+        try validateGuestConfig(guestConfig)
 
         if fm.fileExists(atPath: jobDir.path) {
             try fm.removeItem(at: jobDir)
@@ -34,9 +32,7 @@ struct SharedDirectoryManager: Sendable {
 
         let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         try fm.copyItem(at: runnerPath, to: runnerDestination)
-
-        let jitConfigPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
-        try jitConfig.write(to: jitConfigPath, atomically: true, encoding: .utf8)
+        try writeGuestConfig(guestConfig, in: jobDir, fileManager: fm)
 
         if let signingInjection {
             try writeSigningInjection(signingInjection, in: jobDir, fileManager: fm)
@@ -62,16 +58,14 @@ struct SharedDirectoryManager: Sendable {
     func prepareWarmRunnerJob(
         jobId: Int64,
         runnerPath: URL,
-        jitConfig: String,
+        guestConfig: RunnerGuestConfig,
         signingInjection: AppleSigningInjection? = nil
     ) throws -> URL {
         let jobDir = warmRunnerDirectory
         let fm = FileManager.default
 
         try validateRunner(at: runnerPath, fileManager: fm)
-        guard !jitConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw SharedDirectoryError.emptyJITConfig
-        }
+        try validateGuestConfig(guestConfig)
 
         try fm.createDirectory(at: jobDir, withIntermediateDirectories: true)
         try clearWarmRunnerJobArtifacts(in: jobDir, fileManager: fm)
@@ -81,9 +75,7 @@ struct SharedDirectoryManager: Sendable {
             try fm.removeItem(at: runnerDestination)
         }
         try fm.copyItem(at: runnerPath, to: runnerDestination)
-
-        let jitConfigPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
-        try jitConfig.write(to: jitConfigPath, atomically: true, encoding: .utf8)
+        try writeGuestConfig(guestConfig, in: jobDir, fileManager: fm)
 
         if let signingInjection {
             try writeSigningInjection(signingInjection, in: jobDir, fileManager: fm)
@@ -152,6 +144,56 @@ struct SharedDirectoryManager: Sendable {
 
     var cacheDirectory: URL {
         storage.actionsCacheDirectory
+    }
+
+    private func validateGuestConfig(_ guestConfig: RunnerGuestConfig) throws {
+        switch guestConfig {
+        case .jit(let config):
+            guard !config.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SharedDirectoryError.emptyJITConfig
+            }
+        case .registrationToken(let url, let token, let runnerName, let labels):
+            guard !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SharedDirectoryError.incompleteRegistrationConfig
+            }
+            guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SharedDirectoryError.incompleteRegistrationConfig
+            }
+            guard !runnerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SharedDirectoryError.incompleteRegistrationConfig
+            }
+            guard !labels.isEmpty else {
+                throw SharedDirectoryError.incompleteRegistrationConfig
+            }
+        }
+    }
+
+    private func writeGuestConfig(
+        _ guestConfig: RunnerGuestConfig,
+        in jobDir: URL,
+        fileManager fm: FileManager
+    ) throws {
+        let jitConfigPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
+        let registrationTokenPath = jobDir.appendingPathComponent(GuestBootstrapContract.registrationTokenFileName)
+        let runnerURLPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerURLFileName)
+        let runnerNamePath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerNameFileName)
+        let runnerLabelsPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerLabelsFileName)
+
+        for path in [jitConfigPath, registrationTokenPath, runnerURLPath, runnerNamePath, runnerLabelsPath] {
+            if fm.fileExists(atPath: path.path) {
+                try fm.removeItem(at: path)
+            }
+        }
+
+        switch guestConfig {
+        case .jit(let config):
+            try config.write(to: jitConfigPath, atomically: true, encoding: .utf8)
+        case .registrationToken(let url, let token, let runnerName, let labels):
+            try token.write(to: registrationTokenPath, atomically: true, encoding: .utf8)
+            try url.write(to: runnerURLPath, atomically: true, encoding: .utf8)
+            try runnerName.write(to: runnerNamePath, atomically: true, encoding: .utf8)
+            try labels.joined(separator: ",").write(to: runnerLabelsPath, atomically: true, encoding: .utf8)
+        }
     }
 
     private func validateRunner(at runnerPath: URL, fileManager fm: FileManager) throws {
@@ -301,6 +343,7 @@ enum SharedDirectoryError: LocalizedError {
     case missingRunnerEntrypoint(URL)
     case runnerEntrypointNotExecutable(URL)
     case emptyJITConfig
+    case incompleteRegistrationConfig
     case emptySigningCertificate
     case emptySigningPassphrase
     case emptyProvisioningProfile
@@ -315,6 +358,8 @@ enum SharedDirectoryError: LocalizedError {
             "Runner entrypoint is not executable at \(url.path)"
         case .emptyJITConfig:
             "JIT configuration is empty"
+        case .incompleteRegistrationConfig:
+            "Registration token runner configuration is incomplete"
         case .emptySigningCertificate:
             "Apple signing certificate is empty"
         case .emptySigningPassphrase:

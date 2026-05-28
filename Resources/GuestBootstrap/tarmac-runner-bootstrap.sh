@@ -204,6 +204,10 @@ validate_job_payload() {
     local runner_dir="${SHARED_MOUNT}/runner"
     local run_script="${runner_dir}/run.sh"
     local jit_config="${SHARED_MOUNT}/jitconfig"
+    local registration_token="${SHARED_MOUNT}/registration-token"
+    local runner_url="${SHARED_MOUNT}/runner-url"
+    local runner_name="${SHARED_MOUNT}/runner-name"
+    local runner_labels="${SHARED_MOUNT}/runner-labels"
 
     if [[ ! -d "${runner_dir}" ]]; then
         log "Missing runner package at ${runner_dir}"
@@ -215,15 +219,47 @@ validate_job_payload() {
         return 1
     fi
 
-    if [[ ! -s "${jit_config}" ]]; then
-        log "Missing or empty JIT config at ${jit_config}"
-        return 1
+    if [[ -s "${jit_config}" ]]; then
+        return 0
     fi
+
+    if [[ -s "${registration_token}" && -s "${runner_url}" && -s "${runner_name}" && -s "${runner_labels}" ]]; then
+        return 0
+    fi
+
+    log "Missing runner registration payload (jitconfig or registration-token files)"
+    return 1
+}
+
+configure_runner_with_registration_token() {
+    local runner_dir="${SHARED_MOUNT}/runner"
+    local registration_token
+    local runner_url
+    local runner_name
+    local runner_labels
+
+    registration_token="$(/bin/cat "${SHARED_MOUNT}/registration-token")"
+    runner_url="$(/bin/cat "${SHARED_MOUNT}/runner-url")"
+    runner_name="$(/bin/cat "${SHARED_MOUNT}/runner-name")"
+    runner_labels="$(/bin/cat "${SHARED_MOUNT}/runner-labels")"
+
+    log "Configuring GitHub Actions runner with registration token"
+    (
+        cd "${runner_dir}" || exit 127
+        ./config.sh \
+            --url "${runner_url}" \
+            --token "${registration_token}" \
+            --name "${runner_name}" \
+            --labels "${runner_labels}" \
+            --unattended \
+            --replace
+    ) >> "${RUNNER_LOG}" 2>&1
 }
 
 run_runner() {
     local runner_dir="${SHARED_MOUNT}/runner"
     local jit_config="${SHARED_MOUNT}/jitconfig"
+    local registration_token="${SHARED_MOUNT}/registration-token"
 
     log "Starting GitHub Actions runner"
     (
@@ -232,7 +268,14 @@ run_runner() {
             # shellcheck disable=SC1090
             . "${CACHE_ENV_FILE}"
         fi
-        ./run.sh --jitconfig "${jit_config}"
+        if [[ -s "${jit_config}" ]]; then
+            ./run.sh --jitconfig "${jit_config}"
+        elif [[ -s "${registration_token}" ]]; then
+            configure_runner_with_registration_token || exit "$?"
+            ./run.sh
+        else
+            exit 12
+        fi
     ) >> "${RUNNER_LOG}" 2>&1
     return "$?"
 }

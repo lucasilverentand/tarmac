@@ -8,6 +8,9 @@ struct RunnerJob: Identifiable, Codable, Sendable {
     var workflowName: String? = nil
     var repositoryName: String? = nil
     var jitConfig: String? = nil
+    var registrationToken: String? = nil
+    var runnerRegistrationURL: String? = nil
+    var runnerRegistrationLabels: [String]? = nil
     var runnerName: String? = nil
     var runnerLease: RunnerLease? = nil
     var vmInstanceId: UUID? = nil

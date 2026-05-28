@@ -82,4 +82,24 @@ enum GitHubAPIError: Error, LocalizedError, Sendable {
         case .decodingError(let detail): "Decoding error: \(detail)"
         }
     }
+
+    /// Whether JIT config generation may fall back to a registration token.
+    var isRunnerRegistrationFallbackEligible: Bool {
+        guard case .httpError(let statusCode, _) = self else { return false }
+        switch statusCode {
+        case 404, 408, 429, 500, 502, 503, 504:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+extension Error {
+    var isRunnerRegistrationFallbackEligible: Bool {
+        if let apiError = self as? GitHubAPIError {
+            return apiError.isRunnerRegistrationFallbackEligible
+        }
+        return false
+    }
 }

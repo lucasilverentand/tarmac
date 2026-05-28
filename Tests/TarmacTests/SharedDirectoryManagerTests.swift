@@ -17,7 +17,7 @@ struct SharedDirectoryManagerTests {
         let jobDir = try manager.prepareForJob(
             jobId: 42,
             runnerPath: runnerDir,
-            jitConfig: "test-jit-config-data"
+            guestConfig: .jit(config: "test-jit-config-data")
         )
 
         let runnerCopy = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
@@ -38,7 +38,7 @@ struct SharedDirectoryManagerTests {
         let jobDir = try manager.prepareForJob(
             jobId: 100,
             runnerPath: runnerDir,
-            jitConfig: "my-encoded-config"
+            guestConfig: .jit(config: "my-encoded-config")
         )
 
         let jitPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
@@ -55,7 +55,7 @@ struct SharedDirectoryManagerTests {
         try makeRunnerPackage(at: runnerDir)
 
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
-        _ = try manager.prepareForJob(jobId: 55, runnerPath: runnerDir, jitConfig: "cfg")
+        _ = try manager.prepareForJob(jobId: 55, runnerPath: runnerDir, guestConfig: .jit(config: "cfg"))
 
         try manager.cleanupJob(jobId: 55)
 
@@ -85,7 +85,7 @@ struct SharedDirectoryManagerTests {
             try manager.prepareForJob(
                 jobId: 1,
                 runnerPath: tempDir.appendingPathComponent("missing-runner"),
-                jitConfig: "cfg"
+                guestConfig: .jit(config: "cfg")
             )
         }
     }
@@ -101,7 +101,7 @@ struct SharedDirectoryManagerTests {
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
 
         #expect(throws: SharedDirectoryError.self) {
-            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, jitConfig: "cfg")
+            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, guestConfig: .jit(config: "cfg"))
         }
     }
 
@@ -116,7 +116,7 @@ struct SharedDirectoryManagerTests {
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
 
         #expect(throws: SharedDirectoryError.self) {
-            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, jitConfig: " \n ")
+            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, guestConfig: .jit(config: " \n "))
         }
     }
 
@@ -136,8 +136,41 @@ struct SharedDirectoryManagerTests {
         let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
 
         #expect(throws: SharedDirectoryError.self) {
-            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, jitConfig: "cfg")
+            try manager.prepareForJob(jobId: 1, runnerPath: runnerDir, guestConfig: .jit(config: "cfg"))
         }
+    }
+
+    @Test("prepareForJob writes registration token guest files")
+    func prepareForJobWritesRegistrationTokenFiles() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try makeRunnerPackage(at: runnerDir)
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+        let jobDir = try manager.prepareForJob(
+            jobId: 88,
+            runnerPath: runnerDir,
+            guestConfig: .registrationToken(
+                url: "https://github.com/orgs/octo",
+                token: "REGTOKEN",
+                runnerName: "ephemeral-88",
+                labels: ["self-hosted", "macOS"]
+            )
+        )
+
+        let tokenPath = jobDir.appendingPathComponent(GuestBootstrapContract.registrationTokenFileName)
+        let urlPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerURLFileName)
+        let namePath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerNameFileName)
+        let labelsPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerLabelsFileName)
+        let jitPath = jobDir.appendingPathComponent(GuestBootstrapContract.jitConfigFileName)
+
+        #expect(try String(contentsOf: tokenPath, encoding: .utf8) == "REGTOKEN")
+        #expect(try String(contentsOf: urlPath, encoding: .utf8) == "https://github.com/orgs/octo")
+        #expect(try String(contentsOf: namePath, encoding: .utf8) == "ephemeral-88")
+        #expect(try String(contentsOf: labelsPath, encoding: .utf8) == "self-hosted,macOS")
+        #expect(!FileManager.default.fileExists(atPath: jitPath.path))
     }
 
     @Test("prepareForJob writes ephemeral Apple signing injection")
@@ -167,7 +200,7 @@ struct SharedDirectoryManagerTests {
         let jobDir = try manager.prepareForJob(
             jobId: 77,
             runnerPath: runnerDir,
-            jitConfig: "cfg",
+            guestConfig: .jit(config: "cfg"),
             signingInjection: injection
         )
 
@@ -221,7 +254,7 @@ struct SharedDirectoryManagerTests {
             try manager.prepareForJob(
                 jobId: 78,
                 runnerPath: runnerDir,
-                jitConfig: "cfg",
+                guestConfig: .jit(config: "cfg"),
                 signingInjection: injection
             )
         }
@@ -239,7 +272,7 @@ struct SharedDirectoryManagerTests {
         let warmDir = try manager.prepareWarmRunnerJob(
             jobId: 99,
             runnerPath: runnerDir,
-            jitConfig: "warm-config"
+            guestConfig: .jit(config: "warm-config")
         )
         try manager.enableWarmMode(in: warmDir)
         try manager.signalJobReady(in: warmDir)

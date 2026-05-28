@@ -241,6 +241,35 @@ actor GitHubEngine {
         )
     }
 
+    func generateRegistrationToken(for org: Organization) async throws -> String {
+        let token = try await authorizationToken(for: org)
+        return try await runnerProvider.generateRegistrationToken(
+            token: token,
+            accountPath: org.accountPath
+        )
+    }
+
+    func generateRunnerGuestConfig(for org: Organization, runnerName: String) async throws -> RunnerGuestConfig {
+        do {
+            let jitConfig = try await generateJITConfig(for: org, runnerName: runnerName)
+            return .jit(config: jitConfig)
+        } catch {
+            guard error.isRunnerRegistrationFallbackEligible else {
+                throw error
+            }
+            Log.github.warning(
+                "JIT runner config unavailable; falling back to registration token: \(error.localizedDescription)"
+            )
+            let registrationToken = try await generateRegistrationToken(for: org)
+            return .registrationToken(
+                url: org.runnerRegistrationURL,
+                token: registrationToken,
+                runnerName: runnerName,
+                labels: org.runnerLabels
+            )
+        }
+    }
+
     func listOrganizationRunners(for org: Organization) async throws -> [GitHubRunner] {
         let token = try await authorizationToken(for: org)
         var runners: [GitHubRunner] = []

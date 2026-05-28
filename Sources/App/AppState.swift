@@ -227,20 +227,20 @@ final class AppState {
             // Update status to provisioning
             queueViewModel.updateJobStatus(id: job.id, status: .provisioning)
 
-            // Get runner binary + JIT config
+            // Get runner binary + guest registration config (JIT with registration-token fallback)
             let runnerPath = try await githubEngine.ensureRunner(for: org)
             let runnerName = "ephemeral-\(job.id)"
-            let jitConfig = try await githubEngine.generateJITConfig(for: org, runnerName: runnerName)
+            let guestConfig = try await githubEngine.generateRunnerGuestConfig(for: org, runnerName: runnerName)
             var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.runnerLabels)
             await queueEngine.runnerLeaseStore.upsert(lease)
             await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
 
-            // Update job with JIT config in the store
+            // Update job with runner config in the store
             await queueEngine.jobStore.updateJob(id: job.id, status: .running)
 
             // Provision and boot VM
             var runnableJob = job
-            runnableJob.jitConfig = jitConfig
+            runnableJob.applyRunnerGuestConfig(guestConfig)
             runnableJob.runnerName = runnerName
             runnableJob.runnerLease = lease
             runnableJob.status = .running
