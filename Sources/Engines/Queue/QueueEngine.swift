@@ -345,14 +345,19 @@ actor QueueEngine {
         failure: QueuePollingFailureKind,
         message: String?
     ) {
-        pollingStates[orgName]?.lastFailure = failure
-        pollingStates[orgName]?.lastFailureMessage = message
-        if failure.isTerminal {
-            pollingStates[orgName]?.retryAttempt = 0
-            pollingStates[orgName]?.nextRetryDelay = nil
-        } else {
-            pollingStates[orgName]?.retryAttempt = (pollingStates[orgName]?.retryAttempt ?? 0) + 1
+        guard var state = pollingStates[orgName] else {
+            return
         }
+
+        state.lastFailure = failure
+        state.lastFailureMessage = message
+        if failure.isTerminal {
+            state.retryAttempt = 0
+            state.nextRetryDelay = nil
+        } else {
+            state.retryAttempt += 1
+        }
+        pollingStates[orgName] = state
     }
 
     private func pollingFailureMessage(for error: Error, failure: QueuePollingFailureKind) -> String? {

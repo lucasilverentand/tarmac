@@ -348,16 +348,17 @@ extension GitHubEngine {
                         statusCode: response.statusCode
                     )
                 default:
-                    message = issue(
-                        statusCode: response.statusCode,
-                        org: org.name,
-                        capability: capability,
-                        notFoundMessage: ScaleSetPollingMessages.setupSessionUnavailable(
-                            organization: org,
-                            statusCode: response.statusCode
-                        ),
-                        kind: .scaleSetUnavailable
-                    ).message
+                    message =
+                        issue(
+                            statusCode: response.statusCode,
+                            org: org.name,
+                            capability: capability,
+                            notFoundMessage: ScaleSetPollingMessages.setupSessionUnavailable(
+                                organization: org,
+                                statusCode: response.statusCode
+                            ),
+                            kind: .scaleSetUnavailable
+                        ).message
                 }
                 issues.append(.init(kind: .scaleSetUnavailable, message: message))
                 return

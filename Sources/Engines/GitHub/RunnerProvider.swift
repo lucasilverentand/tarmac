@@ -22,6 +22,13 @@ actor RunnerProvider {
             return cached
         }
 
+        let runnerDir = storage.runnerDirectory
+        if FileManager.default.fileExists(atPath: runnerDir.appendingPathComponent("run.sh").path) {
+            cachedRunnerPath = runnerDir
+            Log.runner.debug("Using persisted runner at \(runnerDir.path)")
+            return runnerDir
+        }
+
         let downloads: [RunnerDownloadInfo] = try await client.request(
             method: "GET",
             path: "\(accountPath)/actions/runners/downloads",
@@ -34,7 +41,6 @@ actor RunnerProvider {
             throw RunnerProviderError.noCompatibleRunner
         }
 
-        let runnerDir = storage.runnerDirectory
         try? FileManager.default.removeItem(at: runnerDir)
         try FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: storage.tmpDirectory, withIntermediateDirectories: true)

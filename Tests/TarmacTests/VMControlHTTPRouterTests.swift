@@ -129,6 +129,7 @@ struct VMControlHTTPRouterTests {
     }
 
     @Test("Authorization helper accepts bearer and raw token")
+    @MainActor
     func authorizationHelper() {
         let request = VMControlHTTPRequest(
             method: "POST",
@@ -146,6 +147,7 @@ struct VMControlHTTPRouterTests {
     }
 
     @Test("HTTP request parser reads headers and body")
+    @MainActor
     func requestParser() {
         let raw = Data(
             [

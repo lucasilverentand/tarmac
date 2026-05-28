@@ -187,11 +187,34 @@ struct QueueEngineTests {
 
     @Test("start filters to enabled orgs with scaleSetId")
     func startFiltersOrgs() async throws {
-        let (engine, _, _) = try makeEngine()
-
         let enabledWithScaleSet = TestFactories.makeOrg(name: "good", scaleSetId: 1, isEnabled: true)
         let disabledOrg = TestFactories.makeOrg(name: "disabled", scaleSetId: 2, isEnabled: false)
         let noScaleSet = TestFactories.makeOrg(name: "no-ss", scaleSetId: nil, isEnabled: true)
+        let (engine, _, client) = try makeEngine(privateKeyOrg: enabledWithScaleSet)
+
+        await client.addRawResponse(
+            forPathContaining: "/orgs/good/actions/runners/1/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"good-session","ownerName":"good","runnerScaleSet":{"id":1,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/orgs/good/actions/runners/1/sessions/good-session/message",
+            method: "POST",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/orgs/good/actions/runners/1/sessions/good-session",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
 
         // start should only create pollers for enabled orgs with scaleSetId
         // We can't easily inspect pollers, but we can verify it doesn't crash
@@ -202,8 +225,32 @@ struct QueueEngineTests {
 
     @Test("stop cancels polling tasks and clears state")
     func stopClearsState() async throws {
-        let (engine, _, _) = try makeEngine()
         let org = TestFactories.makeOrg()
+        let (engine, _, client) = try makeEngine(privateKeyOrg: org)
+
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"test-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/test-session/message",
+            method: "POST",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/test-session",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
 
         await engine.start(orgs: [org])
         await engine.stop()
@@ -478,6 +525,7 @@ struct QueueEngineTests {
         await client.addRawResponse(
             forPathContaining: "/actions/runners/42/sessions",
             method: "POST",
+            excludingPathContaining: "/message",
             statusCode: 200,
             json: """
                 {"sessionId":"new-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
@@ -486,8 +534,10 @@ struct QueueEngineTests {
         await client.addRawResponse(
             forPathContaining: "/actions/runners/42/sessions/new-session/message",
             method: "POST",
-            statusCode: 202,
-            json: Data()
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
         )
         await client.addRawResponse(
             forPathContaining: "/actions/runners/42/sessions/new-session",

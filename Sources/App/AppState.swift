@@ -45,11 +45,13 @@ final class AppState {
     private var syncTask: Task<Void, Never>?
     private var completionMonitorTasks: [Int64: Task<Void, Never>] = [:]
     private var warmRunnerIdleReleaseTask: Task<Void, Never>?
+    private let warmRunnerIdleShutdownSecondsOverride: Int?
     private var controlVMEngine: VMEngine?
     private var vmControlServer: LocalVMControlHTTPServer?
     private var vmControlHandler: VMControlHandler?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
+    private let queueEngineFactory: (GitHubEngine, any GitHubClientProtocol) -> QueueEngine
     private let vmEngineFactory:
         (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine
 
@@ -60,6 +62,9 @@ final class AppState {
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = { GitHubClient() }
+        self.queueEngineFactory = { github, client in
+            QueueEngine(github: github, client: client)
+        }
         self.vmEngineFactory = { cachePath, basePath, platformPath, cacheConfig, diagnosticsRetention in
             VMEngine(
                 cacheDirectoryPath: cachePath,
@@ -69,12 +74,16 @@ final class AppState {
                 diagnosticsRetention: diagnosticsRetention
             )
         }
+        self.warmRunnerIdleShutdownSecondsOverride = nil
         refreshReadiness()
     }
 
     init(
         configStore: ConfigStore,
         githubClientFactory: @escaping () -> any GitHubClientProtocol = { GitHubClient() },
+        queueEngineFactory: @escaping (GitHubEngine, any GitHubClientProtocol) -> QueueEngine = { github, client in
+            QueueEngine(github: github, client: client)
+        },
         vmEngineFactory:
             @escaping (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine = {
                 cachePath,
@@ -89,15 +98,28 @@ final class AppState {
                     cacheConfig: cacheConfig,
                     diagnosticsRetention: diagnosticsRetention
                 )
-            }
+            },
+        warmRunnerIdleShutdownSecondsOverride: Int? = nil
     ) {
         self.configStore = configStore
         self.queueViewModel = QueueViewModel()
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = githubClientFactory
+        self.queueEngineFactory = queueEngineFactory
         self.vmEngineFactory = vmEngineFactory
+        self.warmRunnerIdleShutdownSecondsOverride = warmRunnerIdleShutdownSecondsOverride
         refreshReadiness()
+    }
+
+    /// Whether a warm-runner idle shutdown task is pending (test access).
+    internal var isWarmRunnerIdleReleaseScheduled: Bool {
+        warmRunnerIdleReleaseTask != nil
+    }
+
+    /// Delivers scale-set messages through the live queue engine (test access).
+    internal func testing_handleScaleSetMessages(_ messages: [ScaleSetMessage], org: Organization) async {
+        await queueEngine?.handleMessages(messages, org: org)
     }
 
     // MARK: - Engine Lifecycle
@@ -147,10 +169,7 @@ final class AppState {
         vmStatusViewModel.baseImageVerified = vmEngine.baseImageVerified
         refreshReadiness()
 
-        let queueEngine = QueueEngine(
-            github: githubEngine,
-            client: client
-        )
+        let queueEngine = queueEngineFactory(githubEngine, client)
         self.queueEngine = queueEngine
 
         // Wire job dispatch → VM provisioning
@@ -184,6 +203,8 @@ final class AppState {
             task.cancel()
         }
         completionMonitorTasks.removeAll()
+        warmRunnerIdleReleaseTask?.cancel()
+        warmRunnerIdleReleaseTask = nil
 
         if let queueEngine {
             await queueEngine.stop()
@@ -495,7 +516,9 @@ final class AppState {
 
     private func scheduleWarmRunnerIdleRelease(using vmEngine: VMEngine) {
         warmRunnerIdleReleaseTask?.cancel()
-        let idleSeconds = configStore.warmRunnerConfig.normalizedIdleShutdownSeconds
+        let idleSeconds =
+            warmRunnerIdleShutdownSecondsOverride
+            ?? configStore.warmRunnerConfig.normalizedIdleShutdownSeconds
         warmRunnerIdleReleaseTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(idleSeconds))
