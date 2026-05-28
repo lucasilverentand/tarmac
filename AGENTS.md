@@ -55,3 +55,21 @@ TarmacApp (@main)
 4. Clone base VM disk → configure VZ* → boot VM
 5. Guest LaunchDaemon runs `./run.sh --jitconfig` from VirtioFS shared dir
 6. JobCompleted → stop VM → delete clone → mark .completed
+
+## Cursor Cloud specific instructions
+
+This is a **macOS-only** native app. Build, test, and run require macOS 26 + Xcode 26 + Apple Silicon — none of which are available in the Linux Cloud Agent VM.
+
+### What works on Linux
+
+- **Lint:** `swift format lint --strict --recursive Sources Tests` (matches the `format.yml` CI job). Swift 6.3 is installed via Swiftly; the env is sourced from `~/.bashrc`.
+
+### What does NOT work on Linux
+
+- `tuist generate` — Tuist is macOS-only.
+- `xcodebuild build` / `xcodebuild test` — requires Xcode.
+- Running the app — depends on Virtualization.framework, AppKit, SwiftUI (macOS scenes).
+
+### Developing in the Cloud Agent
+
+When making code changes, validate with `swift format lint --strict --recursive Sources Tests`. All other CI checks (build, test) run in GitHub Actions on `macos-26` runners and cannot be replicated here. Review test files in `Tests/TarmacTests/` to understand mocking patterns (`MockURLProtocol`, `MockVMLifecycle`, `RecordingGitHubClient`) before adding or modifying tests.
