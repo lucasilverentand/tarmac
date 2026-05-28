@@ -129,6 +129,70 @@ struct RunnerProviderTests {
         #expect(requests == 0)  // No API calls yet for JIT config
     }
 
+    @Test("generateRegistrationToken returns token from response")
+    func generateRegistrationTokenReturns() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"token":"REGISTRATION123","expires_at":"2030-01-01T00:00:00Z"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        let token = try await provider.generateRegistrationToken(
+            token: "test-token",
+            accountPath: "/orgs/my-org"
+        )
+
+        #expect(token == "REGISTRATION123")
+    }
+
+    @Test("generateRegistrationToken sends correct path with org name")
+    func generateRegistrationTokenPath() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"token":"tok","expires_at":"2030-01-01T00:00:00Z"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        _ = try await provider.generateRegistrationToken(
+            token: "tok",
+            accountPath: "/orgs/test-org"
+        )
+
+        let requests = await client.requests
+        #expect(requests.count == 1)
+        #expect(requests[0].path == "/orgs/test-org/actions/runners/registration-token")
+        #expect(requests[0].method == "POST")
+    }
+
+    @Test("generateRegistrationToken routes enterprise accounts to /enterprises path")
+    func generateRegistrationTokenEnterprisePath() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"token":"tok","expires_at":"2030-01-01T00:00:00Z"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        _ = try await provider.generateRegistrationToken(
+            token: "tok",
+            accountPath: "/enterprises/acme"
+        )
+
+        let requests = await client.requests
+        #expect(requests[0].path == "/enterprises/acme/actions/runners/registration-token")
+    }
+
     @Test("ensureRunner throws noCompatibleRunner when no macOS ARM64 binary")
     func ensureRunnerThrowsNoCompatible() async throws {
         let client = RecordingGitHubClient(

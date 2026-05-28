@@ -93,6 +93,22 @@ actor RunnerProvider {
 
         return response.encoded_jit_config
     }
+
+    func generateRegistrationToken(token: String, accountPath: String) async throws -> String {
+        struct RegistrationTokenResponse: Decodable, Sendable {
+            let token: String
+        }
+
+        let response: RegistrationTokenResponse = try await client.request(
+            method: "POST",
+            path: "\(accountPath)/actions/runners/registration-token",
+            body: nil as String?,
+            headers: ["Authorization": "Bearer \(token)"],
+            timeoutInterval: 30
+        )
+
+        return response.token
+    }
 }
 
 enum RunnerProviderError: Error, LocalizedError, Sendable {

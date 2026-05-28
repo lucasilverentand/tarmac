@@ -351,6 +351,73 @@ struct GitHubEngineTests {
         #expect(jitRequest != nil)
     }
 
+    @Test("generateRunnerGuestConfig falls back to registration token when JIT returns 404")
+    func generateRunnerGuestConfigFallsBackOnJIT404() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_fallback","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "generate-jitconfig",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "registration-token",
+            json: """
+                {"token":"REGTOKEN","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+
+        let (engine, client2, _) = try makeEngine(client: client)
+
+        let config = try await engine.generateRunnerGuestConfig(for: Self.testOrg, runnerName: "ephemeral-9")
+
+        guard case .registrationToken(let url, let token, let runnerName, let labels) = config else {
+            Issue.record("Expected registration token fallback config")
+            return
+        }
+        #expect(url == "https://github.com/orgs/test-org")
+        #expect(token == "REGTOKEN")
+        #expect(runnerName == "ephemeral-9")
+        #expect(labels == Self.testOrg.runnerLabels)
+
+        let requests = await client2.requests
+        #expect(requests.contains { $0.path.contains("generate-jitconfig") })
+        #expect(requests.contains { $0.path.contains("registration-token") })
+    }
+
+    @Test("generateRunnerGuestConfig rethrows non-fallback JIT failures")
+    func generateRunnerGuestConfigRethrowsAuthFailure() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_auth","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "generate-jitconfig",
+            statusCode: 401,
+            json: """
+                {"message":"Bad credentials"}
+                """.data(using: .utf8)!
+        )
+
+        let (engine, _, _) = try makeEngine(client: client)
+
+        await #expect(throws: GitHubAPIError.self) {
+            _ = try await engine.generateRunnerGuestConfig(for: Self.testOrg, runnerName: "ephemeral-9")
+        }
+    }
+
     @Test("reconcileStaleRunners removes offline runners matching local leases")
     func reconcileStaleRunnersRemovesOfflineLeaseRunner() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
