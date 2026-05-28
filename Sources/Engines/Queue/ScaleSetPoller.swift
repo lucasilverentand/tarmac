@@ -148,7 +148,14 @@ actor ScaleSetPoller {
                 retryAfter: retryAfter,
                 message: message
             )
-        case 403, 404:
+        case 404, 410:
+            throw ScaleSetPollerError.scaleSetUnavailable(
+                org: org,
+                operation: operation,
+                statusCode: response.statusCode,
+                message: message
+            )
+        case 403:
             throw ScaleSetPollerError.permissionDenied(
                 org: org.name,
                 operation: operation,
@@ -193,6 +200,7 @@ actor ScaleSetPoller {
 
 enum ScaleSetPollerError: Error, LocalizedError, Equatable, Sendable {
     case missingScaleSetId(org: String)
+    case scaleSetUnavailable(org: Organization, operation: String, statusCode: Int, message: String)
     case tokenExpired(org: String, operation: String, message: String)
     case permissionDenied(org: String, operation: String, statusCode: Int, message: String)
     case rateLimited(org: String, operation: String, retryAfter: TimeInterval?, message: String)
@@ -204,6 +212,12 @@ enum ScaleSetPollerError: Error, LocalizedError, Equatable, Sendable {
         switch self {
         case .missingScaleSetId(let org):
             "Organization '\(org)' has no scale set ID configured"
+        case .scaleSetUnavailable(let org, let operation, let statusCode, _):
+            ScaleSetPollingMessages.unavailable(
+                organization: org,
+                statusCode: statusCode,
+                operation: operation
+            )
         case .tokenExpired(let org, let operation, let message):
             "GitHub token expired while trying to \(operation) for '\(org)': \(message)"
         case .permissionDenied(let org, let operation, let statusCode, let message):

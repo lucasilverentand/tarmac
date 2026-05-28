@@ -124,6 +124,7 @@ actor QueueEngine {
             sessionId: nil,
             isRunning: true,
             lastFailure: nil,
+            lastFailureMessage: nil,
             retryAttempt: 0,
             nextRetryDelay: nil
         )
@@ -144,8 +145,12 @@ actor QueueEngine {
             let session = try await poller.createSession(org: org, token: token)
             guard let sessionId = session.sessionId else {
                 Log.queue.error("No session ID returned for org \(org.name)")
+                applyPollingFailure(
+                    orgName: org.name,
+                    failure: .malformedResponse,
+                    message: "GitHub did not return a scale-set session ID for \(org.name)."
+                )
                 pollingStates[org.name]?.isRunning = false
-                pollingStates[org.name]?.lastFailure = .malformedResponse
                 return
             }
             sessions[org.name] = sessionId
@@ -160,8 +165,13 @@ actor QueueEngine {
             pollingStates[org.name]?.sessionId = sessionId
         } catch {
             Log.queue.error("Failed to create session for org \(org.name): \(error.localizedDescription)")
+            let failure = failureKind(for: error)
+            applyPollingFailure(
+                orgName: org.name,
+                failure: failure,
+                message: pollingFailureMessage(for: error, failure: failure)
+            )
             pollingStates[org.name]?.isRunning = false
-            pollingStates[org.name]?.lastFailure = failureKind(for: error)
             return
         }
 
@@ -173,6 +183,7 @@ actor QueueEngine {
             do {
                 let messages = try await poller.poll(org: org, sessionId: sessionId)
                 pollingStates[org.name]?.lastFailure = nil
+                pollingStates[org.name]?.lastFailureMessage = nil
                 pollingStates[org.name]?.retryAttempt = 0
                 pollingStates[org.name]?.nextRetryDelay = nil
                 await handleMessages(messages, org: org)
@@ -180,12 +191,22 @@ actor QueueEngine {
                 break
             } catch {
                 let failure = failureKind(for: error)
-                let nextAttempt = (pollingStates[org.name]?.retryAttempt ?? 0) + 1
+                applyPollingFailure(
+                    orgName: org.name,
+                    failure: failure,
+                    message: pollingFailureMessage(for: error, failure: failure)
+                )
+
+                if failure.isTerminal {
+                    Log.queue.error(
+                        "Poll paused for \(org.name) [\(failure.rawValue)]: \(error.localizedDescription)"
+                    )
+                    break
+                }
+
+                let nextAttempt = pollingStates[org.name]?.retryAttempt ?? 0
                 let retryAfter = (error as? ScaleSetPollerError)?.retryAfter
                 let delay = retryPolicy.delay(for: failure, attempt: nextAttempt, retryAfter: retryAfter)
-
-                pollingStates[org.name]?.lastFailure = failure
-                pollingStates[org.name]?.retryAttempt = nextAttempt
                 pollingStates[org.name]?.nextRetryDelay = delay
 
                 Log.queue.error(
@@ -319,6 +340,31 @@ actor QueueEngine {
         await tryDispatch()
     }
 
+    private func applyPollingFailure(
+        orgName: String,
+        failure: QueuePollingFailureKind,
+        message: String?
+    ) {
+        pollingStates[orgName]?.lastFailure = failure
+        pollingStates[orgName]?.lastFailureMessage = message
+        if failure.isTerminal {
+            pollingStates[orgName]?.retryAttempt = 0
+            pollingStates[orgName]?.nextRetryDelay = nil
+        } else {
+            pollingStates[orgName]?.retryAttempt = (pollingStates[orgName]?.retryAttempt ?? 0) + 1
+        }
+    }
+
+    private func pollingFailureMessage(for error: Error, failure: QueuePollingFailureKind) -> String? {
+        if let pollerError = error as? ScaleSetPollerError {
+            return pollerError.errorDescription
+        }
+        if failure == .malformedResponse {
+            return error.localizedDescription
+        }
+        return nil
+    }
+
     private func failureKind(for error: Error) -> QueuePollingFailureKind {
         guard let pollerError = error as? ScaleSetPollerError else {
             return .unknown
@@ -327,6 +373,8 @@ actor QueueEngine {
         switch pollerError {
         case .missingScaleSetId:
             return .missingConfiguration
+        case .scaleSetUnavailable:
+            return .scaleSetUnavailable
         case .tokenExpired:
             return .tokenExpired
         case .permissionDenied:

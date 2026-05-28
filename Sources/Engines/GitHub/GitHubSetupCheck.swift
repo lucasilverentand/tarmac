@@ -185,8 +185,19 @@ extension GitHubEngine {
                 token: token,
                 org: org.name,
                 capability: "Runner scale set \(scaleSetId)",
-                notFoundMessage: "\(org.name): Runner scale set \(scaleSetId) is unavailable.",
+                notFoundMessage: ScaleSetPollingMessages.setupScaleSetMetadataUnavailable(
+                    org: org.name,
+                    scaleSetId: scaleSetId
+                ),
                 kind: .scaleSetUnavailable
+            )
+
+            await Self.appendScaleSetSessionCheck(
+                to: &issues,
+                client: client,
+                org: org,
+                scaleSetId: scaleSetId,
+                token: token
             )
         }
 
@@ -293,7 +304,7 @@ extension GitHubEngine {
                 kind: .permissionMissing,
                 message: "\(org): Permission missing for \(capability). GitHub returned HTTP \(statusCode)."
             )
-        case 404:
+        case 404, 410:
             return .init(kind: kind, message: notFoundMessage)
         case 500...599:
             return .init(
@@ -306,6 +317,82 @@ extension GitHubEngine {
                 message: "\(org): GitHub returned HTTP \(statusCode) while checking \(capability)."
             )
         }
+    }
+
+    private static func appendScaleSetSessionCheck(
+        to issues: inout [GitHubSetupCheckIssue],
+        client: any GitHubClientProtocol,
+        org: Organization,
+        scaleSetId: Int,
+        token: String
+    ) async {
+        let sessionPath = "\(org.accountPath)/actions/runners/\(scaleSetId)/sessions"
+        let capability = "Scale-set session \(scaleSetId)"
+
+        let sessionData: Data?
+        do {
+            let (data, response) = try await client.requestRaw(
+                method: "POST",
+                path: sessionPath,
+                body: nil as String?,
+                headers: ["Authorization": "Bearer \(token)"],
+                timeoutInterval: 30
+            )
+
+            guard (200..<300).contains(response.statusCode) else {
+                let message: String
+                switch response.statusCode {
+                case 404, 410:
+                    message = ScaleSetPollingMessages.setupSessionUnavailable(
+                        organization: org,
+                        statusCode: response.statusCode
+                    )
+                default:
+                    message = issue(
+                        statusCode: response.statusCode,
+                        org: org.name,
+                        capability: capability,
+                        notFoundMessage: ScaleSetPollingMessages.setupSessionUnavailable(
+                            organization: org,
+                            statusCode: response.statusCode
+                        ),
+                        kind: .scaleSetUnavailable
+                    ).message
+                }
+                issues.append(.init(kind: .scaleSetUnavailable, message: message))
+                return
+            }
+            sessionData = data
+        } catch {
+            issues.append(issue(for: error, org: org.name, capability: capability))
+            return
+        }
+
+        guard let sessionData,
+            let session = try? JSONDecoder().decode(ScaleSetSession.self, from: sessionData),
+            let sessionId = session.sessionId
+        else {
+            issues.append(
+                .init(
+                    kind: .scaleSetUnavailable,
+                    message:
+                        "\(org.name): GitHub accepted scale-set session creation but returned no session ID."
+                )
+            )
+            return
+        }
+
+        _ = await rawCheckData(
+            to: &issues,
+            client: client,
+            method: "DELETE",
+            path: "\(sessionPath)/\(sessionId)",
+            token: token,
+            org: org.name,
+            capability: "Scale-set session cleanup",
+            notFoundMessage: "\(org.name): Could not delete the setup probe session.",
+            kind: .scaleSetUnavailable
+        )
     }
 
     private static func issue(for error: Error, org: String, capability: String) -> GitHubSetupCheckIssue {
