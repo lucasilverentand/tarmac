@@ -45,6 +45,10 @@ final class AppState {
     private var syncTask: Task<Void, Never>?
     private var completionMonitorTasks: [Int64: Task<Void, Never>] = [:]
     private var warmRunnerIdleReleaseTask: Task<Void, Never>?
+    private let warmRunnerIdleShutdownSecondsOverride: Int?
+    private var controlVMEngine: VMEngine?
+    private var vmControlServer: LocalVMControlHTTPServer?
+    private var vmControlHandler: VMControlHandler?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
     private let vmEngineFactory:
@@ -86,7 +90,8 @@ final class AppState {
                     cacheConfig: cacheConfig,
                     diagnosticsRetention: diagnosticsRetention
                 )
-            }
+            },
+        warmRunnerIdleShutdownSecondsOverride: Int? = nil
     ) {
         self.configStore = configStore
         self.queueViewModel = QueueViewModel()
@@ -94,7 +99,18 @@ final class AppState {
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = githubClientFactory
         self.vmEngineFactory = vmEngineFactory
+        self.warmRunnerIdleShutdownSecondsOverride = warmRunnerIdleShutdownSecondsOverride
         refreshReadiness()
+    }
+
+    /// Whether a warm-runner idle shutdown task is pending (test access).
+    internal var isWarmRunnerIdleReleaseScheduled: Bool {
+        warmRunnerIdleReleaseTask != nil
+    }
+
+    /// Delivers scale-set messages through the live queue engine (test access).
+    internal func testing_handleScaleSetMessages(_ messages: [ScaleSetMessage], org: Organization) async {
+        await queueEngine?.handleMessages(messages, org: org)
     }
 
     // MARK: - Engine Lifecycle
@@ -171,6 +187,7 @@ final class AppState {
         startJobStoreSync()
 
         Log.app.info("App started — polling \(self.configStore.organizations.filter(\.isEnabled).count) org(s)")
+        syncVMControlServer()
     }
 
     func stop() async {
@@ -194,11 +211,99 @@ final class AppState {
             }
         }
 
+        if let controlVMEngine, controlVMEngine.isRunning {
+            try? await controlVMEngine.teardown()
+        }
+
+        stopVMControlServer()
+        controlVMEngine = nil
+
         githubEngine = nil
         queueEngine = nil
         vmEngine = nil
 
         Log.app.info("App stopped")
+    }
+
+    func shutdownForTermination() async {
+        await stop()
+    }
+
+    func syncVMControlServer() {
+        guard configStore.vmControlConfiguration.isEnabled else {
+            stopVMControlServer()
+            return
+        }
+
+        guard configStore.hasCompletedStorageSetup else {
+            stopVMControlServer()
+            return
+        }
+
+        var configuration = configStore.vmControlConfiguration
+        let previousToken = configuration.authToken
+        configuration.ensureAuthToken()
+        if configuration.authToken != previousToken {
+            configStore.vmControlConfiguration = configuration
+            configStore.save()
+        }
+
+        stopVMControlServer()
+
+        let handler = makeVMControlHandler()
+        vmControlHandler = handler
+        let server = LocalVMControlHTTPServer(configuration: configuration, handler: handler)
+        vmControlServer = server
+
+        do {
+            try server.start()
+        } catch {
+            Log.vmControl.error("Failed to start VM control server: \(error.localizedDescription)")
+            stopVMControlServer()
+        }
+    }
+
+    private func stopVMControlServer() {
+        vmControlServer?.stop()
+        vmControlServer = nil
+        vmControlHandler = nil
+    }
+
+    private func makeVMControlHandler() -> VMControlHandler {
+        VMControlHandler(
+            engineProvider: { [weak self] in self?.engineForVMControl() },
+            vmConfiguration: { [weak self] in self?.configStore.vmConfiguration ?? VMConfiguration() },
+            storageRootPath: { [weak self] in self?.configStore.storageRootPath ?? "" },
+            baseImagePath: { [weak self] in self?.configStore.resolvedBaseImagePath ?? "" },
+            platformDirectoryPath: { [weak self] in self?.configStore.platformDirectoryPath ?? "" },
+            cacheConfig: { [weak self] in self?.configStore.cacheConfig ?? CacheConfiguration() },
+            diagnosticsRetention: { [weak self] in
+                self?.configStore.diagnosticsRetentionConfig ?? DiagnosticsRetentionConfiguration()
+            },
+            hasActiveRunnerJob: { [weak self] in
+                self?.queueViewModel.activeJob != nil
+            }
+        )
+    }
+
+    private func engineForVMControl() -> VMEngine? {
+        if let vmEngine {
+            return vmEngine
+        }
+
+        guard configStore.hasCompletedStorageSetup else { return nil }
+
+        if controlVMEngine == nil {
+            controlVMEngine = vmEngineFactory(
+                configStore.storageRootPath,
+                configStore.resolvedBaseImagePath,
+                configStore.platformDirectoryPath,
+                configStore.cacheConfig,
+                configStore.diagnosticsRetentionConfig
+            )
+        }
+
+        return controlVMEngine
     }
 
     func restart() async {
@@ -227,20 +332,20 @@ final class AppState {
             // Update status to provisioning
             queueViewModel.updateJobStatus(id: job.id, status: .provisioning)
 
-            // Get runner binary + JIT config
+            // Get runner binary + guest registration config (JIT with registration-token fallback)
             let runnerPath = try await githubEngine.ensureRunner(for: org)
             let runnerName = "ephemeral-\(job.id)"
-            let jitConfig = try await githubEngine.generateJITConfig(for: org, runnerName: runnerName)
+            let guestConfig = try await githubEngine.generateRunnerGuestConfig(for: org, runnerName: runnerName)
             var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.runnerLabels)
             await queueEngine.runnerLeaseStore.upsert(lease)
             await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)
 
-            // Update job with JIT config in the store
+            // Update job with runner config in the store
             await queueEngine.jobStore.updateJob(id: job.id, status: .running)
 
             // Provision and boot VM
             var runnableJob = job
-            runnableJob.jitConfig = jitConfig
+            runnableJob.applyRunnerGuestConfig(guestConfig)
             runnableJob.runnerName = runnerName
             runnableJob.runnerLease = lease
             runnableJob.status = .running
@@ -403,7 +508,9 @@ final class AppState {
 
     private func scheduleWarmRunnerIdleRelease(using vmEngine: VMEngine) {
         warmRunnerIdleReleaseTask?.cancel()
-        let idleSeconds = configStore.warmRunnerConfig.normalizedIdleShutdownSeconds
+        let idleSeconds =
+            warmRunnerIdleShutdownSecondsOverride
+            ?? configStore.warmRunnerConfig.normalizedIdleShutdownSeconds
         warmRunnerIdleReleaseTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(idleSeconds))
