@@ -40,7 +40,16 @@ final class VMControlHandler: VMControlHandling {
     }
 
     func vmState() -> VMControlVMResponse {
-        snapshot(using: resolveEngine())
+        guard let engine = engineProvider() else {
+            let storage = StorageManager(rootPath: storageRootPath())
+            return VMControlVMResponse(
+                instance: nil,
+                isRunning: false,
+                baseImageExists: FileManager.default.fileExists(atPath: baseImagePath()),
+                baseImageVerified: storage.isBaseImageVerified()
+            )
+        }
+        return snapshot(using: engine)
     }
 
     func boot() async throws -> VMControlVMResponse {
