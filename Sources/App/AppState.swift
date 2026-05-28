@@ -51,6 +51,7 @@ final class AppState {
     private var vmControlHandler: VMControlHandler?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
+    private let queueEngineFactory: (GitHubEngine, any GitHubClientProtocol) -> QueueEngine
     private let vmEngineFactory:
         (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine
 
@@ -61,6 +62,9 @@ final class AppState {
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = { GitHubClient() }
+        self.queueEngineFactory = { github, client in
+            QueueEngine(github: github, client: client)
+        }
         self.vmEngineFactory = { cachePath, basePath, platformPath, cacheConfig, diagnosticsRetention in
             VMEngine(
                 cacheDirectoryPath: cachePath,
@@ -70,12 +74,16 @@ final class AppState {
                 diagnosticsRetention: diagnosticsRetention
             )
         }
+        self.warmRunnerIdleShutdownSecondsOverride = nil
         refreshReadiness()
     }
 
     init(
         configStore: ConfigStore,
         githubClientFactory: @escaping () -> any GitHubClientProtocol = { GitHubClient() },
+        queueEngineFactory: @escaping (GitHubEngine, any GitHubClientProtocol) -> QueueEngine = { github, client in
+            QueueEngine(github: github, client: client)
+        },
         vmEngineFactory:
             @escaping (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine = {
                 cachePath,
@@ -98,6 +106,7 @@ final class AppState {
         self.vmStatusViewModel = VMStatusViewModel()
         self.settingsViewModel = SettingsViewModel(configStore: configStore)
         self.githubClientFactory = githubClientFactory
+        self.queueEngineFactory = queueEngineFactory
         self.vmEngineFactory = vmEngineFactory
         self.warmRunnerIdleShutdownSecondsOverride = warmRunnerIdleShutdownSecondsOverride
         refreshReadiness()
@@ -160,10 +169,7 @@ final class AppState {
         vmStatusViewModel.baseImageVerified = vmEngine.baseImageVerified
         refreshReadiness()
 
-        let queueEngine = QueueEngine(
-            github: githubEngine,
-            client: client
-        )
+        let queueEngine = queueEngineFactory(githubEngine, client)
         self.queueEngine = queueEngine
 
         // Wire job dispatch → VM provisioning
@@ -197,6 +203,8 @@ final class AppState {
             task.cancel()
         }
         completionMonitorTasks.removeAll()
+        warmRunnerIdleReleaseTask?.cancel()
+        warmRunnerIdleReleaseTask = nil
 
         if let queueEngine {
             await queueEngine.stop()

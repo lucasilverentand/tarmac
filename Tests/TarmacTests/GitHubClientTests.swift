@@ -163,6 +163,40 @@ struct GitHubClientTests {
         #expect(result.name == "test-repo")
     }
 
+    @Test("registration token response decodes from POST runners path")
+    func registrationTokenResponseDecodes() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+
+        struct RegistrationTokenResponse: Decodable, Sendable {
+            let token: String
+        }
+
+        let responseJSON = """
+            {"token":"REG123","expires_at":"2030-01-01T00:00:00Z"}
+            """.data(using: .utf8)!
+
+        MockURLProtocol.addHandler(
+            matching: { request in
+                request.httpMethod == "POST"
+                    && request.url?.path == "/orgs/octo/actions/runners/registration-token"
+            },
+            statusCode: 201,
+            responseData: responseJSON
+        )
+
+        let client = makeClient()
+        let response: RegistrationTokenResponse = try await client.request(
+            method: "POST",
+            path: "/orgs/octo/actions/runners/registration-token",
+            body: nil as String?,
+            headers: ["Authorization": "Bearer test"],
+            timeoutInterval: 10
+        )
+
+        #expect(response.token == "REG123")
+    }
+
     @Test("HTTP error throws GitHubAPIError.httpError")
     func httpErrorThrows() async {
         MockURLProtocol.reset()

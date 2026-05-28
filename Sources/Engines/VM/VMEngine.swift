@@ -354,8 +354,8 @@ final class VMEngine: VMManagerProtocol {
         baseImagePath overrideBaseImagePath: String? = nil,
         signingInjection: AppleSigningInjection? = nil
     ) async throws -> VMInstance {
-        guard let jitConfig = job.jitConfig else {
-            throw VMEngineError.missingJITConfig
+        guard let guestConfig = job.runnerGuestConfig else {
+            throw VMEngineError.missingRunnerGuestConfig
         }
 
         let sourceImagePath = baseImageURL(for: overrideBaseImagePath).path
@@ -366,7 +366,7 @@ final class VMEngine: VMManagerProtocol {
             return try await reuseWarmRunner(
                 job: job,
                 runnerPath: runnerPath,
-                jitConfig: jitConfig,
+                guestConfig: guestConfig,
                 signingInjection: signingInjection,
                 warmState: warmState
             )
@@ -380,7 +380,7 @@ final class VMEngine: VMManagerProtocol {
                 job: job,
                 config: config,
                 runnerPath: runnerPath,
-                jitConfig: jitConfig,
+                guestConfig: guestConfig,
                 baseImagePath: overrideBaseImagePath,
                 signingInjection: signingInjection
             )
@@ -389,7 +389,7 @@ final class VMEngine: VMManagerProtocol {
         let sharedDir = try sharedDirManager.prepareForJob(
             jobId: job.id,
             runnerPath: runnerPath,
-            jitConfig: jitConfig,
+            guestConfig: guestConfig,
             signingInjection: signingInjection
         )
         diagnosticsContexts[job.id] = JobDiagnosticsContext(job: job, runnerName: job.runnerName)
@@ -699,14 +699,14 @@ final class VMEngine: VMManagerProtocol {
         job: RunnerJob,
         config: VMConfiguration,
         runnerPath: URL,
-        jitConfig: String,
+        guestConfig: RunnerGuestConfig,
         baseImagePath overrideBaseImagePath: String?,
         signingInjection: AppleSigningInjection?
     ) async throws -> VMInstance {
         let sharedDir = try sharedDirManager.prepareWarmRunnerJob(
             jobId: job.id,
             runnerPath: runnerPath,
-            jitConfig: jitConfig,
+            guestConfig: guestConfig,
             signingInjection: signingInjection
         )
         try sharedDirManager.enableWarmMode(in: sharedDir)
@@ -745,14 +745,14 @@ final class VMEngine: VMManagerProtocol {
     private func reuseWarmRunner(
         job: RunnerJob,
         runnerPath: URL,
-        jitConfig: String,
+        guestConfig: RunnerGuestConfig,
         signingInjection: AppleSigningInjection?,
         warmState: WarmRunnerState
     ) async throws -> VMInstance {
         let sharedDir = try sharedDirManager.prepareWarmRunnerJob(
             jobId: job.id,
             runnerPath: runnerPath,
-            jitConfig: jitConfig,
+            guestConfig: guestConfig,
             signingInjection: signingInjection
         )
         diagnosticsContexts[job.id] = JobDiagnosticsContext(job: job, runnerName: job.runnerName)
@@ -818,6 +818,7 @@ final class VMEngine: VMManagerProtocol {
 }
 
 enum VMEngineError: LocalizedError {
+    case missingRunnerGuestConfig
     case missingJITConfig
     case baseImageMissing
     case verificationFailed(reason: String)
@@ -827,8 +828,8 @@ enum VMEngineError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingJITConfig:
-            "Job is missing JIT configuration"
+        case .missingRunnerGuestConfig, .missingJITConfig:
+            "Job is missing runner guest configuration"
         case .baseImageMissing:
             "Base image does not exist on disk"
         case .verificationFailed(let reason):

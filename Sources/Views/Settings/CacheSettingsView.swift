@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CacheSettingsView: View {
     @Bindable var viewModel: SettingsViewModel
+    var onVMControlConfigurationChanged: (() -> Void)?
 
     var body: some View {
         Form {
@@ -103,6 +104,44 @@ struct CacheSettingsView: View {
                 }
             }
 
+            Section("Local VM Control API") {
+                Toggle("Enable loopback REST control", isOn: vmControlEnabledBinding)
+
+                if viewModel.vmControlConfiguration.isEnabled {
+                    Stepper(
+                        "Port: \(viewModel.vmControlConfiguration.normalizedPort)",
+                        value: vmControlPortBinding,
+                        in: 1024...65_535
+                    )
+
+                    LabeledContent("Base URL") {
+                        Text(viewModel.vmControlConfiguration.baseURL)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    LabeledContent("Token") {
+                        Text(viewModel.vmControlConfiguration.authToken)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Button("Rotate Token") {
+                        viewModel.rotateVMControlToken()
+                        onVMControlConfigurationChanged?()
+                    }
+
+                    Text(
+                        "Exposes GET /health, GET /vm, and authenticated POST /vm/boot, /vm/stop, and /vm/teardown on 127.0.0.1 only. Send Authorization: Bearer <token> for lifecycle calls."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
+            }
+
             Section("Diagnostics") {
                 Toggle(
                     "Keep full logs for successful jobs",
@@ -131,6 +170,39 @@ struct CacheSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: viewModel.vmControlConfiguration.isEnabled) { _, _ in
+            onVMControlConfigurationChanged?()
+        }
+        .onChange(of: viewModel.vmControlConfiguration.port) { _, _ in
+            onVMControlConfigurationChanged?()
+        }
+    }
+
+    private var vmControlEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.vmControlConfiguration.isEnabled },
+            set: { enabled in
+                var configuration = viewModel.vmControlConfiguration
+                configuration.isEnabled = enabled
+                if enabled {
+                    configuration.ensureAuthToken()
+                }
+                viewModel.vmControlConfiguration = configuration
+                onVMControlConfigurationChanged?()
+            }
+        )
+    }
+
+    private var vmControlPortBinding: Binding<Int> {
+        Binding(
+            get: { Int(viewModel.vmControlConfiguration.normalizedPort) },
+            set: { port in
+                var configuration = viewModel.vmControlConfiguration
+                configuration.port = port
+                viewModel.vmControlConfiguration = configuration
+                onVMControlConfigurationChanged?()
+            }
+        )
     }
 
     private var warmRunnerRecycleLabel: String {

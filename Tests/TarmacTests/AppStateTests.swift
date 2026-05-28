@@ -44,10 +44,26 @@ struct AppStateTests {
         await configureGitHubSetupStubs(client: client, futureDate: futureDate)
 
         let mock = lifecycle ?? MockVMLifecycle()
+        let jobStore = TestFactories.makeJobStore()
+        let runnerLeaseStore = RunnerLeaseStore(
+            defaults: UserDefaults(suiteName: "appstate-leases-\(UUID().uuidString)")!
+        )
+        let sessionStore = PollingSessionStore(
+            defaults: UserDefaults(suiteName: "appstate-sessions-\(UUID().uuidString)")!
+        )
 
         let appState = AppState(
             configStore: configStore,
             githubClientFactory: { client },
+            queueEngineFactory: { github, client in
+                QueueEngine(
+                    github: github,
+                    client: client,
+                    jobStore: jobStore,
+                    runnerLeaseStore: runnerLeaseStore,
+                    sessionStore: sessionStore
+                )
+            },
             vmEngineFactory: { cachePath, basePath, platformPath, cacheConfig, diagnosticsRetention in
                 VMEngine(
                     cacheDirectoryPath: cachePath,
@@ -81,6 +97,29 @@ struct AppStateTests {
             forPathContaining: "runner-scale-sets",
             json: """
                 {"id":42,"name":"test-scale-set"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"poll-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/sessions/",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/message",
+            method: "POST",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
                 """.data(using: .utf8)!
         )
         await client.addResponse(
@@ -274,7 +313,7 @@ struct AppStateTests {
 
     @Test("Apple signing injection resolves selected dispatch asset")
     @MainActor
-    func appleSigningInjectionResolvesSelectedAsset() throws {
+    func appleSigningInjectionResolvesSelectedAsset() async throws {
         let org = TestFactories.makeOrg(
             name: "SevenTwo",
             imageProfile: RunnerImageProfile(name: "Xcode 17")
@@ -315,7 +354,7 @@ struct AppStateTests {
 
     @Test("Apple signing injection skips unselected assets")
     @MainActor
-    func appleSigningInjectionSkipsUnselectedAsset() throws {
+    func appleSigningInjectionSkipsUnselectedAsset() async throws {
         let org = TestFactories.makeOrg(name: "SevenTwo")
         let (appState, _, _) = try await makeAppState(orgs: [org])
         let asset = AppleSigningAsset(
@@ -338,7 +377,7 @@ struct AppStateTests {
 
     @Test("Apple signing injection blocks invalid selected assets")
     @MainActor
-    func appleSigningInjectionBlocksInvalidAsset() throws {
+    func appleSigningInjectionBlocksInvalidAsset() async throws {
         let org = TestFactories.makeOrg(name: "SevenTwo")
         let (appState, _, _) = try await makeAppState(orgs: [org])
         let asset = AppleSigningAsset(

@@ -668,6 +668,7 @@ struct VMEngineTests {
     }
 
     private func writeExecutableRunScript(in runnerPath: URL) throws {
+        try FileManager.default.createDirectory(at: runnerPath, withIntermediateDirectories: true)
         let runScript = runnerPath.appendingPathComponent("run.sh")
         try "#!/bin/bash".write(to: runScript, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(

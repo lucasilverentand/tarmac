@@ -63,14 +63,25 @@ jobs:
 
       - name: Coverage summary
         if: always()
+        continue-on-error: true
         run: |
-          if [ -d "TestResults.xcresult" ]; then
-            xcrun xccov view --report --json TestResults.xcresult > coverage.json
-            echo "### Code Coverage" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            xcrun xccov view --report TestResults.xcresult | head -30 >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          bundle="TestResults.xcresult"
+          if [ ! -d "$bundle" ]; then
+            echo "No test result bundle; skipping coverage."
+            exit 0
           fi
+          if [ -z "$(find "$bundle" -name '*.xccovreport' -print -quit 2>/dev/null)" ]; then
+            echo "No coverage report in bundle; skipping coverage summary."
+            exit 0
+          fi
+          if ! xcrun xccov view --report --json "$bundle" > coverage.json 2>/dev/null; then
+            echo "xccov could not load coverage; skipping."
+            exit 0
+          fi
+          echo "### Code Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          xcrun xccov view --report "$bundle" 2>/dev/null | head -30 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
         if: always()

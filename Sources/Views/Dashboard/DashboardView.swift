@@ -43,7 +43,12 @@ struct DashboardView: View {
         case .organizations:
             OrganizationListView(viewModel: appState.settingsViewModel)
         case .cache:
-            CacheSettingsView(viewModel: appState.settingsViewModel)
+            CacheSettingsView(
+                viewModel: appState.settingsViewModel,
+                onVMControlConfigurationChanged: {
+                    appState.syncVMControlServer()
+                }
+            )
         case .storage:
             StorageSettingsView(viewModel: appState.settingsViewModel)
         }

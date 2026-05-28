@@ -13,10 +13,24 @@ The installer copies:
 - `/usr/local/libexec/tarmac-runner-bootstrap`
 - `/Library/LaunchDaemons/studio.seventwo.tarmac.runner-bootstrap.plist`
 
-At job boot the daemon mounts VirtioFS tag `shared` at `/Volumes/tarmac-shared`, tries optional tag `actions-cache` at `/Volumes/actions-cache`, validates `/Volumes/tarmac-shared/runner/run.sh` and `/Volumes/tarmac-shared/jitconfig`, then starts:
+At job boot the daemon mounts VirtioFS tag `shared` at `/Volumes/tarmac-shared`, tries optional tag `actions-cache` at `/Volumes/actions-cache`, validates `/Volumes/tarmac-shared/runner/run.sh`, then starts the runner using either:
+
+**JIT config (default):**
 
 ```sh
 ./run.sh --jitconfig /Volumes/tarmac-shared/jitconfig
+```
+
+**Registration token fallback** when JIT config is unavailable and the host writes:
+
+- `/Volumes/tarmac-shared/registration-token`
+- `/Volumes/tarmac-shared/runner-url`
+- `/Volumes/tarmac-shared/runner-name`
+- `/Volumes/tarmac-shared/runner-labels` (comma-separated)
+
+```sh
+./config.sh --url <runner-url> --token <registration-token> --name <runner-name> --labels <runner-labels> --unattended --replace
+./run.sh
 ```
 
 When the cache mount is present, the bootstrap creates first-version cache targets under `/Volumes/actions-cache`:

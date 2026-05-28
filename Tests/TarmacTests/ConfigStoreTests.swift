@@ -303,6 +303,28 @@ struct ConfigStoreTests {
         #expect(store.organizations.first?.name == "updated")
     }
 
+    @Test("VM control configuration persists across reloads")
+    func vmControlConfigurationPersistence() {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+
+        let store1 = ConfigStore(defaults: defaults, keychainService: keychain)
+        store1.vmControlConfiguration = VMControlConfiguration(
+            isEnabled: true,
+            port: 9480,
+            authToken: "test-token"
+        )
+        store1.save()
+
+        let store2 = ConfigStore(defaults: defaults, keychainService: keychain)
+        #expect(store2.vmControlConfiguration.isEnabled)
+        #expect(store2.vmControlConfiguration.port == 9480)
+        #expect(store2.vmControlConfiguration.authToken == "test-token")
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("Apple signing assets store metadata separately from keychain material")
     func appleSigningAssetStorage() {
         let suiteName = "test-config-\(UUID().uuidString)"

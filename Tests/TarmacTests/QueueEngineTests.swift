@@ -187,11 +187,34 @@ struct QueueEngineTests {
 
     @Test("start filters to enabled orgs with scaleSetId")
     func startFiltersOrgs() async throws {
-        let (engine, _, _) = try makeEngine()
-
         let enabledWithScaleSet = TestFactories.makeOrg(name: "good", scaleSetId: 1, isEnabled: true)
         let disabledOrg = TestFactories.makeOrg(name: "disabled", scaleSetId: 2, isEnabled: false)
         let noScaleSet = TestFactories.makeOrg(name: "no-ss", scaleSetId: nil, isEnabled: true)
+        let (engine, _, client) = try makeEngine(privateKeyOrg: enabledWithScaleSet)
+
+        await client.addRawResponse(
+            forPathContaining: "/orgs/good/actions/runners/1/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"good-session","ownerName":"good","runnerScaleSet":{"id":1,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/orgs/good/actions/runners/1/sessions/good-session/message",
+            method: "POST",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/orgs/good/actions/runners/1/sessions/good-session",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
 
         // start should only create pollers for enabled orgs with scaleSetId
         // We can't easily inspect pollers, but we can verify it doesn't crash
@@ -202,8 +225,32 @@ struct QueueEngineTests {
 
     @Test("stop cancels polling tasks and clears state")
     func stopClearsState() async throws {
-        let (engine, _, _) = try makeEngine()
         let org = TestFactories.makeOrg()
+        let (engine, _, client) = try makeEngine(privateKeyOrg: org)
+
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"test-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/test-session/message",
+            method: "POST",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/test-session",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
 
         await engine.start(orgs: [org])
         await engine.stop()
@@ -413,6 +460,47 @@ struct QueueEngineTests {
         #expect(jobs.first?.id == 70)
     }
 
+    @Test("session create 404 pauses polling with scale set unavailable state")
+    func sessionCreateNotFoundPausesPolling() async throws {
+        let defaults = UserDefaults(suiteName: "polling-unavailable-\(UUID().uuidString)")!
+        let sessionStore = PollingSessionStore(defaults: defaults)
+        let org = TestFactories.makeOrg()
+        let (engine, _, client) = try makeEngine(sessionStore: sessionStore, privateKeyOrg: org)
+
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+
+        await engine.start(orgs: [org])
+
+        var state: QueuePollingState?
+        for _ in 0..<50 {
+            state = await engine.pollingState(orgName: org.name)
+            if state?.lastFailure == .scaleSetUnavailable {
+                break
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        await engine.stop()
+
+        let finalState = try #require(state)
+        #expect(finalState.isRunning == false)
+        #expect(finalState.lastFailure == .scaleSetUnavailable)
+        #expect(finalState.lastFailureMessage?.contains(ScaleSetPollingMessages.strategyReference) == true)
+        #expect(finalState.retryAttempt == 0)
+
+        let pollRequests = await client.requests.filter {
+            $0.method == "POST" && $0.path.contains("/message")
+        }
+        #expect(pollRequests.isEmpty)
+    }
+
     @Test("start removes stale persisted session before creating a new one")
     func startRemovesStalePersistedSession() async throws {
         let defaults = UserDefaults(suiteName: "polling-session-\(UUID().uuidString)")!
@@ -437,6 +525,7 @@ struct QueueEngineTests {
         await client.addRawResponse(
             forPathContaining: "/actions/runners/42/sessions",
             method: "POST",
+            excludingPathContaining: "/message",
             statusCode: 200,
             json: """
                 {"sessionId":"new-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
@@ -445,8 +534,10 @@ struct QueueEngineTests {
         await client.addRawResponse(
             forPathContaining: "/actions/runners/42/sessions/new-session/message",
             method: "POST",
-            statusCode: 202,
-            json: Data()
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
         )
         await client.addRawResponse(
             forPathContaining: "/actions/runners/42/sessions/new-session",
