@@ -45,6 +45,9 @@ final class AppState {
     private var syncTask: Task<Void, Never>?
     private var completionMonitorTasks: [Int64: Task<Void, Never>] = [:]
     private var warmRunnerIdleReleaseTask: Task<Void, Never>?
+    private var controlVMEngine: VMEngine?
+    private var vmControlServer: LocalVMControlHTTPServer?
+    private var vmControlHandler: VMControlHandler?
 
     private let githubClientFactory: () -> any GitHubClientProtocol
     private let vmEngineFactory:
@@ -171,6 +174,7 @@ final class AppState {
         startJobStoreSync()
 
         Log.app.info("App started — polling \(self.configStore.organizations.filter(\.isEnabled).count) org(s)")
+        syncVMControlServer()
     }
 
     func stop() async {
@@ -194,11 +198,99 @@ final class AppState {
             }
         }
 
+        if let controlVMEngine, controlVMEngine.isRunning {
+            try? await controlVMEngine.teardown()
+        }
+
+        stopVMControlServer()
+        controlVMEngine = nil
+
         githubEngine = nil
         queueEngine = nil
         vmEngine = nil
 
         Log.app.info("App stopped")
+    }
+
+    func shutdownForTermination() async {
+        await stop()
+    }
+
+    func syncVMControlServer() {
+        guard configStore.vmControlConfiguration.isEnabled else {
+            stopVMControlServer()
+            return
+        }
+
+        guard configStore.hasCompletedStorageSetup else {
+            stopVMControlServer()
+            return
+        }
+
+        var configuration = configStore.vmControlConfiguration
+        let previousToken = configuration.authToken
+        configuration.ensureAuthToken()
+        if configuration.authToken != previousToken {
+            configStore.vmControlConfiguration = configuration
+            configStore.save()
+        }
+
+        stopVMControlServer()
+
+        let handler = makeVMControlHandler()
+        vmControlHandler = handler
+        let server = LocalVMControlHTTPServer(configuration: configuration, handler: handler)
+        vmControlServer = server
+
+        do {
+            try server.start()
+        } catch {
+            Log.vmControl.error("Failed to start VM control server: \(error.localizedDescription)")
+            stopVMControlServer()
+        }
+    }
+
+    private func stopVMControlServer() {
+        vmControlServer?.stop()
+        vmControlServer = nil
+        vmControlHandler = nil
+    }
+
+    private func makeVMControlHandler() -> VMControlHandler {
+        VMControlHandler(
+            engineProvider: { [weak self] in self?.engineForVMControl() },
+            vmConfiguration: { [weak self] in self?.configStore.vmConfiguration ?? VMConfiguration() },
+            storageRootPath: { [weak self] in self?.configStore.storageRootPath ?? "" },
+            baseImagePath: { [weak self] in self?.configStore.resolvedBaseImagePath ?? "" },
+            platformDirectoryPath: { [weak self] in self?.configStore.platformDirectoryPath ?? "" },
+            cacheConfig: { [weak self] in self?.configStore.cacheConfig ?? CacheConfiguration() },
+            diagnosticsRetention: { [weak self] in
+                self?.configStore.diagnosticsRetentionConfig ?? DiagnosticsRetentionConfiguration()
+            },
+            hasActiveRunnerJob: { [weak self] in
+                self?.queueViewModel.activeJob != nil
+            }
+        )
+    }
+
+    private func engineForVMControl() -> VMEngine? {
+        if let vmEngine {
+            return vmEngine
+        }
+
+        guard configStore.hasCompletedStorageSetup else { return nil }
+
+        if controlVMEngine == nil {
+            controlVMEngine = vmEngineFactory(
+                configStore.storageRootPath,
+                configStore.resolvedBaseImagePath,
+                configStore.platformDirectoryPath,
+                configStore.cacheConfig,
+                configStore.diagnosticsRetentionConfig
+            )
+        }
+
+        return controlVMEngine
     }
 
     func restart() async {
