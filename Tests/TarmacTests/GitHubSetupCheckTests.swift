@@ -81,6 +81,26 @@ struct GitHubSetupCheckTests {
                 {"runner_groups":[{"id":1,"name":"Default"}]}
                 """.data(using: .utf8)!
         )
+        await client.addResponse(
+            forPathContaining: "runner-scale-sets/42",
+            json: """
+                {"id":42,"name":"scale-set"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                {"sessionId":"setup-probe","ownerName":"example-enterprise","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/setup-probe",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
         let tempDir = try TestFactories.makeTempDir()
         defer { TestFactories.cleanup(tempDir) }
         let engine = GitHubEngine(client: client, keychainService: keychain, cacheDirectory: tempDir)
@@ -93,6 +113,12 @@ struct GitHubSetupCheckTests {
         #expect(requests.contains { $0.path == "/enterprises/example-enterprise/actions/runners/downloads" })
         #expect(requests.contains { $0.path == "/enterprises/example-enterprise/actions/runner-groups" })
         #expect(requests.contains { $0.path == "/enterprises/example-enterprise/actions/runner-scale-sets/42" })
+        #expect(
+            requests.contains {
+                $0.method == "POST"
+                    && $0.path == "/enterprises/example-enterprise/actions/runners/42/sessions"
+            }
+        )
         #expect(!requests.contains { $0.path == "/installation/repositories" })
     }
 
@@ -121,6 +147,7 @@ struct GitHubSetupCheckTests {
         let client = SetupStatusGitHubClient(statuses: [
             "/orgs/setup-org/actions/runner-groups": 403,
             "/orgs/setup-org/actions/runner-scale-sets/42": 404,
+            "/orgs/setup-org/actions/runners/42/sessions": 404,
         ])
         let keychain = PreviewKeychainService()
         _ = keychain.save(key: org.privateKeyKeychainKey, data: try TestFactories.makeTestKeyData())
@@ -137,6 +164,7 @@ struct GitHubSetupCheckTests {
                 $0.kind == .scaleSetUnavailable && $0.message.contains("Runner scale set 42")
             }
         )
+        #expect(result.issues.contains { $0.message.contains(ScaleSetPollingMessages.strategyReference) })
     }
 
     private func makeEngine(org: Organization) async throws -> (GitHubEngine, RecordingGitHubClient) {
@@ -156,6 +184,26 @@ struct GitHubSetupCheckTests {
             json: """
                 {"runner_groups":[{"id":1,"name":"Default"},{"id":2,"name":"macOS builders"}]}
                 """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "runner-scale-sets/42",
+            json: """
+                {"id":42,"name":"scale-set"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                {"sessionId":"setup-probe","ownerName":"setup-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/setup-probe",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
         )
 
         let tempDir = try TestFactories.makeTempDir()

@@ -11,7 +11,7 @@ struct AppStateTests {
         withPrivateKeys: Bool = false,
         hasReadyVM: Bool = true,
         lifecycle: MockVMLifecycle? = nil
-    ) throws -> (AppState, RecordingGitHubClient) {
+    ) async throws -> (AppState, RecordingGitHubClient) {
         let (configStore, _) = TestFactories.makeConfigStore()
         let tempDir = try TestFactories.makeTempDir()
 
@@ -34,6 +34,33 @@ struct AppStateTests {
             defaultResponseJSON: """
                 {"token":"ghs_test","expires_at":"\(futureDate)"}
                 """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "runner-scale-sets/",
+            json: """
+                {"id":42,"name":"scale-set"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"poll-session","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/sessions/",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/message",
+            method: "POST",
+            statusCode: 202,
+            json: Data()
         )
 
         let mock = lifecycle ?? MockVMLifecycle()
@@ -59,7 +86,7 @@ struct AppStateTests {
     @Test("start with no orgs logs warning and returns early")
     @MainActor
     func startNoOrgs() async throws {
-        let (appState, _) = try makeAppState()
+        let (appState, _) = try await makeAppState()
         await appState.start()
 
         // No engines should be created — polling should not start
@@ -70,7 +97,7 @@ struct AppStateTests {
     @MainActor
     func startValidConfig() async throws {
         let org = TestFactories.makeOrg(scaleSetId: 42)
-        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: true)
+        let (appState, _) = try await makeAppState(orgs: [org], withPrivateKeys: true)
 
         await appState.start()
 
@@ -84,7 +111,7 @@ struct AppStateTests {
     @MainActor
     func stopCancels() async throws {
         let org = TestFactories.makeOrg(scaleSetId: 42)
-        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: true)
+        let (appState, _) = try await makeAppState(orgs: [org], withPrivateKeys: true)
 
         await appState.start()
         await appState.stop()
@@ -96,7 +123,7 @@ struct AppStateTests {
     @MainActor
     func restart() async throws {
         let org = TestFactories.makeOrg(scaleSetId: 42)
-        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: true)
+        let (appState, _) = try await makeAppState(orgs: [org], withPrivateKeys: true)
 
         await appState.start()
         #expect(appState.queueViewModel.isPolling)
@@ -111,7 +138,7 @@ struct AppStateTests {
     @MainActor
     func startDisabledOrgs() async throws {
         let org = TestFactories.makeOrg(isEnabled: false)
-        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: true)
+        let (appState, _) = try await makeAppState(orgs: [org], withPrivateKeys: true)
 
         // All orgs disabled = validation fails
         await appState.start()
@@ -122,7 +149,7 @@ struct AppStateTests {
     @MainActor
     func startMissingKey() async throws {
         let org = TestFactories.makeOrg()
-        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: false)
+        let (appState, _) = try await makeAppState(orgs: [org], withPrivateKeys: false)
 
         // Missing private key = validation fails
         await appState.start()
@@ -133,7 +160,7 @@ struct AppStateTests {
     @MainActor
     func startMissingVMSetup() async throws {
         let org = TestFactories.makeOrg(scaleSetId: 42)
-        let (appState, _) = try makeAppState(orgs: [org], withPrivateKeys: true, hasReadyVM: false)
+        let (appState, _) = try await makeAppState(orgs: [org], withPrivateKeys: true, hasReadyVM: false)
 
         await appState.start()
 
@@ -192,7 +219,7 @@ struct AppStateTests {
             name: "SevenTwo",
             imageProfile: RunnerImageProfile(name: "Xcode 17")
         )
-        let (appState, _) = try makeAppState(orgs: [org])
+        let (appState, _) = try await makeAppState(orgs: [org])
         let asset = AppleSigningAsset(
             displayName: "Distribution",
             teamId: "TEAM12345",
@@ -230,7 +257,7 @@ struct AppStateTests {
     @MainActor
     func appleSigningInjectionSkipsUnselectedAsset() throws {
         let org = TestFactories.makeOrg(name: "SevenTwo")
-        let (appState, _) = try makeAppState(orgs: [org])
+        let (appState, _) = try await makeAppState(orgs: [org])
         let asset = AppleSigningAsset(
             displayName: "Distribution",
             teamId: "TEAM12345",
@@ -253,7 +280,7 @@ struct AppStateTests {
     @MainActor
     func appleSigningInjectionBlocksInvalidAsset() throws {
         let org = TestFactories.makeOrg(name: "SevenTwo")
-        let (appState, _) = try makeAppState(orgs: [org])
+        let (appState, _) = try await makeAppState(orgs: [org])
         let asset = AppleSigningAsset(
             displayName: "Expired Distribution",
             teamId: "TEAM12345",

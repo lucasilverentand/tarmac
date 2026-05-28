@@ -1,16 +1,23 @@
 import Foundation
 
+/// Per-organization scale-set polling status exposed by `QueueEngine`.
+///
+/// When `isRunning` is false and `lastFailure` is a terminal kind (for example `scaleSetUnavailable`),
+/// the polling loop has paused for that org until the app restarts or GitHub configuration is fixed.
 struct QueuePollingState: Equatable, Sendable {
     let orgName: String
     var sessionId: String?
     var isRunning: Bool
     var lastFailure: QueuePollingFailureKind?
+    /// User-facing detail for `lastFailure`; nil when polling is healthy.
+    var lastFailureMessage: String?
     var retryAttempt: Int
     var nextRetryDelay: TimeInterval?
 }
 
 enum QueuePollingFailureKind: String, Equatable, Sendable {
     case missingConfiguration
+    case scaleSetUnavailable
     case tokenExpired
     case permissionDenied
     case rateLimited
@@ -18,6 +25,17 @@ enum QueuePollingFailureKind: String, Equatable, Sendable {
     case malformedResponse
     case requestFailed
     case unknown
+
+    /// Failures that should stop the long-poll retry loop until configuration changes or the app restarts.
+    var isTerminal: Bool {
+        switch self {
+        case .missingConfiguration, .scaleSetUnavailable:
+            return true
+        case .tokenExpired, .permissionDenied, .rateLimited, .transientFailure, .malformedResponse,
+            .requestFailed, .unknown:
+            return false
+        }
+    }
 }
 
 struct QueuePollingRetryPolicy: Equatable, Sendable {
@@ -33,7 +51,7 @@ struct QueuePollingRetryPolicy: Equatable, Sendable {
         }
 
         switch failure {
-        case .permissionDenied, .tokenExpired, .missingConfiguration:
+        case .permissionDenied, .tokenExpired, .missingConfiguration, .scaleSetUnavailable:
             return maxDelay
         case .malformedResponse:
             return min(baseDelay, maxDelay)

@@ -87,6 +87,48 @@ struct ScaleSetPollerEdgeCaseTests {
         #expect(paths.contains { $0.contains("org-b") })
     }
 
+    @Test("404 from session create is classified as scale set unavailable")
+    func createSessionNotFound() async {
+        let client = ErrorClient(statusCode: 404, message: "Not Found")
+        let poller = ScaleSetPoller(client: client) { _ in "test-token" }
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+
+        do {
+            _ = try await poller.createSession(org: org, token: "test-token")
+            Issue.record("Expected scale set unavailable")
+        } catch let error as ScaleSetPollerError {
+            guard case .scaleSetUnavailable(let failedOrg, let operation, let statusCode, _) = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+            #expect(failedOrg.name == org.name)
+            #expect(operation == "create session")
+            #expect(statusCode == 404)
+            #expect(error.errorDescription?.contains(ScaleSetPollingMessages.strategyReference) == true)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("410 from poll is classified as scale set unavailable")
+    func pollScaleSetGone() async {
+        let client = ErrorClient(statusCode: 410, message: "Gone")
+        let poller = ScaleSetPoller(client: client) { _ in "test-token" }
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+
+        do {
+            _ = try await poller.poll(org: org, sessionId: "session-1")
+            Issue.record("Expected scale set unavailable")
+        } catch let error as ScaleSetPollerError {
+            guard case .scaleSetUnavailable = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test("Poll with non-decodable response is classified as malformed")
     func nonDecodableResponse() async {
         let client = RecordingGitHubClient(

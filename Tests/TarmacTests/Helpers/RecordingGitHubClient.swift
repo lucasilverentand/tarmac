@@ -37,12 +37,16 @@ actor RecordingGitHubClient: GitHubClientProtocol {
     func addRawResponse(
         forPathContaining pathFragment: String,
         method: String? = nil,
+        excludingPathContaining excludedPathFragment: String? = nil,
         statusCode: Int,
         headers: [String: String] = [:],
         json: Data
     ) {
         responseHandlers.append { requestMethod, path in
             guard path.contains(pathFragment), method == nil || method == requestMethod else {
+                return nil
+            }
+            if let excludedPathFragment, path.contains(excludedPathFragment) {
                 return nil
             }
             return StubbedResponse(data: json, statusCode: statusCode, headers: headers)
