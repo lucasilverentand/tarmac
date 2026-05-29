@@ -36,6 +36,45 @@ actor GitHubEngine {
         return try await tokenManager.installationToken(for: org, privateKeyData: keyData)
     }
 
+    /// Resolve an installation token from credentials that may not yet be saved
+    /// to the Keychain (used by the account-setup "Create scale set" action).
+    func installationToken(appId: String, installationId: Int, privateKeyData: Data) async throws -> String {
+        try await tokenManager.installationToken(
+            installationId: installationId,
+            appId: appId,
+            privateKeyData: privateKeyData,
+            logSubject: "scale-set-setup"
+        )
+    }
+
+    /// Find a runner scale set by name, creating it in the given runner group
+    /// when it does not exist. Returns the resolved scale set (with its numeric
+    /// `id`). The same call reconciles a missing scale set: if the previously
+    /// created one is gone, listing no longer finds it and a fresh one is made.
+    func ensureScaleSet(
+        accountPath: String,
+        token: String,
+        name: String,
+        runnerGroupId: Int,
+        labels: [String]
+    ) async throws -> RunnerScaleSet {
+        let existing = try await runnerProvider.listScaleSets(token: token, accountPath: accountPath)
+        if let match = existing.first(where: { $0.name == name }) {
+            Log.github.info("Reusing existing runner scale set \(match.id) named '\(name)'")
+            return match
+        }
+
+        let created = try await runnerProvider.createScaleSet(
+            token: token,
+            accountPath: accountPath,
+            name: name,
+            runnerGroupId: runnerGroupId,
+            labels: labels
+        )
+        Log.github.info("Created runner scale set \(created.id) named '\(name)'")
+        return created
+    }
+
     func authorizationToken(for org: Organization) async throws -> String {
         switch org.accountType {
         case .organization:

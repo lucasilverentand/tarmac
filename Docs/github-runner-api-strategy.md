@@ -125,6 +125,35 @@ If this API proves unstable, the fallback strategy is to register ephemeral
 JIT runners and rely on normal GitHub runner matching rather than poll
 scale-set sessions directly.
 
+## Creating the scale set
+
+GitHub has no web UI to create a runner scale set; scale sets are an ARC
+concept created through the same Actions-service surface as the session
+endpoints. Asking users to "create a runner scale set on GitHub" is therefore
+not actionable — the web UI only creates runner *groups*, which do not yield a
+scale-set ID.
+
+Tarmac creates the scale set itself. The account-setup "Create / Find Scale
+Set" action:
+
+- lists existing scale sets with `GET /{account_type}/{account}/actions/runner-scale-sets`
+- reuses the one whose name matches the configured scale-set name (default
+  `tarmac-macos`), or creates it with
+  `POST /{account_type}/{account}/actions/runner-scale-sets`
+- writes the returned numeric `id` into the account's scale-set field
+
+Both endpoints use the same camelCase Actions-service JSON shape that the
+polling-session response already decodes (`RunnerScaleSet`), and the create
+request defaults the scale set to the default runner group (`1`), ephemeral
+runners, and no auto-update. Because the create action is name-keyed and
+list-then-create, re-running it reconciles a missing scale set: if the prior
+one is gone, listing no longer finds it and a fresh one is created.
+
+This works identically for organization and enterprise accounts (only the
+`{account_type}/{account}` prefix differs). The exact request schema for these
+non-public endpoints may need adjustment if GitHub changes them; the fallback
+remains the registration-token / normal-matching path above.
+
 ## Open decisions
 
 - Enterprise-owned app control-plane support: whether Tarmac should install the

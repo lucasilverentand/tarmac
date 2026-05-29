@@ -27,6 +27,104 @@ struct RunnerProviderTests {
         #expect(config == "test-config-data")
     }
 
+    @Test("createScaleSet POSTs a name-keyed camelCase body and returns the new id")
+    func createScaleSetSendsBodyAndReturnsId() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"id":42,"name":"tarmac-macos","runnerGroupId":1,"runnerGroupName":"Default"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        let result = try await provider.createScaleSet(
+            token: "tok",
+            accountPath: "/orgs/test-org",
+            name: "tarmac-macos",
+            runnerGroupId: 1,
+            labels: ["self-hosted", "macOS"]
+        )
+
+        #expect(result.id == 42)
+        #expect(result.name == "tarmac-macos")
+
+        let requests = await client.requests
+        #expect(requests.count == 1)
+        #expect(requests[0].method == "POST")
+        #expect(requests[0].path == "/orgs/test-org/actions/runner-scale-sets")
+
+        let bodyData = try #require(requests[0].bodyData)
+        let body = try JSONSerialization.jsonObject(with: bodyData) as! [String: Any]
+        #expect(body["name"] as? String == "tarmac-macos")
+        #expect(body["runnerGroupId"] as? Int == 1)
+        let bodyLabels = body["labels"] as? [[String: Any]]
+        #expect(bodyLabels?.count == 2)
+        #expect(bodyLabels?.first?["name"] as? String == "self-hosted")
+        #expect(bodyLabels?.first?["type"] as? String == "User")
+    }
+
+    @Test("createScaleSet routes enterprise accounts to /enterprises path")
+    func createScaleSetEnterprisePath() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"id":7,"name":"tarmac-macos","runnerGroupId":1}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        _ = try await provider.createScaleSet(
+            token: "tok",
+            accountPath: "/enterprises/acme",
+            name: "tarmac-macos",
+            runnerGroupId: 1,
+            labels: ["self-hosted"]
+        )
+
+        let requests = await client.requests
+        #expect(requests[0].path == "/enterprises/acme/actions/runner-scale-sets")
+    }
+
+    @Test("listScaleSets GETs the account path and parses the value array")
+    func listScaleSetsParsesValue() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"count":1,"value":[{"id":9,"name":"tarmac-macos","runnerGroupId":2}]}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        let sets = try await provider.listScaleSets(token: "tok", accountPath: "/orgs/o")
+
+        #expect(sets.count == 1)
+        #expect(sets.first?.id == 9)
+        #expect(sets.first?.name == "tarmac-macos")
+
+        let requests = await client.requests
+        #expect(requests[0].method == "GET")
+        #expect(requests[0].path == "/orgs/o/actions/runner-scale-sets")
+    }
+
+    @Test("listScaleSets returns empty when no scale sets are present")
+    func listScaleSetsEmpty() async throws {
+        let client = RecordingGitHubClient()  // default "{}"
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        let sets = try await provider.listScaleSets(token: "tok", accountPath: "/orgs/o")
+
+        #expect(sets.isEmpty)
+    }
+
     @Test("generateJITConfig sends correct path with org name")
     func generateJITConfigPath() async throws {
         let client = RecordingGitHubClient(

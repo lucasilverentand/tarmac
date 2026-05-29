@@ -78,6 +78,65 @@ final class SettingsViewModel {
         return deleted
     }
 
+    /// The default name Tarmac gives the runner scale sets it creates. Stable so
+    /// the create action reconciles to the same scale set instead of duplicating.
+    static let defaultScaleSetName = "tarmac-macos"
+
+    /// Find or create a runner scale set for the account currently being edited
+    /// and return its numeric ID. Credentials are taken from the in-flight form
+    /// values when provided, falling back to the Keychain for a saved account.
+    ///
+    /// GitHub has no web UI to create a runner scale set, so this is how a fresh
+    /// account obtains the scale-set ID that polling requires.
+    func createScaleSet(
+        for org: Organization,
+        scaleSetName: String,
+        runnerGroupId: Int,
+        inFlightAccessToken: String?,
+        inFlightPrivateKey: Data?
+    ) async throws -> Int {
+        guard !org.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SettingsError.missingAccountName
+        }
+
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+
+        let token: String
+        switch org.accountType {
+        case .enterprise:
+            let inFlight = inFlightAccessToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let inFlight, !inFlight.isEmpty {
+                token = inFlight
+            } else if let saved = configStore.loadAccessToken(for: org) {
+                token = saved
+            } else {
+                throw SettingsError.missingCredentials
+            }
+        case .organization:
+            guard let keyData = inFlightPrivateKey ?? configStore.loadPrivateKey(for: org) else {
+                throw SettingsError.missingCredentials
+            }
+            token = try await engine.installationToken(
+                appId: org.appId,
+                installationId: org.installationId,
+                privateKeyData: keyData
+            )
+        }
+
+        let scaleSet = try await engine.ensureScaleSet(
+            accountPath: org.accountPath,
+            token: token,
+            name: scaleSetName,
+            runnerGroupId: runnerGroupId,
+            labels: org.runnerLabels
+        )
+        Log.config.info("Resolved runner scale set \(scaleSet.id) for account \(org.name)")
+        return scaleSet.id
+    }
+
     func findOrganizationInstallationId(
         organizationName: String,
         appId: String,
@@ -495,11 +554,17 @@ private func formatBytes(_ bytes: Int64) -> String {
 enum SettingsError: LocalizedError {
     case fileAccessDenied
     case keychainSaveFailed
+    case missingCredentials
+    case missingAccountName
 
     var errorDescription: String? {
         switch self {
         case .fileAccessDenied: "Could not access the selected file"
         case .keychainSaveFailed: "Failed to save key to keychain"
+        case .missingCredentials:
+            "Add the account credentials (App private key or enterprise access token) before creating a scale set."
+        case .missingAccountName:
+            "Enter the organization name or enterprise slug before creating a scale set."
         }
     }
 }

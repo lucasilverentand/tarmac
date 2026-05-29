@@ -223,6 +223,67 @@ struct GitHubEngineTests {
         #expect(body.repositorySelection == "none")
     }
 
+    @Test("ensureScaleSet reuses an existing scale set matched by name and does not create one")
+    func ensureScaleSetReusesExisting() async throws {
+        let client = RecordingGitHubClient()
+        await client.addRawResponse(
+            forPathContaining: "/actions/runner-scale-sets",
+            method: "GET",
+            statusCode: 200,
+            json: """
+                {"count":1,"value":[{"id":5,"name":"tarmac-macos","runnerGroupId":1}]}
+                """.data(using: .utf8)!
+        )
+        let (engine, _, _) = try makeEngine(client: client)
+
+        let scaleSet = try await engine.ensureScaleSet(
+            accountPath: "/orgs/test-org",
+            token: "tok",
+            name: "tarmac-macos",
+            runnerGroupId: 1,
+            labels: ["self-hosted"]
+        )
+
+        #expect(scaleSet.id == 5)
+        let requests = await client.requests
+        #expect(requests.allSatisfy { $0.method == "GET" })
+        #expect(!requests.contains { $0.method == "POST" })
+    }
+
+    @Test("ensureScaleSet creates a scale set when none matches the name")
+    func ensureScaleSetCreatesWhenMissing() async throws {
+        let client = RecordingGitHubClient()
+        await client.addRawResponse(
+            forPathContaining: "/actions/runner-scale-sets",
+            method: "GET",
+            statusCode: 200,
+            json: """
+                {"count":0,"value":[]}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runner-scale-sets",
+            method: "POST",
+            statusCode: 201,
+            json: """
+                {"id":11,"name":"tarmac-macos","runnerGroupId":1}
+                """.data(using: .utf8)!
+        )
+        let (engine, _, _) = try makeEngine(client: client)
+
+        let scaleSet = try await engine.ensureScaleSet(
+            accountPath: "/orgs/test-org",
+            token: "tok",
+            name: "tarmac-macos",
+            runnerGroupId: 1,
+            labels: ["self-hosted"]
+        )
+
+        #expect(scaleSet.id == 11)
+        let requests = await client.requests
+        #expect(requests.contains { $0.method == "POST" && $0.path == "/orgs/test-org/actions/runner-scale-sets" })
+    }
+
     @Test("Different installations trigger separate API calls")
     func differentInstallationsSeparateCalls() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
