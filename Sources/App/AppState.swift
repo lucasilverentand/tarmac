@@ -327,9 +327,20 @@ final class AppState {
         do {
             let org = configStore.organizations.first { $0.name == job.organizationName }
             guard let org else {
-                Log.app.error("No org found for job \(job.id)")
-                await queueEngine.jobStore.updateJob(id: job.id, status: .failed)
-                queueViewModel.updateJobStatus(id: job.id, status: .failed)
+                let reason = "No account found for job organization \(job.organizationName)."
+                Log.app.error("\(reason)")
+                await queueEngine.jobStore.updateJob(id: job.id, status: .failed, failureReason: reason)
+                queueViewModel.updateJobStatus(id: job.id, status: .failed, failureReason: reason)
+                await queueEngine.tryDispatch()
+                return
+            }
+
+            refreshReadiness()
+            guard vmStatusViewModel.readyForJobs else {
+                let reason = "Pre-flight readiness failed: \(vmStatusViewModel.readinessStatusText)"
+                Log.app.warning("Job \(job.id) refused before VM provisioning: \(reason)")
+                await queueEngine.jobStore.updateJob(id: job.id, status: .failed, failureReason: reason)
+                queueViewModel.updateJobStatus(id: job.id, status: .failed, failureReason: reason)
                 await queueEngine.tryDispatch()
                 return
             }
@@ -392,12 +403,13 @@ final class AppState {
                 queueEngine: queueEngine
             )
         } catch {
-            Log.app.error("Failed to provision job \(job.id): \(error.localizedDescription)")
+            let reason = error.localizedDescription
+            Log.app.error("Failed to provision job \(job.id): \(reason)")
             if let failedLease = await queueEngine.runnerLeaseStore.recordCleanupState(jobId: job.id, state: .failed) {
                 await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: failedLease)
             }
-            await queueEngine.jobStore.updateJob(id: job.id, status: .failed)
-            queueViewModel.updateJobStatus(id: job.id, status: .failed)
+            await queueEngine.jobStore.updateJob(id: job.id, status: .failed, failureReason: reason)
+            queueViewModel.updateJobStatus(id: job.id, status: .failed, failureReason: reason)
             if let diagnosticsPath = vmEngine.diagnosticsBundlePath(for: job.id)?.path {
                 if let lease = await queueEngine.runnerLeaseStore.recordDiagnosticsBundle(
                     jobId: job.id,
@@ -507,7 +519,13 @@ final class AppState {
         if let diagnosticsPath {
             await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
         }
-        queueViewModel.updateJobStatus(id: job.id, status: result.jobStatus)
+        let failureReason: String? =
+            if case .failure(let reason) = result {
+                reason
+            } else {
+                nil
+            }
+        queueViewModel.updateJobStatus(id: job.id, status: result.jobStatus, failureReason: failureReason)
         if !vmEngine.hasWarmRunner {
             vmStatusViewModel.activeVM = nil
         }

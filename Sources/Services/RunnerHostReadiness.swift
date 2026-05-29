@@ -151,6 +151,13 @@ struct RunnerHostReadiness: Equatable, Sendable {
                         message: "Verify the base image before starting."
                     )
                 )
+            } else if !storage.isGuestBootstrapVerified() {
+                issues.append(
+                    .init(
+                        category: .vm,
+                        message: "Verify the guest bootstrap before starting jobs."
+                    )
+                )
             }
         }
 
