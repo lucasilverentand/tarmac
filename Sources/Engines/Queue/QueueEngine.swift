@@ -13,6 +13,7 @@ actor QueueEngine {
     private let retryPolicy: QueuePollingRetryPolicy
     private var pollers: [String: ScaleSetPoller] = [:]
     private var sessions: [String: String] = [:]  // org name → sessionId
+    private var runnerGroupIds: [String: Int] = [:]  // org name → scale set's runner group id
     private var pollingTasks: [String: Task<Void, Never>] = [:]
     private var pollingStates: [String: QueuePollingState] = [:]
     private var processedMessageIdsByOrg: [String: Set<Int64>] = [:]
@@ -102,6 +103,7 @@ actor QueueEngine {
         pollingTasks.removeAll()
         pollers.removeAll()
         sessions.removeAll()
+        runnerGroupIds.removeAll()
         pollingStates.removeAll()
     }
 
@@ -154,6 +156,10 @@ actor QueueEngine {
                 return
             }
             sessions[org.name] = sessionId
+            if let groupId = session.runnerScaleSet?.runnerGroupId {
+                runnerGroupIds[org.name] = groupId
+                Log.queue.debug("Scale set for org \(org.name) belongs to runner group \(groupId)")
+            }
             sessionStore.save(
                 PollingSessionRecord(
                     orgName: org.name,
@@ -277,7 +283,7 @@ actor QueueEngine {
             return
         }
 
-        let job = RunnerJob(
+        var job = RunnerJob(
             id: base.jobId,
             organizationName: org.name,
             runnerRequestId: base.runnerRequestId,
@@ -286,6 +292,7 @@ actor QueueEngine {
             repositoryName: base.repositoryName,
             queuedAt: Date()
         )
+        job.runnerGroupId = runnerGroupIds[org.name]
 
         await jobStore.addJob(job)
         await tryDispatch()
