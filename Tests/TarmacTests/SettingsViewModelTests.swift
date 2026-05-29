@@ -86,6 +86,65 @@ struct SettingsViewModelTests {
         #expect(!vm.hasAccessToken(for: org))
     }
 
+    @Test("reconcileCredentials drops the App private key when switching org → enterprise")
+    func reconcileDropsPrivateKeyOnEnterpriseSwitch() {
+        let (vm, _, keychain) = makeVM()
+        var org = TestFactories.makeOrg(name: "acme")
+
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+        #expect(vm.hasPrivateKey(for: org))
+
+        org.accountType = .enterprise
+        vm.reconcileCredentials(
+            for: org,
+            newType: .enterprise,
+            previousType: .organization,
+            accessToken: "github_pat_enterprise"
+        )
+
+        #expect(!vm.hasPrivateKey(for: org))
+        #expect(vm.hasAccessToken(for: org))
+    }
+
+    @Test("reconcileCredentials drops the access token when switching enterprise → org")
+    func reconcileDropsAccessTokenOnOrgSwitch() {
+        let (vm, _, keychain) = makeVM()
+        var org = TestFactories.makeOrg(name: "acme", accountType: .enterprise, appId: "", installationId: 0)
+
+        _ = vm.saveAccessToken("github_pat_enterprise", for: org)
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+        #expect(vm.hasAccessToken(for: org))
+
+        org.accountType = .organization
+        vm.reconcileCredentials(
+            for: org,
+            newType: .organization,
+            previousType: .enterprise,
+            accessToken: ""
+        )
+
+        #expect(!vm.hasAccessToken(for: org))
+        // The App private key is what the org account now uses, so it stays.
+        #expect(vm.hasPrivateKey(for: org))
+    }
+
+    @Test("reconcileCredentials keeps the private key when the account stays an organization")
+    func reconcileKeepsPrivateKeyWhenTypeUnchanged() {
+        let (vm, _, keychain) = makeVM()
+        let org = TestFactories.makeOrg(name: "acme")
+
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+
+        vm.reconcileCredentials(
+            for: org,
+            newType: .organization,
+            previousType: .organization,
+            accessToken: ""
+        )
+
+        #expect(vm.hasPrivateKey(for: org))
+    }
+
     @Test("validateConfiguration returns empty when fully configured")
     func validateFullyConfigured() throws {
         let (vm, _, keychain) = makeVM()

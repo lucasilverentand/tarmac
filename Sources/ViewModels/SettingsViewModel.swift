@@ -78,6 +78,34 @@ final class SettingsViewModel {
         return deleted
     }
 
+    /// Reconcile stored Keychain credentials when an account's runner type
+    /// changes, dropping secrets the new type no longer uses so stale material
+    /// does not outlive its purpose.
+    ///
+    /// - organization → enterprise: save the access token (when provided) and
+    ///   remove the now-unused GitHub App private key.
+    /// - enterprise → organization: remove the now-unused enterprise access token.
+    func reconcileCredentials(
+        for org: Organization,
+        newType: GitHubAccountType,
+        previousType: GitHubAccountType,
+        accessToken: String
+    ) {
+        switch newType {
+        case .enterprise:
+            if !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                _ = saveAccessToken(accessToken, for: org)
+            }
+            if previousType == .organization {
+                deletePrivateKey(for: org)
+            }
+        case .organization:
+            if previousType == .enterprise {
+                _ = deleteAccessToken(for: org)
+            }
+        }
+    }
+
     func findOrganizationInstallationId(
         organizationName: String,
         appId: String,
