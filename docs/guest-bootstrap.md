@@ -62,3 +62,11 @@ The bootstrap links the root user cache locations in the cloned guest disk to th
 - `BUN_INSTALL_CACHE_DIR`
 
 The guest writes `bootstrap.log`, `runner.log`, `exit-code`, and cache setup details into the shared job directory before requesting shutdown.
+
+Base image verification also boots a temporary shared-directory probe. When the
+LaunchDaemon runs the probe successfully, Tarmac writes
+`Platform/guestBootstrapVerified.json` beside the base image verification marker.
+Jobs are refused before VM provisioning when that marker is missing, so a base
+image without the guest bootstrap fails quickly instead of waiting for the runner
+completion timeout. After installing the bootstrap into an existing base image,
+rerun base image verification so the host marker reflects the prepared image.

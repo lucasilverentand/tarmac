@@ -36,9 +36,13 @@ final class VMEngine: VMManagerProtocol {
         storage.isBaseImageVerified()
     }
 
-    /// True only when the base image both exists on disk and has passed boot verification.
+    var guestBootstrapVerified: Bool {
+        storage.isGuestBootstrapVerified()
+    }
+
+    /// True only when the base image exists, boots, and the guest bootstrap responds.
     var baseImageReady: Bool {
-        baseImageExists && baseImageVerified
+        baseImageExists && baseImageVerified && guestBootstrapVerified
     }
 
     var installProgress: Double {
@@ -103,18 +107,23 @@ final class VMEngine: VMManagerProtocol {
     /// Writes the verified marker only when the full cycle succeeds.
     func verifyBaseImage(
         config: VMConfiguration,
-        holdSeconds: TimeInterval = 10
+        holdSeconds: TimeInterval = 10,
+        bootstrapProbeTimeoutSeconds: Int = 30
     ) async throws {
         guard baseImageExists else {
             throw VMEngineError.baseImageMissing
         }
 
         try storage.prepareBaseDirectories()
+        try storage.clearBaseImageVerified()
         verificationState = .verifying
         _ = try ensureStorageReadyForBoot(config: config, context: "base image verification")
 
+        let verificationId = UUID()
         let clonePath = storage.disksDirectory
-            .appendingPathComponent("verify-\(UUID().uuidString).img")
+            .appendingPathComponent("verify-\(verificationId.uuidString).img")
+        let sharedDirectory = storage.jobsDirectory
+            .appendingPathComponent("verify-\(verificationId.uuidString)", isDirectory: true)
 
         do {
             let cloneMetrics = try diskManager.cloneDisk(from: baseImageURL, to: clonePath)
@@ -124,20 +133,41 @@ final class VMEngine: VMManagerProtocol {
             throw VMEngineError.verificationFailed(reason: error.localizedDescription)
         }
 
-        defer { try? diskManager.deleteDisk(at: clonePath) }
+        defer {
+            try? diskManager.deleteDisk(at: clonePath)
+            try? FileManager.default.removeItem(at: sharedDirectory)
+        }
 
         do {
+            try prepareBootstrapProbeSharedDirectory(sharedDirectory)
             try await lifecycle.bootVM(
                 vmConfig: config,
                 diskPath: clonePath,
                 platformStore: platformStore,
-                sharedDirectoryURL: nil,
+                sharedDirectoryURL: sharedDirectory,
                 cacheDirectoryURL: nil
             )
         } catch {
             verificationState = .failed(message: "Boot failed: \(error.localizedDescription)")
             Log.vm.error("Base image verification boot failed: \(error.localizedDescription)")
             throw VMEngineError.verificationFailed(reason: error.localizedDescription)
+        }
+
+        do {
+            let result = try await waitForSharedCompletion(
+                in: sharedDirectory,
+                timeoutSeconds: bootstrapProbeTimeoutSeconds,
+                context: "guest bootstrap probe"
+            )
+            if case .failure(let reason) = result {
+                throw VMEngineError.verificationFailed(reason: "Guest bootstrap probe failed: \(reason)")
+            }
+        } catch {
+            try? await lifecycle.stopVM()
+            let reason = "Guest bootstrap check failed: \(error.localizedDescription)"
+            verificationState = .failed(message: reason)
+            Log.vm.error("Guest bootstrap verification failed: \(error.localizedDescription)")
+            throw VMEngineError.verificationFailed(reason: reason)
         }
 
         if holdSeconds > 0 {
@@ -154,6 +184,7 @@ final class VMEngine: VMManagerProtocol {
 
         do {
             try storage.markBaseImageVerified()
+            try storage.markGuestBootstrapVerified()
         } catch {
             verificationState = .failed(message: "Could not write verified marker: \(error.localizedDescription)")
             throw VMEngineError.verificationFailed(reason: error.localizedDescription)
@@ -796,6 +827,25 @@ final class VMEngine: VMManagerProtocol {
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runScriptURL.path)
     }
 
+    private func prepareBootstrapProbeSharedDirectory(_ sharedDirectory: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: sharedDirectory.path) {
+            try fm.removeItem(at: sharedDirectory)
+        }
+
+        let runnerDirectory = sharedDirectory.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
+        try fm.createDirectory(at: runnerDirectory, withIntermediateDirectories: true)
+        try "bootstrap-probe\n".write(
+            to: sharedDirectory.appendingPathComponent(GuestBootstrapContract.jitConfigFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runScriptURL = runnerDirectory.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
+        try Self.bootstrapProbeRunScript.write(to: runScriptURL, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runScriptURL.path)
+    }
+
     private func waitForSharedCompletion(
         in sharedDirectory: URL,
         timeoutSeconds: Int,
@@ -815,6 +865,14 @@ final class VMEngine: VMManagerProtocol {
 
         return .failure("Timed out waiting for \(context)")
     }
+}
+
+private extension VMEngine {
+    static let bootstrapProbeRunScript = """
+        #!/bin/bash
+        set -euo pipefail
+        echo "Tarmac guest bootstrap probe"
+        """
 }
 
 enum VMEngineError: LocalizedError {

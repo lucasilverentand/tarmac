@@ -78,6 +78,30 @@ struct RunnerHostReadinessTests {
         #expect(readiness.issues.contains { $0.category == .vm && $0.message.contains("platform data") })
     }
 
+    @Test("missing guest bootstrap marker blocks VM readiness")
+    func missingGuestBootstrapMarkerBlocksReadiness() throws {
+        let (store, _) = TestFactories.makeConfigStore()
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        try store.configureStorage(at: root)
+        try TestFactories.prepareReadyRunnerHostStorage(for: store)
+        let storage = StorageManager(rootDirectory: root)
+        try storage.clearGuestBootstrapVerified()
+
+        let org = TestFactories.makeOrg()
+        store.addOrganization(org)
+        _ = store.savePrivateKey(Data([0x01]), for: org)
+
+        let readiness = RunnerHostReadiness.evaluate(
+            configStore: store,
+            hostCapability: Self.supportedHost
+        )
+
+        #expect(!readiness.isReady)
+        #expect(readiness.issues.contains { $0.category == .vm && $0.message.contains("guest bootstrap") })
+    }
+
     @Test("GitHub credential failures stay distinguishable")
     func githubCredentialIssues() throws {
         let (store, _) = TestFactories.makeConfigStore()
