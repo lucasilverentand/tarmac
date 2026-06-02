@@ -7,6 +7,10 @@ struct RunnerJob: Identifiable, Codable, Sendable {
     var status: JobStatus
     var workflowName: String? = nil
     var repositoryName: String? = nil
+    /// Runner group the scale set belongs to, discovered at polling-session
+    /// creation. Used when generating the JIT runner config; nil falls back to
+    /// the default group.
+    var runnerGroupId: Int? = nil
     var jitConfig: String? = nil
     var registrationToken: String? = nil
     var runnerRegistrationURL: String? = nil

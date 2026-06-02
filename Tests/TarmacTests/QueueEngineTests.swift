@@ -577,6 +577,49 @@ struct QueueEngineTests {
         #expect(staleDeleteIndex < newCreateIndex)
         #expect(sessionStore.record(for: org.name) == nil)
     }
+    @Test("Job inherits the scale set's runner group from the polling session")
+    func jobInheritsRunnerGroupFromSession() async throws {
+        let org = TestFactories.makeOrg()
+        let (engine, store, client) = try makeEngine(privateKeyOrg: org)
+
+        // Register most-specific paths first — handlers match in registration order
+        // and the message path also contains the "/sessions" create fragment.
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/sess/message",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                [{"messageId":501,"messageType":"JobAvailable","body":"{\\"jobMessageBase\\":{\\"jobId\\":501,\\"runnerRequestId\\":1,\\"repositoryName\\":\\"test-repo\\",\\"ownerName\\":\\"test-org\\",\\"workflowRunName\\":\\"CI\\"}}","statistics":null}]
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions/sess",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/actions/runners/42/sessions",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                {"sessionId":"sess","ownerName":"test-org","runnerScaleSet":{"id":42,"name":"scale-set","runnerGroupId":9,"runnerGroupName":"macOS"}}
+                """.data(using: .utf8)!
+        )
+
+        await engine.start(orgs: [org])
+
+        var job = await store.job(byId: 501)
+        for _ in 0..<50 where job == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            job = await store.job(byId: 501)
+        }
+
+        await engine.stop()
+
+        let dispatched = try #require(job)
+        #expect(dispatched.runnerGroupId == 9)
+    }
 }
 
 private actor CompletionSourceHolder {

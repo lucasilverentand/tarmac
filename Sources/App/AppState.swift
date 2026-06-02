@@ -354,7 +354,11 @@ final class AppState {
             // Get runner binary + guest registration config (JIT with registration-token fallback)
             let runnerPath = try await githubEngine.ensureRunner(for: org)
             let runnerName = "ephemeral-\(job.id)"
-            let guestConfig = try await githubEngine.generateRunnerGuestConfig(for: org, runnerName: runnerName)
+            let guestConfig = try await githubEngine.generateRunnerGuestConfig(
+                for: org,
+                runnerName: runnerName,
+                runnerGroupId: job.runnerGroupId
+            )
             var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.runnerLabels)
             await queueEngine.runnerLeaseStore.upsert(lease)
             await queueEngine.jobStore.updateRunnerLease(jobId: job.id, lease: lease)

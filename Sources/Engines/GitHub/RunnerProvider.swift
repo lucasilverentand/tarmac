@@ -70,7 +70,13 @@ actor RunnerProvider {
         return runnerDir
     }
 
-    func generateJITConfig(token: String, accountPath: String, name: String, labels: [String]) async throws -> String {
+    func generateJITConfig(
+        token: String,
+        accountPath: String,
+        name: String,
+        labels: [String],
+        runnerGroupId: Int? = nil
+    ) async throws -> String {
         struct JITRequest: Encodable, Sendable {
             let name: String
             let runner_group_id: Int
@@ -84,7 +90,9 @@ actor RunnerProvider {
 
         let request = JITRequest(
             name: name,
-            runner_group_id: 1,  // Default group
+            // Prefer the scale set's runner group (discovered at session creation);
+            // fall back to the default group 1 when GitHub did not report one.
+            runner_group_id: runnerGroupId ?? 1,
             labels: labels,
             work_folder: "_work"
         )
