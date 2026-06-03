@@ -117,12 +117,17 @@ struct StorageManagerTests {
         #expect(!storage.isBaseImageVerified())
 
         try storage.markBaseImageVerified()
+        try storage.markGuestBootstrapVerified()
         #expect(storage.isBaseImageVerified())
+        #expect(storage.isGuestBootstrapVerified())
         #expect(FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
+        #expect(FileManager.default.fileExists(atPath: storage.guestBootstrapVerifiedMarkerURL.path))
 
         try storage.clearBaseImageVerified()
         #expect(!storage.isBaseImageVerified())
+        #expect(!storage.isGuestBootstrapVerified())
         #expect(!FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.guestBootstrapVerifiedMarkerURL.path))
     }
 
     @Test("resetBaseImage removes image and platform data but preserves retained installer")

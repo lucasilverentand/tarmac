@@ -270,13 +270,15 @@ actor GitHubEngine {
         ]
     }
 
-    func generateJITConfig(for org: Organization, runnerName: String) async throws -> String {
+    func generateJITConfig(for org: Organization, runnerName: String, runnerGroupId: Int? = nil) async throws -> String
+    {
         let token = try await authorizationToken(for: org)
         return try await runnerProvider.generateJITConfig(
             token: token,
             accountPath: org.accountPath,
             name: runnerName,
-            labels: org.runnerLabels
+            labels: org.runnerLabels,
+            runnerGroupId: runnerGroupId
         )
     }
 
@@ -288,9 +290,17 @@ actor GitHubEngine {
         )
     }
 
-    func generateRunnerGuestConfig(for org: Organization, runnerName: String) async throws -> RunnerGuestConfig {
+    func generateRunnerGuestConfig(
+        for org: Organization,
+        runnerName: String,
+        runnerGroupId: Int? = nil
+    ) async throws -> RunnerGuestConfig {
         do {
-            let jitConfig = try await generateJITConfig(for: org, runnerName: runnerName)
+            let jitConfig = try await generateJITConfig(
+                for: org,
+                runnerName: runnerName,
+                runnerGroupId: runnerGroupId
+            )
             return .jit(config: jitConfig)
         } catch {
             guard error.isRunnerRegistrationFallbackEligible else {

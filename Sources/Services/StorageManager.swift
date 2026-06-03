@@ -25,6 +25,7 @@ struct StorageManager: Sendable {
 
     var baseImageURL: URL { rootDirectory.appendingPathComponent("BaseImage.img") }
     var baseImageVerifiedMarkerURL: URL { platformDirectory.appendingPathComponent("baseImageVerified.json") }
+    var guestBootstrapVerifiedMarkerURL: URL { platformDirectory.appendingPathComponent("guestBootstrapVerified.json") }
     var restoreIPSWURL: URL { rootDirectory.appendingPathComponent("restore.ipsw") }
     var ipswResumeDataURL: URL { rootDirectory.appendingPathComponent("ipsw-resume.json") }
     var platformDirectory: URL { rootDirectory.appendingPathComponent("Platform", isDirectory: true) }
@@ -96,6 +97,10 @@ struct StorageManager: Sendable {
         FileManager.default.fileExists(atPath: baseImageVerifiedMarkerURL.path)
     }
 
+    func isGuestBootstrapVerified() -> Bool {
+        FileManager.default.fileExists(atPath: guestBootstrapVerifiedMarkerURL.path)
+    }
+
     func markBaseImageVerified(at date: Date = Date()) throws {
         try FileManager.default.createDirectory(at: platformDirectory, withIntermediateDirectories: true)
         let marker = BaseImageVerificationMarker(verifiedAt: date)
@@ -103,8 +108,23 @@ struct StorageManager: Sendable {
         try data.write(to: baseImageVerifiedMarkerURL, options: .atomic)
     }
 
+    func markGuestBootstrapVerified(at date: Date = Date()) throws {
+        try FileManager.default.createDirectory(at: platformDirectory, withIntermediateDirectories: true)
+        let marker = GuestBootstrapVerificationMarker(verifiedAt: date)
+        let data = try JSONEncoder.iso8601.encode(marker)
+        try data.write(to: guestBootstrapVerifiedMarkerURL, options: .atomic)
+    }
+
     func clearBaseImageVerified() throws {
-        let url = baseImageVerifiedMarkerURL
+        for url in [baseImageVerifiedMarkerURL, guestBootstrapVerifiedMarkerURL] {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    func clearGuestBootstrapVerified() throws {
+        let url = guestBootstrapVerifiedMarkerURL
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
@@ -373,6 +393,10 @@ struct StorageReport: Sendable {
 }
 
 struct BaseImageVerificationMarker: Codable, Sendable {
+    let verifiedAt: Date
+}
+
+struct GuestBootstrapVerificationMarker: Codable, Sendable {
     let verifiedAt: Date
 }
 

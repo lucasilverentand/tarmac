@@ -199,6 +199,57 @@ struct RunnerProviderTests {
         #expect(labels == ["custom", "macOS"])
     }
 
+    @Test("generateJITConfig sends provided runner group id")
+    func generateJITConfigRunnerGroup() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"encoded_jit_config":"cfg"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        _ = try await provider.generateJITConfig(
+            token: "tok",
+            accountPath: "/orgs/org",
+            name: "r1",
+            labels: ["self-hosted"],
+            runnerGroupId: 7
+        )
+
+        let requests = await client.requests
+        let bodyData = try #require(requests[0].bodyData)
+        let body = try JSONSerialization.jsonObject(with: bodyData) as! [String: Any]
+        #expect(body["runner_group_id"] as? Int == 7)
+    }
+
+    @Test("generateJITConfig falls back to default group when none provided")
+    func generateJITConfigDefaultGroup() async throws {
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: """
+                {"encoded_jit_config":"cfg"}
+                """.data(using: .utf8)!
+        )
+
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
+        _ = try await provider.generateJITConfig(
+            token: "tok",
+            accountPath: "/orgs/org",
+            name: "r1",
+            labels: ["self-hosted"]
+        )
+
+        let requests = await client.requests
+        let bodyData = try #require(requests[0].bodyData)
+        let body = try JSONSerialization.jsonObject(with: bodyData) as! [String: Any]
+        #expect(body["runner_group_id"] as? Int == 1)
+    }
+
     @Test("ensureRunner returns cached path when run.sh exists")
     func ensureRunnerUsesCachedPath() async throws {
         let tempDir = try TestFactories.makeTempDir()

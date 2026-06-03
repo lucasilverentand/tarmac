@@ -101,6 +101,12 @@ Runner groups are the supported visibility boundary. Tarmac should validate that
 - the group's repository visibility allows the repositories the user expects
 - configured labels match the workflow `runs-on` contract
 
+The JIT runner config is generated against the runner group the scale set
+belongs to. Tarmac reads `runnerScaleSet.runnerGroupId` from the polling-session
+response and passes it to `generate-jitconfig`, falling back to the default
+group (1) only when GitHub does not report one. There is no manual group-ID
+field to configure.
+
 Repository include/exclude filters in Tarmac should remain a local dispatch
 guard. They are not a replacement for GitHub runner group visibility, because
 GitHub can still route jobs according to its own runner group and label rules.

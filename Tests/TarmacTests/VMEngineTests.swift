@@ -564,10 +564,33 @@ struct VMEngineTests {
         #expect(mock.stopCallCount == 1)
         #expect(engine.verificationState == .verified)
         #expect(engine.baseImageVerified)
+        #expect(engine.guestBootstrapVerified)
         #expect(engine.baseImageReady)
 
         let storage = StorageManager(rootPath: tempDir.path)
         #expect(FileManager.default.fileExists(atPath: storage.baseImageVerifiedMarkerURL.path))
+        #expect(FileManager.default.fileExists(atPath: storage.guestBootstrapVerifiedMarkerURL.path))
+    }
+
+    @Test("verifyBaseImage fails when guest bootstrap probe does not complete")
+    @MainActor
+    func verifyBaseImageGuestBootstrapMissing() async throws {
+        let mock = MockVMLifecycle()
+        mock.completeBootstrapProbeOnBoot = false
+        let (engine, _, tempDir) = try makeEngine(lifecycle: mock)
+        defer { TestFactories.cleanup(tempDir) }
+
+        await #expect(throws: VMEngineError.self) {
+            try await engine.verifyBaseImage(
+                config: VMConfiguration(),
+                holdSeconds: 0,
+                bootstrapProbeTimeoutSeconds: 1
+            )
+        }
+
+        #expect(!engine.baseImageVerified)
+        #expect(!engine.guestBootstrapVerified)
+        #expect(!engine.baseImageReady)
     }
 
     @Test("verifyBaseImage throws when base image is missing")
@@ -664,6 +687,9 @@ struct VMEngineTests {
         try storage.markBaseImageVerified()
 
         #expect(engine.baseImageVerified)
+        #expect(!engine.baseImageReady)
+
+        try storage.markGuestBootstrapVerified()
         #expect(engine.baseImageReady)
     }
 

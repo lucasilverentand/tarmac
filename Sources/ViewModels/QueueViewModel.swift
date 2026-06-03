@@ -44,9 +44,12 @@ final class QueueViewModel {
         Log.queue.debug("Job \(job.id) added to queue")
     }
 
-    func updateJobStatus(id: Int64, status: JobStatus) {
+    func updateJobStatus(id: Int64, status: JobStatus, failureReason: String? = nil) {
         guard let index = allJobs.firstIndex(where: { $0.id == id }) else { return }
         allJobs[index].status = status
+        if let failureReason {
+            allJobs[index].failureReason = failureReason
+        }
         if status == .running && allJobs[index].startedAt == nil {
             allJobs[index].startedAt = Date()
         }

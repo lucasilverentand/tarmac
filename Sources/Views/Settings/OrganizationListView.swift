@@ -1747,12 +1747,17 @@ private struct OrganizationFormSheet: View {
             org.filterMode = filterMode
             org.filteredRepositories = parsedRepos
             viewModel.updateOrganization(org)
-            if accountType == .enterprise,
-                !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            {
-                _ = viewModel.saveAccessToken(accessToken, for: org)
-            } else if accountType == .organization && previousAccountType == .enterprise {
-                _ = viewModel.deleteAccessToken(for: org)
+            viewModel.reconcileCredentials(
+                for: org,
+                newType: accountType,
+                previousType: previousAccountType,
+                accessToken: accessToken
+            )
+            // Keep local UI state in sync when the App key was dropped during an
+            // organization → enterprise conversion.
+            if accountType == .enterprise && previousAccountType == .organization {
+                hasPrivateKey = false
+                pendingKeyData = nil
             }
         } else {
             var org = Organization(

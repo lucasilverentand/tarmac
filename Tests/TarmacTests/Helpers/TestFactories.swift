@@ -96,6 +96,7 @@ enum TestFactories {
         try storage.prepareBaseDirectories()
         try Data([0x01]).write(to: storage.baseImageURL)
         try storage.markBaseImageVerified()
+        try storage.markGuestBootstrapVerified()
 
         let platformStore = PlatformDataStore(storage: storage)
         try platformStore.saveHardwareModel(Data([0x02]))

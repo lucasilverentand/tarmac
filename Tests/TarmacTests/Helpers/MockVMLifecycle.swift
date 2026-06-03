@@ -13,6 +13,7 @@ final class MockVMLifecycle: VMLifecycleProtocol {
 
     var shouldThrowOnBoot = false
     var shouldThrowOnStop = false
+    var completeBootstrapProbeOnBoot = true
     var bootError: Error = VMEngineError.missingJITConfig
     var stopError: Error = VMEngineError.missingJITConfig
 
@@ -34,6 +35,23 @@ final class MockVMLifecycle: VMLifecycleProtocol {
 
         if shouldThrowOnBoot {
             throw bootError
+        }
+
+        if completeBootstrapProbeOnBoot,
+            let sharedDirectoryURL,
+            sharedDirectoryURL.lastPathComponent.hasPrefix("verify-")
+        {
+            try FileManager.default.createDirectory(at: sharedDirectoryURL, withIntermediateDirectories: true)
+            try "0\n".write(
+                to: sharedDirectoryURL.appendingPathComponent(GuestBootstrapContract.exitCodeFileName),
+                atomically: true,
+                encoding: .utf8
+            )
+            try #"{"exitCode":0}"#.write(
+                to: sharedDirectoryURL.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+                atomically: true,
+                encoding: .utf8
+            )
         }
 
         _isBooted = true

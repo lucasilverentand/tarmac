@@ -25,6 +25,13 @@ struct JobRowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if job.status == .failed, let failureReason = job.failureReason, !failureReason.isEmpty {
+                    Text(failureReason)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()

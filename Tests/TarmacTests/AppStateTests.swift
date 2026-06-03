@@ -182,6 +182,25 @@ struct AppStateTests {
         Issue.record("Timed out waiting for job \(jobId) to reach running state with an active VM")
     }
 
+    @MainActor
+    private func waitForFailedJob(
+        appState: AppState,
+        jobId: Int64,
+        timeout: Duration = .seconds(5)
+    ) async throws -> RunnerJob {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if let job = appState.queueViewModel.allJobs.first(where: { $0.id == jobId }),
+                job.status == .failed
+            {
+                return job
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        Issue.record("Timed out waiting for job \(jobId) to fail")
+        return try #require(appState.queueViewModel.allJobs.first(where: { $0.id == jobId }))
+    }
+
     @Test("start with no orgs logs warning and returns early")
     @MainActor
     func startNoOrgs() async throws {
@@ -294,6 +313,67 @@ struct AppStateTests {
                 $0.category == .github && $0.message.contains("Permission missing")
             }
         )
+    }
+
+    @Test("job pre-flight fails when base image disappears after polling starts")
+    @MainActor
+    func jobPreflightFailsWhenBaseImageMissing() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _, mock) = try await makeAppState(orgs: [org], withPrivateKeys: true)
+
+        await appState.start()
+        let storage = StorageManager(rootPath: appState.configStore.storageRootPath)
+        try FileManager.default.removeItem(at: storage.baseImageURL)
+
+        await appState.testing_handleScaleSetMessages([jobAvailableMessage(jobId: 601, org: org.name)], org: org)
+        let job = try await waitForFailedJob(appState: appState, jobId: 601)
+
+        #expect(job.failureReason?.contains("Pre-flight readiness failed") == true)
+        #expect(job.failureReason?.contains("base image") == true)
+        #expect(mock.bootCallCount == 0)
+
+        await appState.stop()
+    }
+
+    @Test("job pre-flight fails when platform data disappears after polling starts")
+    @MainActor
+    func jobPreflightFailsWhenPlatformDataMissing() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _, mock) = try await makeAppState(orgs: [org], withPrivateKeys: true)
+
+        await appState.start()
+        let storage = StorageManager(rootPath: appState.configStore.storageRootPath)
+        let platformStore = PlatformDataStore(storage: storage)
+        try FileManager.default.removeItem(at: platformStore.hardwareModelPath)
+
+        await appState.testing_handleScaleSetMessages([jobAvailableMessage(jobId: 602, org: org.name)], org: org)
+        let job = try await waitForFailedJob(appState: appState, jobId: 602)
+
+        #expect(job.failureReason?.contains("Pre-flight readiness failed") == true)
+        #expect(job.failureReason?.contains("platform data") == true)
+        #expect(mock.bootCallCount == 0)
+
+        await appState.stop()
+    }
+
+    @Test("job pre-flight fails when guest bootstrap marker disappears after polling starts")
+    @MainActor
+    func jobPreflightFailsWhenGuestBootstrapUnverified() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _, mock) = try await makeAppState(orgs: [org], withPrivateKeys: true)
+
+        await appState.start()
+        let storage = StorageManager(rootPath: appState.configStore.storageRootPath)
+        try storage.clearGuestBootstrapVerified()
+
+        await appState.testing_handleScaleSetMessages([jobAvailableMessage(jobId: 603, org: org.name)], org: org)
+        let job = try await waitForFailedJob(appState: appState, jobId: 603)
+
+        #expect(job.failureReason?.contains("Pre-flight readiness failed") == true)
+        #expect(job.failureReason?.contains("guest bootstrap") == true)
+        #expect(mock.bootCallCount == 0)
+
+        await appState.stop()
     }
 
     @Test("resolvedBaseImagePath defaults to configured storage root")
