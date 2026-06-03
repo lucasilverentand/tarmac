@@ -64,14 +64,15 @@ mount_required_virtiofs() {
         return 0
     fi
 
-    local attempt
-    for attempt in 1 2 3 4 5; do
+    local attempt=1
+    while [[ "${attempt}" -le 30 ]]; do
         log "Mounting required VirtioFS tag ${tag} at ${mount_point} (attempt ${attempt})"
-        if /sbin/mount_virtiofs "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
+        if /sbin/mount_virtiofs -u root -g wheel "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
             log "Mounted VirtioFS tag ${tag} at ${mount_point}"
             return 0
         fi
         /bin/sleep 2
+        attempt=$((attempt + 1))
     done
 
     log "Required VirtioFS tag ${tag} could not be mounted"
@@ -89,7 +90,7 @@ mount_optional_virtiofs() {
     fi
 
     log "Trying optional VirtioFS tag ${tag} at ${mount_point}"
-    if /sbin/mount_virtiofs "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
+    if /sbin/mount_virtiofs -u root -g wheel "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
         log "Mounted optional VirtioFS tag ${tag} at ${mount_point}"
     else
         log "Optional VirtioFS tag ${tag} is not available"
