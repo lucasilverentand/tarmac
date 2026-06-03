@@ -510,6 +510,69 @@ struct GitHubEngineTests {
         #expect(requests.contains { $0.path.contains("registration-token") })
     }
 
+    @Test("generateRunnerGuestConfig uses repository runner endpoints for repository polling")
+    func generateRunnerGuestConfigUsesRepositoryRunnerEndpoints() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let repositoryOrg = Organization(
+            id: Self.testOrg.id,
+            name: "lucasilverentand",
+            appId: Self.testOrg.appId,
+            installationId: Self.testOrg.installationId,
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["mac-ephemeral-runner"]
+        )
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_repo","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "generate-jitconfig",
+            statusCode: 404,
+            json: """
+                {"message":"Not Found"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "registration-token",
+            json: """
+                {"token":"REPOREGTOKEN","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+
+        let (engine, client2, _) = try makeEngine(client: client)
+
+        let config = try await engine.generateRunnerGuestConfig(
+            for: repositoryOrg,
+            runnerName: "ephemeral-9",
+            repositoryName: "mac-ephemeral-runner"
+        )
+
+        guard case .registrationToken(let url, let token, let runnerName, let labels) = config else {
+            Issue.record("Expected repository registration token fallback config")
+            return
+        }
+        #expect(url == "https://github.com/lucasilverentand/mac-ephemeral-runner")
+        #expect(token == "REPOREGTOKEN")
+        #expect(runnerName == "ephemeral-9")
+        #expect(labels == repositoryOrg.runnerLabels)
+
+        let requests = await client2.requests
+        #expect(
+            requests.contains {
+                $0.path == "/repos/lucasilverentand/mac-ephemeral-runner/actions/runners/generate-jitconfig"
+            }
+        )
+        #expect(
+            requests.contains {
+                $0.path == "/repos/lucasilverentand/mac-ephemeral-runner/actions/runners/registration-token"
+            }
+        )
+    }
+
     @Test("generateRunnerGuestConfig rethrows non-fallback JIT failures")
     func generateRunnerGuestConfigRethrowsAuthFailure() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))

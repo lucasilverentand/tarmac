@@ -231,36 +231,42 @@ actor GitHubEngine {
         ]
     }
 
-    func generateJITConfig(for org: Organization, runnerName: String, runnerGroupId: Int? = nil) async throws -> String
-    {
+    func generateJITConfig(
+        for org: Organization,
+        runnerName: String,
+        runnerGroupId: Int? = nil,
+        repositoryName: String? = nil
+    ) async throws -> String {
         let token = try await authorizationToken(for: org)
         return try await runnerProvider.generateJITConfig(
             token: token,
-            accountPath: org.accountPath,
+            accountPath: runnerAPIPath(for: org, repositoryName: repositoryName),
             name: runnerName,
             labels: org.runnerLabels,
             runnerGroupId: runnerGroupId
         )
     }
 
-    func generateRegistrationToken(for org: Organization) async throws -> String {
+    func generateRegistrationToken(for org: Organization, repositoryName: String? = nil) async throws -> String {
         let token = try await authorizationToken(for: org)
         return try await runnerProvider.generateRegistrationToken(
             token: token,
-            accountPath: org.accountPath
+            accountPath: runnerAPIPath(for: org, repositoryName: repositoryName)
         )
     }
 
     func generateRunnerGuestConfig(
         for org: Organization,
         runnerName: String,
-        runnerGroupId: Int? = nil
+        runnerGroupId: Int? = nil,
+        repositoryName: String? = nil
     ) async throws -> RunnerGuestConfig {
         do {
             let jitConfig = try await generateJITConfig(
                 for: org,
                 runnerName: runnerName,
-                runnerGroupId: runnerGroupId
+                runnerGroupId: runnerGroupId,
+                repositoryName: repositoryName
             )
             return .jit(config: jitConfig)
         } catch {
@@ -270,14 +276,30 @@ actor GitHubEngine {
             Log.github.warning(
                 "JIT runner config unavailable; falling back to registration token: \(error.localizedDescription)"
             )
-            let registrationToken = try await generateRegistrationToken(for: org)
+            let registrationToken = try await generateRegistrationToken(for: org, repositoryName: repositoryName)
             return .registrationToken(
-                url: org.runnerRegistrationURL,
+                url: runnerRegistrationURL(for: org, repositoryName: repositoryName),
                 token: registrationToken,
                 runnerName: runnerName,
                 labels: org.runnerLabels
             )
         }
+    }
+
+    private func runnerAPIPath(for org: Organization, repositoryName: String?) -> String {
+        guard org.usesRepositoryWorkflowPolling, let repositoryName else {
+            return org.accountPath
+        }
+
+        return "/repos/\(org.name)/\(repositoryName)"
+    }
+
+    private func runnerRegistrationURL(for org: Organization, repositoryName: String?) -> String {
+        guard org.usesRepositoryWorkflowPolling, let repositoryName else {
+            return org.runnerRegistrationURL
+        }
+
+        return "https://github.com/\(org.name)/\(repositoryName)"
     }
 
     func listOrganizationRunners(for org: Organization) async throws -> [GitHubRunner] {
