@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 
@@ -167,8 +168,6 @@ struct RunnerProviderTests {
         )
 
         let client = RecordingGitHubClient()
-        let provider = RunnerProvider(client: client, cacheDirectory: tempDir)
-
         // First, set the cached path by accessing the internal state
         // We need to call ensureRunner with a client that would fail on download
         // but first trick it into caching the path
@@ -244,6 +243,72 @@ struct RunnerProviderTests {
         #expect(requests[0].path == "/enterprises/acme/actions/runners/registration-token")
     }
 
+    @Test("ensureRunner extracts archive when checksum matches")
+    func ensureRunnerValidatesMatchingChecksum() async throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let archive = try makeRunnerArchive(in: tempDir)
+        let checksum = try sha256Hex(of: archive)
+        let client = RecordingGitHubClient(
+            defaultResponseJSON: runnerDownloadsJSON(sha256Checksum: checksum.uppercased())
+        )
+        let provider = RunnerProvider(
+            client: client,
+            cacheDirectory: tempDir,
+            downloader: StubRunnerArchiveDownloader(fileURL: archive)
+        )
+
+        let runnerDir = try await provider.ensureRunner(token: "tok", accountPath: "/orgs/org")
+
+        #expect(FileManager.default.fileExists(atPath: runnerDir.appendingPathComponent("run.sh").path))
+    }
+
+    @Test("ensureRunner deletes archive and skips extraction when checksum mismatches")
+    func ensureRunnerRejectsMismatchedChecksum() async throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let archive = try makeRunnerArchive(in: tempDir)
+        let expectedChecksum = String(repeating: "0", count: 64)
+        let client = RecordingGitHubClient(defaultResponseJSON: runnerDownloadsJSON(sha256Checksum: expectedChecksum))
+        let provider = RunnerProvider(
+            client: client,
+            cacheDirectory: tempDir,
+            downloader: StubRunnerArchiveDownloader(fileURL: archive)
+        )
+
+        do {
+            _ = try await provider.ensureRunner(token: "tok", accountPath: "/orgs/org")
+            Issue.record("Expected checksum mismatch")
+        } catch let RunnerProviderError.checksumMismatch(expected, actual) {
+            #expect(expected == expectedChecksum)
+            #expect(actual != expectedChecksum)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        let storage = StorageManager(rootDirectory: tempDir)
+        let downloadedArchive = storage.tmpDirectory.appendingPathComponent("actions-runner.tar.gz")
+        #expect(!FileManager.default.fileExists(atPath: downloadedArchive.path))
+        #expect(!FileManager.default.fileExists(atPath: storage.runnerDirectory.appendingPathComponent("run.sh").path))
+    }
+
+    @Test("ensureRunner skips checksum validation when GitHub omits checksum")
+    func ensureRunnerAllowsMissingChecksum() async throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+        let archive = try makeRunnerArchive(in: tempDir)
+        let client = RecordingGitHubClient(defaultResponseJSON: runnerDownloadsJSON(sha256Checksum: nil))
+        let provider = RunnerProvider(
+            client: client,
+            cacheDirectory: tempDir,
+            downloader: StubRunnerArchiveDownloader(fileURL: archive)
+        )
+
+        let runnerDir = try await provider.ensureRunner(token: "tok", accountPath: "/orgs/org")
+
+        #expect(FileManager.default.fileExists(atPath: runnerDir.appendingPathComponent("run.sh").path))
+    }
+
     @Test("ensureRunner throws noCompatibleRunner when no macOS ARM64 binary")
     func ensureRunnerThrowsNoCompatible() async throws {
         let client = RecordingGitHubClient(
@@ -260,5 +325,45 @@ struct RunnerProviderTests {
         await #expect(throws: RunnerProviderError.noCompatibleRunner) {
             _ = try await provider.ensureRunner(token: "tok", accountPath: "/orgs/org")
         }
+    }
+
+    private func runnerDownloadsJSON(sha256Checksum: String?) -> Data {
+        let checksumField = sha256Checksum.map { #","sha256_checksum":"\#($0)""# } ?? ""
+        return """
+            [{"os":"osx","architecture":"arm64","download_url":"https://example.com/actions-runner.tar.gz","filename":"actions-runner.tar.gz"\(checksumField)}]
+            """.data(using: .utf8)!
+    }
+
+    private func makeRunnerArchive(in root: URL) throws -> URL {
+        let sourceDir = root.appendingPathComponent("archive-source", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try "#!/bin/bash\n".write(
+            to: sourceDir.appendingPathComponent("run.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let archiveURL = root.appendingPathComponent("actions-runner.tar.gz")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = ["-czf", archiveURL.path, "-C", sourceDir.path, "."]
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        return archiveURL
+    }
+
+    private func sha256Hex(of fileURL: URL) throws -> String {
+        try SHA256.hash(data: Data(contentsOf: fileURL))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+private struct StubRunnerArchiveDownloader: RunnerArchiveDownloading {
+    let fileURL: URL
+
+    func download(from url: URL) async throws -> URL {
+        fileURL
     }
 }

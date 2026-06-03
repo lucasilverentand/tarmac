@@ -1,17 +1,39 @@
+import CryptoKit
 import Foundation
+
+protocol RunnerArchiveDownloading: Sendable {
+    func download(from url: URL) async throws -> URL
+}
+
+struct URLSessionRunnerArchiveDownloader: RunnerArchiveDownloading {
+    func download(from url: URL) async throws -> URL {
+        let (fileURL, _) = try await URLSession.shared.download(from: url)
+        return fileURL
+    }
+}
 
 actor RunnerProvider {
     private let client: any GitHubClientProtocol
     private let storage: StorageManager
+    private let downloader: any RunnerArchiveDownloading
     private var cachedRunnerPath: URL?
 
-    init(client: any GitHubClientProtocol, cacheDirectory: URL) {
-        self.init(client: client, storage: StorageManager(rootDirectory: cacheDirectory))
+    init(
+        client: any GitHubClientProtocol,
+        cacheDirectory: URL,
+        downloader: any RunnerArchiveDownloading = URLSessionRunnerArchiveDownloader()
+    ) {
+        self.init(client: client, storage: StorageManager(rootDirectory: cacheDirectory), downloader: downloader)
     }
 
-    init(client: any GitHubClientProtocol, storage: StorageManager) {
+    init(
+        client: any GitHubClientProtocol,
+        storage: StorageManager,
+        downloader: any RunnerArchiveDownloading = URLSessionRunnerArchiveDownloader()
+    ) {
         self.client = client
         self.storage = storage
+        self.downloader = downloader
     }
 
     func ensureRunner(token: String, accountPath: String) async throws -> URL {
@@ -46,11 +68,12 @@ actor RunnerProvider {
         try FileManager.default.createDirectory(at: storage.tmpDirectory, withIntermediateDirectories: true)
 
         Log.runner.info("Downloading runner from \(macOSARM.downloadUrl)")
-        let (tarURL, _) = try await URLSession.shared.download(from: URL(string: macOSARM.downloadUrl)!)
+        let tarURL = try await downloader.download(from: URL(string: macOSARM.downloadUrl)!)
 
         let tarDest = storage.tmpDirectory.appendingPathComponent(macOSARM.filename)
         try? FileManager.default.removeItem(at: tarDest)
         try FileManager.default.moveItem(at: tarURL, to: tarDest)
+        try validateChecksum(for: tarDest, expected: macOSARM.sha256Checksum)
 
         // Extract
         let process = Process()
@@ -68,6 +91,24 @@ actor RunnerProvider {
         cachedRunnerPath = runnerDir
         Log.runner.info("Runner extracted to \(runnerDir.path)")
         return runnerDir
+    }
+
+    private func validateChecksum(for fileURL: URL, expected: String?) throws {
+        guard let expected = expected?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !expected.isEmpty
+        else {
+            return
+        }
+
+        let data = try Data(contentsOf: fileURL)
+        let actual = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+
+        guard actual.caseInsensitiveCompare(expected) == .orderedSame else {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw RunnerProviderError.checksumMismatch(expected: expected.lowercased(), actual: actual)
+        }
     }
 
     func generateJITConfig(
@@ -125,13 +166,16 @@ actor RunnerProvider {
     }
 }
 
-enum RunnerProviderError: Error, LocalizedError, Sendable {
+enum RunnerProviderError: Error, Equatable, LocalizedError, Sendable {
     case noCompatibleRunner
+    case checksumMismatch(expected: String, actual: String)
     case extractionFailed
 
     var errorDescription: String? {
         switch self {
         case .noCompatibleRunner: "No compatible macOS ARM64 runner found"
+        case let .checksumMismatch(expected, actual):
+            "Runner archive checksum mismatch (expected \(expected), got \(actual))"
         case .extractionFailed: "Failed to extract runner archive"
         }
     }
