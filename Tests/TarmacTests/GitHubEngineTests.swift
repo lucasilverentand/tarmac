@@ -251,6 +251,123 @@ struct GitHubEngineTests {
         #expect(count == 2)
     }
 
+    @Test("queuedWorkflowJobs lists queued matching self-hosted jobs for a repository")
+    func queuedWorkflowJobsListsMatchingJobs() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_jobs","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs?status=queued&per_page=20",
+            json: """
+                {"workflow_runs":[{"id":26883117168}]}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs/26883117168/jobs?per_page=100",
+            json: """
+                {
+                  "jobs": [
+                    {
+                      "id": 79288038719,
+                      "run_id": 26883117168,
+                      "name": "build",
+                      "status": "queued",
+                      "conclusion": null,
+                      "labels": ["self-hosted", "macOS", "ARM64"],
+                      "started_at": "2026-06-03T11:56:03Z",
+                      "html_url": "https://github.com/seventwo-studio/tarmac-e2e/actions/runs/26883117168/job/79288038719"
+                    },
+                    {
+                      "id": 79288038720,
+                      "run_id": 26883117168,
+                      "name": "linux",
+                      "status": "queued",
+                      "conclusion": null,
+                      "labels": ["ubuntu-latest"],
+                      "started_at": "2026-06-03T11:56:04Z",
+                      "html_url": null
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+
+        let (engine, client2, _) = try makeEngine(client: client)
+        let jobs = try await engine.queuedWorkflowJobs(for: Self.testOrg, repositoryName: "allowed-repo")
+
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.id == 79288038719)
+        #expect(jobs.first?.runId == 26883117168)
+        #expect(jobs.first?.name == "build")
+        #expect(jobs.first?.repositoryName == "allowed-repo")
+        #expect(jobs.first?.labels == ["self-hosted", "macOS", "ARM64"])
+
+        let requests = await client2.requests
+        #expect(requests.contains { $0.path == "/repos/test-org/allowed-repo/actions/runs?status=queued&per_page=20" })
+        #expect(
+            requests.contains {
+                $0.path == "/repos/test-org/allowed-repo/actions/runs/26883117168/jobs?per_page=100"
+            }
+        )
+    }
+
+    @Test("queuedWorkflowJobs ignores completed jobs and jobs without required labels")
+    func queuedWorkflowJobsFiltersNonMatchingJobs() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_jobs","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs?status=queued&per_page=20",
+            json: """
+                {"workflow_runs":[{"id":100}]}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs/100/jobs?per_page=100",
+            json: """
+                {
+                  "jobs": [
+                    {
+                      "id": 1,
+                      "run_id": 100,
+                      "name": "done",
+                      "status": "completed",
+                      "conclusion": "success",
+                      "labels": ["self-hosted", "macOS", "ARM64"],
+                      "started_at": "2026-06-03T11:56:03Z",
+                      "html_url": null
+                    },
+                    {
+                      "id": 2,
+                      "run_id": 100,
+                      "name": "wrong labels",
+                      "status": "queued",
+                      "conclusion": null,
+                      "labels": ["self-hosted", "Linux", "X64"],
+                      "started_at": "2026-06-03T11:56:04Z",
+                      "html_url": null
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+
+        let (engine, _, _) = try makeEngine(client: client)
+        let jobs = try await engine.queuedWorkflowJobs(for: Self.testOrg, repositoryName: "allowed-repo")
+
+        #expect(jobs.isEmpty)
+    }
+
     @Test("Missing private key throws TokenError.noPrivateKey")
     func missingPrivateKeyThrows() async throws {
         let client = RecordingGitHubClient()

@@ -210,8 +210,14 @@ struct RunnerHostReadiness: Equatable, Sendable {
             if org.requiresGitHubAppCredentials && org.appId.isEmpty {
                 issues.append(.init(category: .github, message: "\(org.name): GitHub App ID is not configured."))
             }
-            if org.scaleSetId == nil {
-                issues.append(.init(category: .github, message: "\(org.name): Scale set ID is not configured."))
+            if org.scaleSetId == nil && !org.usesRepositoryWorkflowPolling {
+                issues.append(
+                    .init(
+                        category: .github,
+                        message:
+                            "\(org.name): Scale set ID is not configured. Add a scale set ID or include repositories for workflow polling."
+                    )
+                )
             }
             for profileIssue in org.imageProfileReadinessIssues {
                 issues.append(.init(category: .github, message: "\(org.name): \(profileIssue.message)"))

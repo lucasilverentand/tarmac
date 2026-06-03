@@ -15,8 +15,10 @@ actor QueueEngine {
     private var sessions: [String: String] = [:]  // org name → sessionId
     private var runnerGroupIds: [String: Int] = [:]  // org name → scale set's runner group id
     private var pollingTasks: [String: Task<Void, Never>] = [:]
+    private var repositoryPollingTasks: [String: Task<Void, Never>] = [:]
     private var pollingStates: [String: QueuePollingState] = [:]
     private var processedMessageIdsByOrg: [String: Set<Int64>] = [:]
+    private let repositoryPollingInterval: TimeInterval = 10
 
     init(
         github: GitHubEngine,
@@ -47,14 +49,17 @@ actor QueueEngine {
     // MARK: - Lifecycle
 
     func start(orgs: [Organization]) async {
-        let enabledOrgs = orgs.filter { $0.isEnabled && $0.scaleSetId != nil }
+        let scaleSetOrgs = orgs.filter { $0.isEnabled && $0.scaleSetId != nil }
+        let repositoryPollingOrgs = orgs.filter { $0.isEnabled && $0.usesRepositoryWorkflowPolling }
 
         // Set org priority in dispatcher — array order = priority
         await dispatcher.setOrgPriority(orgs.filter(\.isEnabled).map(\.name))
 
-        Log.queue.info("Starting queue engine for \(enabledOrgs.count) org(s)")
+        Log.queue.info(
+            "Starting queue engine for \(scaleSetOrgs.count) scale-set org(s) and \(repositoryPollingOrgs.count) repository-polling org(s)"
+        )
 
-        for org in enabledOrgs {
+        for org in scaleSetOrgs {
             let poller = ScaleSetPoller(
                 client: client,
                 tokenProvider: { [github] org in
@@ -63,6 +68,10 @@ actor QueueEngine {
             )
             pollers[org.name] = poller
             startPolling(org: org, poller: poller)
+        }
+
+        for org in repositoryPollingOrgs {
+            startRepositoryPolling(org: org)
         }
     }
 
@@ -100,7 +109,17 @@ actor QueueEngine {
             await task.value
         }
 
+        for (name, task) in repositoryPollingTasks {
+            task.cancel()
+            Log.queue.debug("Cancelled repository polling for \(name)")
+        }
+
+        for (_, task) in repositoryPollingTasks {
+            await task.value
+        }
+
         pollingTasks.removeAll()
+        repositoryPollingTasks.removeAll()
         pollers.removeAll()
         sessions.removeAll()
         runnerGroupIds.removeAll()
@@ -118,6 +137,68 @@ actor QueueEngine {
             await self.pollingLoop(org: org, poller: poller)
         }
         pollingTasks[org.name] = task
+    }
+
+    private func startRepositoryPolling(org: Organization) {
+        let task = Task {
+            await self.repositoryPollingLoop(org: org)
+        }
+        repositoryPollingTasks[org.name] = task
+    }
+
+    private func repositoryPollingLoop(org: Organization) async {
+        pollingStates[org.name] = QueuePollingState(
+            orgName: org.name,
+            sessionId: nil,
+            isRunning: true,
+            lastFailure: nil,
+            lastFailureMessage: nil,
+            retryAttempt: 0,
+            nextRetryDelay: nil
+        )
+
+        Log.queue.info("Repository polling loop started for org \(org.name)")
+
+        while !Task.isCancelled {
+            do {
+                for repositoryName in org.filteredRepositories {
+                    let jobs = try await github.queuedWorkflowJobs(for: org, repositoryName: repositoryName)
+                    await handleQueuedWorkflowJobs(jobs, org: org)
+                }
+                pollingStates[org.name]?.lastFailure = nil
+                pollingStates[org.name]?.lastFailureMessage = nil
+                pollingStates[org.name]?.retryAttempt = 0
+                pollingStates[org.name]?.nextRetryDelay = nil
+                try await sleep(seconds: repositoryPollingInterval)
+            } catch is CancellationError {
+                break
+            } catch {
+                let failure = failureKind(for: error)
+                applyPollingFailure(
+                    orgName: org.name,
+                    failure: failure,
+                    message: pollingFailureMessage(for: error, failure: failure)
+                        ?? "Failed to poll queued workflow jobs for \(org.name)."
+                )
+
+                let nextAttempt = pollingStates[org.name]?.retryAttempt ?? 0
+                let delay = retryPolicy.delay(for: failure, attempt: nextAttempt)
+                pollingStates[org.name]?.nextRetryDelay = delay
+
+                Log.queue.error(
+                    "Repository poll error for \(org.name) [\(failure.rawValue)], retry \(nextAttempt) in \(delay)s: \(error.localizedDescription)"
+                )
+
+                do {
+                    try await sleep(seconds: delay)
+                } catch {
+                    break
+                }
+            }
+        }
+
+        pollingStates[org.name]?.isRunning = false
+        Log.queue.info("Repository polling loop ended for org \(org.name)")
     }
 
     private func pollingLoop(org: Organization, poller: ScaleSetPoller) async {
@@ -262,6 +343,39 @@ actor QueueEngine {
             default:
                 Log.queue.debug("Unhandled message type: \(message.messageType)")
             }
+        }
+    }
+
+    func handleQueuedWorkflowJobs(_ jobs: [GitHubQueuedWorkflowJob], org: Organization) async {
+        for queuedJob in jobs {
+            if processedMessageIdsByOrg[org.name, default: []].contains(queuedJob.id) {
+                Log.queue.debug("Skipping duplicate queued workflow job \(queuedJob.id) for org \(org.name)")
+                continue
+            }
+            if await jobStore.job(byId: queuedJob.id) != nil {
+                processedMessageIdsByOrg[org.name, default: []].insert(queuedJob.id)
+                continue
+            }
+            guard org.acceptsRepository(queuedJob.repositoryName) else {
+                Log.queue.info(
+                    "Queued workflow job \(queuedJob.id) skipped — repo \(queuedJob.repositoryName) filtered out for org \(org.name)"
+                )
+                continue
+            }
+
+            processedMessageIdsByOrg[org.name, default: []].insert(queuedJob.id)
+            let job = RunnerJob(
+                id: queuedJob.id,
+                organizationName: org.name,
+                runnerRequestId: queuedJob.runId,
+                status: .pending,
+                workflowName: queuedJob.name,
+                repositoryName: queuedJob.repositoryName,
+                queuedAt: queuedJob.queuedAt ?? Date()
+            )
+
+            await jobStore.addJob(job)
+            await tryDispatch()
         }
     }
 

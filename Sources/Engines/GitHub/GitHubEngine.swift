@@ -304,6 +304,93 @@ actor GitHubEngine {
         return runners
     }
 
+    func queuedWorkflowJobs(for org: Organization, repositoryName: String) async throws -> [GitHubQueuedWorkflowJob] {
+        let token = try await authorizationToken(for: org)
+        let repository = repositoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !repository.isEmpty else {
+            return []
+        }
+
+        struct WorkflowRunsResponse: Decodable, Sendable {
+            let workflowRuns: [WorkflowRun]
+
+            enum CodingKeys: String, CodingKey {
+                case workflowRuns = "workflow_runs"
+            }
+        }
+
+        struct WorkflowRun: Decodable, Sendable {
+            let id: Int64
+        }
+
+        struct WorkflowJobsResponse: Decodable, Sendable {
+            let jobs: [WorkflowJob]
+        }
+
+        struct WorkflowJob: Decodable, Sendable {
+            let id: Int64
+            let runId: Int64
+            let name: String?
+            let status: String
+            let conclusion: String?
+            let labels: [String]
+            let startedAt: Date?
+            let htmlURL: String?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case runId = "run_id"
+                case name, status, conclusion, labels
+                case startedAt = "started_at"
+                case htmlURL = "html_url"
+            }
+        }
+
+        let runs: WorkflowRunsResponse = try await client.request(
+            method: "GET",
+            path: "/repos/\(org.name)/\(repository)/actions/runs?status=queued&per_page=20",
+            body: nil,
+            headers: ["Authorization": "Bearer \(token)"],
+            timeoutInterval: 30
+        )
+
+        let requiredLabels = org.runnerLabels.map { $0.lowercased() }
+        var queuedJobs: [GitHubQueuedWorkflowJob] = []
+
+        for run in runs.workflowRuns {
+            let response: WorkflowJobsResponse = try await client.request(
+                method: "GET",
+                path: "/repos/\(org.name)/\(repository)/actions/runs/\(run.id)/jobs?per_page=100",
+                body: nil,
+                headers: ["Authorization": "Bearer \(token)"],
+                timeoutInterval: 30
+            )
+
+            for job in response.jobs {
+                guard job.status == "queued", job.conclusion == nil else {
+                    continue
+                }
+                let labels = Set(job.labels.map { $0.lowercased() })
+                guard requiredLabels.allSatisfy(labels.contains) else {
+                    continue
+                }
+                queuedJobs.append(
+                    GitHubQueuedWorkflowJob(
+                        id: job.id,
+                        runId: job.runId,
+                        name: job.name,
+                        repositoryName: repository,
+                        labels: job.labels,
+                        queuedAt: job.startedAt,
+                        htmlURL: job.htmlURL
+                    )
+                )
+            }
+        }
+
+        return queuedJobs
+    }
+
     func deleteOrganizationRunner(id runnerId: Int64, for org: Organization) async throws {
         let token = try await authorizationToken(for: org)
         let (data, response) = try await client.requestRaw(

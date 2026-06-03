@@ -127,6 +127,13 @@ extension Organization {
         Self.normalizedLabels(labels + (imageProfile?.advertisedLabels ?? []))
     }
 
+    var usesRepositoryWorkflowPolling: Bool {
+        accountType == .organization
+            && scaleSetId == nil
+            && filterMode == .include
+            && !filteredRepositories.isEmpty
+    }
+
     var imageProfileReadinessIssues: [RunnerImageProfileReadinessIssue] {
         imageProfile?.readinessIssues ?? []
     }

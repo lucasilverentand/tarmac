@@ -15,8 +15,8 @@ enum ScaleSetPollingMessages {
         \(org): Scale-set job polling is unavailable (HTTP \(statusCode) while \(operation)). \
         Verify the scale set ID and that this \(accountType.displayName.lowercased()) supports scale-set sessions \
         on GitHub.com. Without the session API, Tarmac cannot receive queued jobs from the scale set. \
-        The documented fallback is ephemeral JIT runners matched by GitHub's normal runner routing \
-        (see \(strategyReference)); Tarmac does not implement that alternate poller yet.
+        Configure included repositories without a scale set to use workflow job polling instead \
+        (see \(strategyReference)).
         """
     }
 
