@@ -182,6 +182,19 @@ final class AppState {
             await self.handleJobCompleted(job, result: result, source: source)
         }
 
+        do {
+            let cleanup = try storage.cleanupOrphanedJobArtifacts(
+                activeLeases: await queueEngine.runnerLeaseStore.activeLeases
+            )
+            if cleanup.removedItems > 0 {
+                Log.app.info(
+                    "Reclaimed \(cleanup.removedDisks) orphaned VM disk(s) and \(cleanup.removedJobDirectories) orphaned job folder(s)."
+                )
+            }
+        } catch {
+            Log.app.warning("Failed to reclaim orphaned VM artifacts: \(error.localizedDescription)")
+        }
+
         let reconciliation = await queueEngine.reconcileInterruptedLeases(orgs: configStore.organizations)
         vmStatusViewModel.runnerReconciliation = reconciliation
 
