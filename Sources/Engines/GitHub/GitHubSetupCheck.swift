@@ -65,11 +65,14 @@ extension GitHubEngine {
             )
         }
 
-        if org.scaleSetId == nil {
+        let usesRepositoryWorkflowPolling = org.usesRepositoryWorkflowPolling
+
+        if org.scaleSetId == nil && !usesRepositoryWorkflowPolling {
             issues.append(
                 .init(
                     kind: .missingScaleSet,
-                    message: "\(org.name): Scale set ID is not configured."
+                    message:
+                        "\(org.name): Scale set ID is not configured. Add a scale set ID or include repositories for workflow polling."
                 )
             )
         }
@@ -146,34 +149,50 @@ extension GitHubEngine {
             )
         }
 
-        await Self.appendRawCheck(
-            to: &issues,
-            client: client,
-            method: "GET",
-            path: "\(org.accountPath)/actions/runners/downloads",
-            token: token,
-            org: org.name,
-            capability: "Actions runner downloads",
-            notFoundMessage:
-                "\(org.name): Actions runner downloads are unavailable for this \(org.accountType.displayName.lowercased())."
-        )
+        if usesRepositoryWorkflowPolling {
+            for repositoryName in org.filteredRepositories {
+                await Self.appendRawCheck(
+                    to: &issues,
+                    client: client,
+                    method: "GET",
+                    path: "/repos/\(org.name)/\(repositoryName)/actions/runners/downloads",
+                    token: token,
+                    org: org.name,
+                    capability: "\(repositoryName) Actions runner downloads",
+                    notFoundMessage:
+                        "\(org.name)/\(repositoryName): Actions runner downloads are unavailable for this repository."
+                )
+            }
+        } else {
+            await Self.appendRawCheck(
+                to: &issues,
+                client: client,
+                method: "GET",
+                path: "\(org.accountPath)/actions/runners/downloads",
+                token: token,
+                org: org.name,
+                capability: "Actions runner downloads",
+                notFoundMessage:
+                    "\(org.name): Actions runner downloads are unavailable for this \(org.accountType.displayName.lowercased())."
+            )
 
-        let groupData = await Self.rawCheckData(
-            to: &issues,
-            client: client,
-            method: "GET",
-            path: "\(org.accountPath)/actions/runner-groups",
-            token: token,
-            org: org.name,
-            capability: "Runner group access",
-            notFoundMessage:
-                "\(org.name): Runner groups are unavailable for this \(org.accountType.displayName.lowercased()).",
-            kind: .runnerGroupUnavailable
-        )
-        if let groupData,
-            let decoded = try? JSONDecoder().decode(GitHubRunnerGroupsResponse.self, from: groupData)
-        {
-            runnerGroups = decoded.runnerGroups.map(\.name)
+            let groupData = await Self.rawCheckData(
+                to: &issues,
+                client: client,
+                method: "GET",
+                path: "\(org.accountPath)/actions/runner-groups",
+                token: token,
+                org: org.name,
+                capability: "Runner group access",
+                notFoundMessage:
+                    "\(org.name): Runner groups are unavailable for this \(org.accountType.displayName.lowercased()).",
+                kind: .runnerGroupUnavailable
+            )
+            if let groupData,
+                let decoded = try? JSONDecoder().decode(GitHubRunnerGroupsResponse.self, from: groupData)
+            {
+                runnerGroups = decoded.runnerGroups.map(\.name)
+            }
         }
 
         if let scaleSetId = org.scaleSetId {
