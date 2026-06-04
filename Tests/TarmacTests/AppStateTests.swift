@@ -315,6 +315,25 @@ struct AppStateTests {
         )
     }
 
+    @Test("start reclaims orphaned VM artifacts before polling")
+    @MainActor
+    func startReclaimsOrphanedVMArtifacts() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _, _) = try await makeAppState(orgs: [org], withPrivateKeys: true)
+        let storage = StorageManager(rootPath: appState.configStore.storageRootPath)
+        let orphanedDisk = storage.disksDirectory.appendingPathComponent("orphaned.img")
+        let orphanedJobDir = storage.jobsDirectory.appendingPathComponent("999", isDirectory: true)
+        try Data([0x01]).write(to: orphanedDisk)
+        try FileManager.default.createDirectory(at: orphanedJobDir, withIntermediateDirectories: true)
+        try Data([0x02]).write(to: orphanedJobDir.appendingPathComponent("runner.log"))
+
+        await appState.start()
+        await appState.stop()
+
+        #expect(!FileManager.default.fileExists(atPath: orphanedDisk.path))
+        #expect(!FileManager.default.fileExists(atPath: orphanedJobDir.path))
+    }
+
     @Test("job pre-flight fails when base image disappears after polling starts")
     @MainActor
     func jobPreflightFailsWhenBaseImageMissing() async throws {

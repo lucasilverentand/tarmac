@@ -195,6 +195,46 @@ struct StorageManagerTests {
         #expect(FileManager.default.fileExists(atPath: freshDisk.path))
     }
 
+    @Test("cleanupOrphanedJobArtifacts removes fresh unowned disks and job directories")
+    func cleanupOrphanedJobArtifactsRemovesFreshUnownedItems() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+
+        let activeDisk = storage.disksDirectory.appendingPathComponent("active.img")
+        let orphanedDisk = storage.disksDirectory.appendingPathComponent("orphaned.img")
+        let activeJobDir = storage.jobsDirectory.appendingPathComponent("100", isDirectory: true)
+        let orphanedJobDir = storage.jobsDirectory.appendingPathComponent("101", isDirectory: true)
+        try Data([0x01]).write(to: activeDisk)
+        try Data([0x02]).write(to: orphanedDisk)
+        try FileManager.default.createDirectory(at: activeJobDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: orphanedJobDir, withIntermediateDirectories: true)
+        try Data([0x03]).write(to: activeJobDir.appendingPathComponent("runner.log"))
+        try Data([0x04]).write(to: orphanedJobDir.appendingPathComponent("runner.log"))
+
+        var lease = RunnerLease(
+            job: TestFactories.makeJob(id: 100),
+            runnerName: "tarmac-100",
+            labels: ["self-hosted"]
+        )
+        lease.recordVMStarted(
+            vmInstanceId: UUID(),
+            diskImagePath: activeDisk.path,
+            sharedDirectoryPath: activeJobDir.path
+        )
+
+        let result = try storage.cleanupOrphanedJobArtifacts(activeLeases: [lease])
+
+        #expect(result.removedDisks == 1)
+        #expect(result.removedJobDirectories == 1)
+        #expect(FileManager.default.fileExists(atPath: activeDisk.path))
+        #expect(!FileManager.default.fileExists(atPath: orphanedDisk.path))
+        #expect(FileManager.default.fileExists(atPath: activeJobDir.path))
+        #expect(!FileManager.default.fileExists(atPath: orphanedJobDir.path))
+    }
+
     @Test("cleanupInstallerArtifactsAfterVerification removes restore image by default")
     func cleanupInstallerArtifactsAfterVerificationRemovesRestoreImageByDefault() throws {
         let root = try TestFactories.makeTempDir()

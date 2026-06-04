@@ -137,6 +137,37 @@ struct StorageManager: Sendable {
         try removeContents(in: tmpDirectory, olderThan: cutoff)
     }
 
+    @discardableResult
+    func cleanupOrphanedJobArtifacts(activeLeases: [RunnerLease]) throws -> OrphanedJobArtifactCleanupResult {
+        try prepareBaseDirectories()
+
+        let activeDiskPaths = Set(
+            activeLeases.compactMap(\.executionAttempt?.diskImagePath).map {
+                URL(fileURLWithPath: $0).standardizedFileURL.path
+            }
+        )
+        let activeSharedDirectoryPaths = Set(
+            activeLeases.compactMap(\.executionAttempt?.sharedDirectoryPath).map {
+                URL(fileURLWithPath: $0).standardizedFileURL.path
+            }
+        )
+
+        var result = OrphanedJobArtifactCleanupResult()
+        try removeUnownedContents(
+            in: disksDirectory,
+            preserving: activeDiskPaths,
+            removedKind: .disk,
+            result: &result
+        )
+        try removeUnownedContents(
+            in: jobsDirectory,
+            preserving: activeSharedDirectoryPaths,
+            removedKind: .jobDirectory,
+            result: &result
+        )
+        return result
+    }
+
     func installerArtifactSizeBytes() throws -> Int64 {
         try sizeOfItems(installerArtifactURLs(includeRestoreImage: true))
     }
@@ -361,6 +392,30 @@ struct StorageManager: Sendable {
     private func transientSizeBytes() -> Int64 {
         (try? sizeOfItems([jobsDirectory, disksDirectory, tmpDirectory])) ?? 0
     }
+
+    private func removeUnownedContents(
+        in directory: URL,
+        preserving preservedPaths: Set<String>,
+        removedKind: OrphanedJobArtifactCleanupResult.RemovedKind,
+        result: inout OrphanedJobArtifactCleanupResult
+    ) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: directory.path) else { return }
+
+        let contents = try fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        for url in contents {
+            let path = url.standardizedFileURL.path
+            guard !preservedPaths.contains(path) else { continue }
+            result.removedBytes += (try? itemSize(at: url)) ?? 0
+            try fm.removeItem(at: url)
+            result.recordRemoval(kind: removedKind)
+        }
+    }
 }
 
 struct StorageMigrationResult: Sendable {
@@ -377,6 +432,30 @@ struct InstallerArtifactCleanupResult: Equatable, Sendable {
 struct BaseImageResetResult: Equatable, Sendable {
     var removedItems: Int = 0
     var removedBytes: Int64 = 0
+}
+
+struct OrphanedJobArtifactCleanupResult: Equatable, Sendable {
+    enum RemovedKind: Sendable {
+        case disk
+        case jobDirectory
+    }
+
+    var removedDisks: Int = 0
+    var removedJobDirectories: Int = 0
+    var removedBytes: Int64 = 0
+
+    var removedItems: Int {
+        removedDisks + removedJobDirectories
+    }
+
+    mutating func recordRemoval(kind: RemovedKind) {
+        switch kind {
+        case .disk:
+            removedDisks += 1
+        case .jobDirectory:
+            removedJobDirectories += 1
+        }
+    }
 }
 
 struct StorageReport: Sendable {
