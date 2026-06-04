@@ -743,12 +743,7 @@ private struct OrganizationFormSheet: View {
                 hasAccessToken || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
         case .runner:
-            Int(scaleSetId) != nil
-                && !labels
-                    .split(separator: ",")
-                    .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-                    .filter({ !$0.isEmpty })
-                    .isEmpty
+            runnerSettingsAreReady
         case .image, .repositories:
             true
         case .review:
@@ -1163,10 +1158,10 @@ private struct OrganizationFormSheet: View {
                             }
 
                             setupReviewRow(
-                                title: "Runner scale set",
-                                detail: scaleSetId.isEmpty ? "Missing scale set ID" : "Scale set \(scaleSetId)",
+                                title: "Runner source",
+                                detail: runnerSourceReviewDetail,
                                 systemImage: "server.rack",
-                                isReady: Int(scaleSetId) != nil
+                                isReady: runnerSourceIsReady
                             )
 
                             setupReviewRow(
@@ -1279,12 +1274,29 @@ private struct OrganizationFormSheet: View {
     }
 
     private var runnerSettingsAreReady: Bool {
-        Int(scaleSetId) != nil
-            && !labels
-                .split(separator: ",")
-                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-                .filter({ !$0.isEmpty })
-                .isEmpty
+        !labels
+            .split(separator: ",")
+            .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .filter({ !$0.isEmpty })
+            .isEmpty
+    }
+
+    private var runnerSourceIsReady: Bool {
+        Int(scaleSetId) != nil || repositoryPollingIsConfigured
+    }
+
+    private var runnerSourceReviewDetail: String {
+        if let scaleSetId = Int(scaleSetId) {
+            return "Scale set \(scaleSetId)"
+        }
+        if repositoryPollingIsConfigured {
+            return "Repository polling for \(parsedRepositoryList.joined(separator: ", "))"
+        }
+        return "Add a scale set ID or include repositories for workflow polling"
+    }
+
+    private var repositoryPollingIsConfigured: Bool {
+        accountType == .organization && filterMode == .include && !parsedRepositoryList.isEmpty
     }
 
     private func setupReviewRow(title: String, detail: String, systemImage: String, isReady: Bool) -> some View {
@@ -1707,6 +1719,13 @@ private struct OrganizationFormSheet: View {
             .filter { !$0.isEmpty }
     }
 
+    private var parsedRepositoryList: [String] {
+        repositoryList
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
     private var lookupPrivateKeyData: Data? {
         if let pendingKeyData {
             return pendingKeyData
@@ -1729,11 +1748,7 @@ private struct OrganizationFormSheet: View {
         }
         let parsedScaleSetId = Int(scaleSetId)
         let parsedImageProfile = imageProfileEnabled ? currentImageProfile : nil
-        let parsedRepos =
-            repositoryList
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        let parsedRepos = parsedRepositoryList
 
         if var org = existing {
             let previousAccountType = org.accountType

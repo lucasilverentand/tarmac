@@ -223,6 +223,59 @@ struct QueueEngineTests {
         await engine.stop()
     }
 
+    @Test("start polls included repositories when scale set is not configured")
+    func startPollsIncludedRepositoriesWithoutScaleSet() async throws {
+        let org = TestFactories.makeOrg(
+            name: "test-org",
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["allowed-repo"]
+        )
+        let (engine, store, client) = try makeEngine(privateKeyOrg: org)
+
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs?status=queued&per_page=20",
+            json: """
+                {"workflow_runs":[{"id":200}]}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs/200/jobs?per_page=100",
+            json: """
+                {
+                  "jobs": [
+                    {
+                      "id": 300,
+                      "run_id": 200,
+                      "name": "build",
+                      "status": "queued",
+                      "conclusion": null,
+                      "labels": ["self-hosted", "macOS", "ARM64"],
+                      "started_at": "2026-06-03T11:56:03Z",
+                      "html_url": null
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+
+        await engine.start(orgs: [org])
+
+        var job = await store.job(byId: 300)
+        for _ in 0..<50 where job == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            job = await store.job(byId: 300)
+        }
+
+        await engine.stop()
+
+        let queuedJob = try #require(job)
+        #expect(queuedJob.status == .provisioning)
+        #expect(queuedJob.runnerRequestId == 200)
+        #expect(queuedJob.workflowName == "build")
+        #expect(queuedJob.repositoryName == "allowed-repo")
+    }
+
     @Test("stop cancels polling tasks and clears state")
     func stopClearsState() async throws {
         let org = TestFactories.makeOrg()
@@ -375,6 +428,35 @@ struct QueueEngineTests {
         let jobs = await store.jobs
         #expect(jobs.count == 1)
         #expect(jobs.first?.id == 55)
+    }
+
+    @Test("queued workflow jobs enqueue and deduplicate by job ID")
+    func queuedWorkflowJobsEnqueueAndDeduplicate() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg(
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["allowed-repo"]
+        )
+        let queuedJob = GitHubQueuedWorkflowJob(
+            id: 79288038719,
+            runId: 26883117168,
+            name: "build",
+            repositoryName: "allowed-repo",
+            labels: ["self-hosted", "macOS", "ARM64"],
+            queuedAt: Date(timeIntervalSince1970: 1_780_492_563),
+            htmlURL: nil
+        )
+
+        await engine.handleQueuedWorkflowJobs([queuedJob, queuedJob], org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.id == 79288038719)
+        #expect(jobs.first?.runnerRequestId == 26883117168)
+        #expect(jobs.first?.status == .provisioning)
+        #expect(jobs.first?.workflowName == "build")
+        #expect(jobs.first?.repositoryName == "allowed-repo")
     }
 
     @Test("reconcileInterruptedLeases removes cleaned stale leases")

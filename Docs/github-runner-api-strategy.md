@@ -127,9 +127,11 @@ for organization and Enterprise Cloud enterprise accounts:
 - do not claim GitHub Enterprise Server support for the scale-set session path
 - keep the JIT runner config path separate from scale-set session lifecycle
 
-If this API proves unstable, the fallback strategy is to register ephemeral
-JIT runners and rely on normal GitHub runner matching rather than poll
-scale-set sessions directly.
+When scale-set sessions are unavailable, Tarmac can poll queued workflow jobs
+through the public Actions workflow APIs for explicitly included repositories.
+That fallback still registers ephemeral JIT runners and relies on normal GitHub
+runner matching; repository polling is opt-in so Tarmac does not need broad
+organization repository discovery.
 
 ## Creating the scale set
 

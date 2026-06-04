@@ -53,6 +53,29 @@ struct GitHubSetupCheckTests {
         #expect(result.advertisedLabels == ["self-hosted", "macOS", "ARM64", "xcode", "ios"])
     }
 
+    @Test("repository workflow polling is ready without scale set APIs")
+    func repositoryWorkflowPollingWithoutScaleSet() async throws {
+        let org = TestFactories.makeOrg(
+            name: "setup-owner",
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["tarmac-e2e"]
+        )
+        let (engine, client) = try await makeEngine(org: org)
+
+        let result = await engine.runSetupCheck(for: org)
+
+        #expect(result.isReady)
+        #expect(result.scaleSetId == nil)
+        #expect(result.runnerGroupNames.isEmpty)
+
+        let requests = await client.requests
+        #expect(requests.contains { $0.path == "/repos/setup-owner/tarmac-e2e/actions/runners/downloads" })
+        #expect(!requests.contains { $0.path == "/orgs/setup-owner/actions/runner-groups" })
+        #expect(!requests.contains { $0.path.contains("runner-scale-sets") })
+        #expect(!requests.contains { $0.path.contains("actions/runners/42/sessions") })
+    }
+
     @Test("profile readiness failures block setup checks")
     func profileReadinessFailures() async throws {
         let profile = RunnerImageProfile(

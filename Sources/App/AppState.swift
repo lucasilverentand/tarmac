@@ -370,7 +370,8 @@ final class AppState {
             let guestConfig = try await githubEngine.generateRunnerGuestConfig(
                 for: org,
                 runnerName: runnerName,
-                runnerGroupId: job.runnerGroupId
+                runnerGroupId: job.runnerGroupId,
+                repositoryName: job.repositoryName
             )
             var lease = RunnerLease(job: job, runnerName: runnerName, labels: org.runnerLabels)
             await queueEngine.runnerLeaseStore.upsert(lease)
