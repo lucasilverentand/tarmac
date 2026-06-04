@@ -143,9 +143,13 @@ struct ModelCodableTests {
     func organizationRoundTrip() throws {
         let org = Organization(
             name: "test-org",
+            accountType: .repository,
+            repositoryName: "test-repo",
+            credentialMode: .accessToken,
             appId: "APP42",
             installationId: 99,
             scaleSetId: 7,
+            scaleSetName: "tarmac-test",
             labels: ["self-hosted", "macOS"],
             imageProfile: RunnerImageProfile(
                 name: "Xcode 17",
@@ -183,9 +187,13 @@ struct ModelCodableTests {
         let decoded = try JSONDecoder().decode(Organization.self, from: data)
 
         #expect(decoded.name == "test-org")
+        #expect(decoded.accountType == .repository)
+        #expect(decoded.repositoryName == "test-repo")
+        #expect(decoded.credentialMode == .accessToken)
         #expect(decoded.appId == "APP42")
         #expect(decoded.installationId == 99)
         #expect(decoded.scaleSetId == 7)
+        #expect(decoded.scaleSetName == "tarmac-test")
         #expect(decoded.labels == ["self-hosted", "macOS"])
         #expect(decoded.imageProfile?.name == "Xcode 17")
         #expect(decoded.imageProfile?.baseImagePath == "/Images/Xcode17.img")
@@ -243,6 +251,56 @@ struct ModelCodableTests {
         #expect(org.acceptsRepository(nil))
     }
 
+    @Test("Organization repository account path uses owner and repo")
+    func repositoryAccountPath() {
+        let org = Organization(
+            name: "octo-org",
+            accountType: .repository,
+            repositoryName: "hello-world",
+            appId: "1",
+            installationId: 1
+        )
+
+        #expect(org.accountPath == "/repos/octo-org/hello-world")
+        #expect(org.runnerRegistrationURL == "https://github.com/octo-org/hello-world")
+        #expect(org.acceptsRepository("hello-world"))
+        #expect(!org.acceptsRepository("other-repo"))
+    }
+
+    @Test("Organization decodes legacy payload with default credential mode")
+    func organizationDecodesLegacyCredentialMode() throws {
+        let data = Data(
+            """
+            {
+              "name": "legacy-org",
+              "accountType": "organization",
+              "appId": "APP42",
+              "installationId": 99,
+              "labels": ["self-hosted"]
+            }
+            """.utf8
+        )
+
+        let decoded = try JSONDecoder().decode(Organization.self, from: data)
+
+        #expect(decoded.credentialMode == .githubApp)
+        #expect(decoded.scaleSetName == nil)
+    }
+
+    @Test("Enterprise accounts default to access token credential mode")
+    func enterpriseDefaultsToAccessToken() {
+        let org = Organization(
+            name: "acme",
+            accountType: .enterprise,
+            appId: "",
+            installationId: 0
+        )
+
+        #expect(org.credentialMode == .accessToken)
+        #expect(org.requiresAccessToken)
+        #expect(!org.requiresGitHubAppCredentials)
+    }
+
     @Test("Organization acceptsRepository with include mode")
     func orgFilterInclude() {
         let org = Organization(
@@ -279,10 +337,10 @@ struct ModelCodableTests {
 
         #expect(guidance.map(\.scope) == [.organization, .repository, .enterprise, .permissions])
         #expect(GitHubSetupGuidance.organization.detail.contains("find the organization installation ID"))
-        #expect(GitHubSetupGuidance.repository.detail.contains("only decides which queued jobs Tarmac accepts"))
+        #expect(GitHubSetupGuidance.repository.detail.contains("repository owner and name"))
         #expect(GitHubSetupGuidance.enterprise.detail.contains("enterprise slug"))
         #expect(GitHubSetupGuidance.enterprise.detail.contains("access token"))
-        #expect(GitHubSetupGuidance.permissions.detail.contains("organization self-hosted runner permission"))
+        #expect(GitHubSetupGuidance.permissions.detail.contains("runner scale set"))
     }
 
     @Test("GitHub App setup guide builds organization registration guidance")

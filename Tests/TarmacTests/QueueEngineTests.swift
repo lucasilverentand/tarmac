@@ -11,6 +11,7 @@ struct QueueEngineTests {
             defaults: UserDefaults(suiteName: "queue-engine-\(UUID().uuidString)")!
         ),
         privateKeyOrg: Organization = TestFactories.makeOrg(),
+        additionalPrivateKeyOrgs: [Organization] = [],
         retryPolicy: QueuePollingRetryPolicy = .immediate
     ) throws -> (QueueEngine, JobStore, RecordingGitHubClient) {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
@@ -24,6 +25,9 @@ struct QueueEngineTests {
         let keyData = try TestFactories.makeTestKeyData()
 
         _ = keychain.save(key: privateKeyOrg.privateKeyKeychainKey, data: keyData)
+        for org in additionalPrivateKeyOrgs {
+            _ = keychain.save(key: org.privateKeyKeychainKey, data: keyData)
+        }
 
         let tempDir = try TestFactories.makeTempDir()
         let github = GitHubEngine(
@@ -701,6 +705,92 @@ struct QueueEngineTests {
 
         let dispatched = try #require(job)
         #expect(dispatched.runnerGroupId == 9)
+    }
+
+    @Test("repository-owned accounts with the same owner keep separate runner groups")
+    func repositoryAccountsWithSameOwnerKeepSeparateRunnerGroups() async throws {
+        let repoA = TestFactories.makeOrg(
+            name: "octo-org",
+            accountType: .repository,
+            repositoryName: "repo-a",
+            installationId: 101,
+            scaleSetId: 42
+        )
+        let repoB = TestFactories.makeOrg(
+            name: "octo-org",
+            accountType: .repository,
+            repositoryName: "repo-b",
+            installationId: 102,
+            scaleSetId: 43
+        )
+        let (engine, store, client) = try makeEngine(
+            privateKeyOrg: repoA,
+            additionalPrivateKeyOrgs: [repoB]
+        )
+
+        await client.addRawResponse(
+            forPathContaining: "/repos/octo-org/repo-a/actions/runners/42/sessions/sess-a/message",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                [{"messageId":601,"messageType":"JobAvailable","body":"{\\"jobMessageBase\\":{\\"jobId\\":601,\\"runnerRequestId\\":1,\\"repositoryName\\":\\"repo-a\\",\\"ownerName\\":\\"octo-org\\",\\"workflowRunName\\":\\"CI\\"}}","statistics":null}]
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/repos/octo-org/repo-b/actions/runners/43/sessions/sess-b/message",
+            method: "POST",
+            statusCode: 200,
+            json: """
+                [{"messageId":602,"messageType":"JobAvailable","body":"{\\"jobMessageBase\\":{\\"jobId\\":602,\\"runnerRequestId\\":1,\\"repositoryName\\":\\"repo-b\\",\\"ownerName\\":\\"octo-org\\",\\"workflowRunName\\":\\"CI\\"}}","statistics":null}]
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/repos/octo-org/repo-a/actions/runners/42/sessions/sess-a",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/repos/octo-org/repo-b/actions/runners/43/sessions/sess-b",
+            method: "DELETE",
+            statusCode: 204,
+            json: Data()
+        )
+        await client.addRawResponse(
+            forPathContaining: "/repos/octo-org/repo-a/actions/runners/42/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"sess-a","ownerName":"octo-org","runnerScaleSet":{"id":42,"name":"repo-a-set","runnerGroupId":7,"runnerGroupName":"Repo A"}}
+                """.data(using: .utf8)!
+        )
+        await client.addRawResponse(
+            forPathContaining: "/repos/octo-org/repo-b/actions/runners/43/sessions",
+            method: "POST",
+            excludingPathContaining: "/message",
+            statusCode: 200,
+            json: """
+                {"sessionId":"sess-b","ownerName":"octo-org","runnerScaleSet":{"id":43,"name":"repo-b-set","runnerGroupId":9,"runnerGroupName":"Repo B"}}
+                """.data(using: .utf8)!
+        )
+
+        await engine.start(orgs: [repoA, repoB])
+
+        var jobA = await store.job(byId: 601)
+        var jobB = await store.job(byId: 602)
+        for _ in 0..<50 where jobA == nil || jobB == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            jobA = await store.job(byId: 601)
+            jobB = await store.job(byId: 602)
+        }
+
+        await engine.stop()
+
+        let dispatchedA = try #require(jobA)
+        let dispatchedB = try #require(jobB)
+        #expect(dispatchedA.runnerGroupId == 7)
+        #expect(dispatchedB.runnerGroupId == 9)
     }
 }
 

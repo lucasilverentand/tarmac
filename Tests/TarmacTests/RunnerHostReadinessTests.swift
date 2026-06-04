@@ -184,7 +184,7 @@ struct RunnerHostReadinessTests {
         )
 
         #expect(!readiness.isReady)
-        #expect(readiness.issues.contains { $0.message.contains("Enterprise access token") })
+        #expect(readiness.issues.contains { $0.message.contains("Runner access token") })
     }
 
     @Test("image profile readiness failures block startup")

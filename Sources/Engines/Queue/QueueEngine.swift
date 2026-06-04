@@ -12,8 +12,8 @@ actor QueueEngine {
     private let sessionStore: PollingSessionStore
     private let retryPolicy: QueuePollingRetryPolicy
     private var pollers: [String: ScaleSetPoller] = [:]
-    private var sessions: [String: String] = [:]  // org name → sessionId
-    private var runnerGroupIds: [String: Int] = [:]  // org name → scale set's runner group id
+    private var sessions: [String: String] = [:]  // account key → sessionId
+    private var runnerGroupIds: [String: Int] = [:]  // account key → scale set's runner group id
     private var pollingTasks: [String: Task<Void, Never>] = [:]
     private var repositoryPollingTasks: [String: Task<Void, Never>] = [:]
     private var pollingStates: [String: QueuePollingState] = [:]
@@ -66,7 +66,7 @@ actor QueueEngine {
                     try await github.authorizationToken(for: org)
                 }
             )
-            pollers[org.name] = poller
+            pollers[accountKey(for: org)] = poller
             startPolling(org: org, poller: poller)
         }
 
@@ -127,27 +127,30 @@ actor QueueEngine {
     }
 
     func pollingState(orgName: String) -> QueuePollingState? {
-        pollingStates[orgName]
+        pollingStates[orgName] ?? pollingStates.values.first { $0.orgName == orgName }
     }
 
     // MARK: - Polling Loop
 
     private func startPolling(org: Organization, poller: ScaleSetPoller) {
+        let key = accountKey(for: org)
         let task = Task {
             await self.pollingLoop(org: org, poller: poller)
         }
-        pollingTasks[org.name] = task
+        pollingTasks[key] = task
     }
 
     private func startRepositoryPolling(org: Organization) {
+        let key = accountKey(for: org)
         let task = Task {
             await self.repositoryPollingLoop(org: org)
         }
-        repositoryPollingTasks[org.name] = task
+        repositoryPollingTasks[key] = task
     }
 
     private func repositoryPollingLoop(org: Organization) async {
-        pollingStates[org.name] = QueuePollingState(
+        let key = accountKey(for: org)
+        pollingStates[key] = QueuePollingState(
             orgName: org.name,
             sessionId: nil,
             isRunning: true,
@@ -165,25 +168,25 @@ actor QueueEngine {
                     let jobs = try await github.queuedWorkflowJobs(for: org, repositoryName: repositoryName)
                     await handleQueuedWorkflowJobs(jobs, org: org)
                 }
-                pollingStates[org.name]?.lastFailure = nil
-                pollingStates[org.name]?.lastFailureMessage = nil
-                pollingStates[org.name]?.retryAttempt = 0
-                pollingStates[org.name]?.nextRetryDelay = nil
+                pollingStates[key]?.lastFailure = nil
+                pollingStates[key]?.lastFailureMessage = nil
+                pollingStates[key]?.retryAttempt = 0
+                pollingStates[key]?.nextRetryDelay = nil
                 try await sleep(seconds: repositoryPollingInterval)
             } catch is CancellationError {
                 break
             } catch {
                 let failure = failureKind(for: error)
                 applyPollingFailure(
-                    orgName: org.name,
+                    orgName: key,
                     failure: failure,
                     message: pollingFailureMessage(for: error, failure: failure)
                         ?? "Failed to poll queued workflow jobs for \(org.name)."
                 )
 
-                let nextAttempt = pollingStates[org.name]?.retryAttempt ?? 0
+                let nextAttempt = pollingStates[key]?.retryAttempt ?? 0
                 let delay = retryPolicy.delay(for: failure, attempt: nextAttempt)
-                pollingStates[org.name]?.nextRetryDelay = delay
+                pollingStates[key]?.nextRetryDelay = delay
 
                 Log.queue.error(
                     "Repository poll error for \(org.name) [\(failure.rawValue)], retry \(nextAttempt) in \(delay)s: \(error.localizedDescription)"
@@ -197,12 +200,13 @@ actor QueueEngine {
             }
         }
 
-        pollingStates[org.name]?.isRunning = false
+        pollingStates[key]?.isRunning = false
         Log.queue.info("Repository polling loop ended for org \(org.name)")
     }
 
     private func pollingLoop(org: Organization, poller: ScaleSetPoller) async {
-        pollingStates[org.name] = QueuePollingState(
+        let key = accountKey(for: org)
+        pollingStates[key] = QueuePollingState(
             orgName: org.name,
             sessionId: nil,
             isRunning: true,
@@ -219,9 +223,9 @@ actor QueueEngine {
                 throw ScaleSetPollerError.missingScaleSetId(org: org.name)
             }
 
-            if let staleSession = sessionStore.record(for: org.name), staleSession.scaleSetId == scaleSetId {
+            if let staleSession = sessionStore.record(for: key), staleSession.scaleSetId == scaleSetId {
                 try await poller.deleteSession(org: org, token: token, sessionId: staleSession.sessionId)
-                sessionStore.remove(orgName: org.name)
+                sessionStore.remove(orgName: key)
                 Log.queue.info("Deleted stale polling session \(staleSession.sessionId) for org \(org.name)")
             }
 
@@ -229,57 +233,57 @@ actor QueueEngine {
             guard let sessionId = session.sessionId else {
                 Log.queue.error("No session ID returned for org \(org.name)")
                 applyPollingFailure(
-                    orgName: org.name,
+                    orgName: key,
                     failure: .malformedResponse,
                     message: "GitHub did not return a scale-set session ID for \(org.name)."
                 )
-                pollingStates[org.name]?.isRunning = false
+                pollingStates[key]?.isRunning = false
                 return
             }
-            sessions[org.name] = sessionId
+            sessions[key] = sessionId
             if let groupId = session.runnerScaleSet?.runnerGroupId {
-                runnerGroupIds[org.name] = groupId
+                runnerGroupIds[key] = groupId
                 Log.queue.debug("Scale set for org \(org.name) belongs to runner group \(groupId)")
             }
             sessionStore.save(
                 PollingSessionRecord(
-                    orgName: org.name,
+                    orgName: key,
                     scaleSetId: scaleSetId,
                     sessionId: sessionId,
                     updatedAt: Date()
                 )
             )
-            pollingStates[org.name]?.sessionId = sessionId
+            pollingStates[key]?.sessionId = sessionId
         } catch {
             Log.queue.error("Failed to create session for org \(org.name): \(error.localizedDescription)")
             let failure = failureKind(for: error)
             applyPollingFailure(
-                orgName: org.name,
+                orgName: key,
                 failure: failure,
                 message: pollingFailureMessage(for: error, failure: failure)
             )
-            pollingStates[org.name]?.isRunning = false
+            pollingStates[key]?.isRunning = false
             return
         }
 
-        guard let sessionId = sessions[org.name] else { return }
+        guard let sessionId = sessions[key] else { return }
 
         Log.queue.info("Polling loop started for org \(org.name)")
 
         while !Task.isCancelled {
             do {
                 let messages = try await poller.poll(org: org, sessionId: sessionId)
-                pollingStates[org.name]?.lastFailure = nil
-                pollingStates[org.name]?.lastFailureMessage = nil
-                pollingStates[org.name]?.retryAttempt = 0
-                pollingStates[org.name]?.nextRetryDelay = nil
+                pollingStates[key]?.lastFailure = nil
+                pollingStates[key]?.lastFailureMessage = nil
+                pollingStates[key]?.retryAttempt = 0
+                pollingStates[key]?.nextRetryDelay = nil
                 await handleMessages(messages, org: org)
             } catch is CancellationError {
                 break
             } catch {
                 let failure = failureKind(for: error)
                 applyPollingFailure(
-                    orgName: org.name,
+                    orgName: key,
                     failure: failure,
                     message: pollingFailureMessage(for: error, failure: failure)
                 )
@@ -291,10 +295,10 @@ actor QueueEngine {
                     break
                 }
 
-                let nextAttempt = pollingStates[org.name]?.retryAttempt ?? 0
+                let nextAttempt = pollingStates[key]?.retryAttempt ?? 0
                 let retryAfter = (error as? ScaleSetPollerError)?.retryAfter
                 let delay = retryPolicy.delay(for: failure, attempt: nextAttempt, retryAfter: retryAfter)
-                pollingStates[org.name]?.nextRetryDelay = delay
+                pollingStates[key]?.nextRetryDelay = delay
 
                 Log.queue.error(
                     "Poll error for \(org.name) [\(failure.rawValue)], retry \(nextAttempt) in \(delay)s: \(error.localizedDescription)"
@@ -311,17 +315,17 @@ actor QueueEngine {
         }
 
         // Cleanup session on exit
-        if let sessionId = sessions[org.name] {
+        if let sessionId = sessions[key] {
             do {
                 let token = try await github.authorizationToken(for: org)
                 try await poller.deleteSession(org: org, token: token, sessionId: sessionId)
-                sessionStore.remove(orgName: org.name)
+                sessionStore.remove(orgName: key)
             } catch {
                 Log.queue.warning("Failed to delete session for \(org.name): \(error.localizedDescription)")
             }
         }
 
-        pollingStates[org.name]?.isRunning = false
+        pollingStates[key]?.isRunning = false
         Log.queue.info("Polling loop ended for org \(org.name)")
     }
 
@@ -406,7 +410,7 @@ actor QueueEngine {
             repositoryName: base.repositoryName,
             queuedAt: Date()
         )
-        job.runnerGroupId = runnerGroupIds[org.name]
+        job.runnerGroupId = runnerGroupIds[accountKey(for: org)]
 
         await jobStore.addJob(job)
         await tryDispatch()
@@ -479,6 +483,15 @@ actor QueueEngine {
             state.retryAttempt += 1
         }
         pollingStates[orgName] = state
+    }
+
+    private func accountKey(for org: Organization) -> String {
+        switch org.accountType {
+        case .repository:
+            org.accountPath
+        case .organization, .enterprise:
+            org.name
+        }
     }
 
     private func pollingFailureMessage(for error: Error, failure: QueuePollingFailureKind) -> String? {

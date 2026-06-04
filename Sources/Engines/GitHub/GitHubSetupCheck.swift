@@ -39,6 +39,7 @@ enum GitHubSetupCheckIssueKind: String, Sendable {
     case missingAppId
     case missingPrivateKey
     case missingAccessToken
+    case missingRepository
     case missingScaleSet
     case imageProfileNotReady
     case labelMismatch
@@ -61,6 +62,17 @@ extension GitHubEngine {
                 .init(
                     kind: .missingAppId,
                     message: "\(org.name): GitHub App ID is not configured."
+                )
+            )
+        }
+
+        if org.accountType == .repository,
+            org.repositoryName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+        {
+            issues.append(
+                .init(
+                    kind: .missingRepository,
+                    message: "\(org.name): Repository name is not configured."
                 )
             )
         }
@@ -103,7 +115,7 @@ extension GitHubEngine {
         )
 
         let token: String
-        if org.requiresEnterpriseAccessToken {
+        if org.requiresAccessToken {
             guard let tokenData = keychainService.load(key: org.accessTokenKeychainKey),
                 let loadedToken = String(data: tokenData, encoding: .utf8),
                 !loadedToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -111,13 +123,13 @@ extension GitHubEngine {
                 issues.append(
                     .init(
                         kind: .missingAccessToken,
-                        message: "\(org.name): Enterprise access token is not configured."
+                        message: "\(org.name): Runner access token is not configured."
                     )
                 )
                 return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
             }
             token = loadedToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
+        } else if org.requiresGitHubAppCredentials {
             guard let keyData = keychainService.load(key: org.privateKeyKeychainKey) else {
                 issues.append(
                     .init(
@@ -134,6 +146,8 @@ extension GitHubEngine {
                 issues.append(Self.issue(for: error, org: org.name, capability: "GitHub App installation access"))
                 return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
             }
+        } else {
+            return Self.setupCheckResult(for: org, labels: labels, runnerGroups: runnerGroups, issues: issues)
         }
 
         if org.requiresGitHubAppCredentials {
@@ -176,22 +190,24 @@ extension GitHubEngine {
                     "\(org.name): Actions runner downloads are unavailable for this \(org.accountType.displayName.lowercased())."
             )
 
-            let groupData = await Self.rawCheckData(
-                to: &issues,
-                client: client,
-                method: "GET",
-                path: "\(org.accountPath)/actions/runner-groups",
-                token: token,
-                org: org.name,
-                capability: "Runner group access",
-                notFoundMessage:
-                    "\(org.name): Runner groups are unavailable for this \(org.accountType.displayName.lowercased()).",
-                kind: .runnerGroupUnavailable
-            )
-            if let groupData,
-                let decoded = try? JSONDecoder().decode(GitHubRunnerGroupsResponse.self, from: groupData)
-            {
-                runnerGroups = decoded.runnerGroups.map(\.name)
+            if org.accountType != .repository {
+                let groupData = await Self.rawCheckData(
+                    to: &issues,
+                    client: client,
+                    method: "GET",
+                    path: "\(org.accountPath)/actions/runner-groups",
+                    token: token,
+                    org: org.name,
+                    capability: "Runner group access",
+                    notFoundMessage:
+                        "\(org.name): Runner groups are unavailable for this \(org.accountType.displayName.lowercased()).",
+                    kind: .runnerGroupUnavailable
+                )
+                if let groupData,
+                    let decoded = try? JSONDecoder().decode(GitHubRunnerGroupsResponse.self, from: groupData)
+                {
+                    runnerGroups = decoded.runnerGroups.map(\.name)
+                }
             }
         }
 
