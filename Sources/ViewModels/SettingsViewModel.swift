@@ -105,8 +105,7 @@ final class SettingsViewModel {
         )
 
         let token: String
-        switch org.accountType {
-        case .enterprise:
+        if org.requiresAccessToken {
             let inFlight = inFlightAccessToken?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let inFlight, !inFlight.isEmpty {
                 token = inFlight
@@ -115,7 +114,7 @@ final class SettingsViewModel {
             } else {
                 throw SettingsError.missingCredentials
             }
-        case .organization:
+        } else {
             guard let keyData = inFlightPrivateKey ?? configStore.loadPrivateKey(for: org) else {
                 throw SettingsError.missingCredentials
             }
@@ -141,28 +140,50 @@ final class SettingsViewModel {
     /// changes, dropping secrets the new type no longer uses so stale material
     /// does not outlive its purpose.
     ///
-    /// - organization → enterprise: save the access token (when provided) and
+    /// - GitHub App → access token: save the access token (when provided) and
     ///   remove the now-unused GitHub App private key.
-    /// - enterprise → organization: remove the now-unused enterprise access token.
+    /// - access token → GitHub App: remove the now-unused access token.
     func reconcileCredentials(
         for org: Organization,
         newType: GitHubAccountType,
         previousType: GitHubAccountType,
+        newCredentialMode: GitHubCredentialMode,
+        previousCredentialMode: GitHubCredentialMode,
         accessToken: String
     ) {
-        switch newType {
-        case .enterprise:
+        let usesToken = newType == .enterprise || newCredentialMode == .accessToken
+        let previouslyUsedToken = previousType == .enterprise || previousCredentialMode == .accessToken
+
+        if usesToken {
             if !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 _ = saveAccessToken(accessToken, for: org)
             }
-            if previousType == .organization {
+            if !previouslyUsedToken {
                 deletePrivateKey(for: org)
             }
-        case .organization:
-            if previousType == .enterprise {
+        } else {
+            if previouslyUsedToken {
                 _ = deleteAccessToken(for: org)
             }
         }
+    }
+
+    func findRepositoryInstallationId(
+        owner: String,
+        repositoryName: String,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> Int {
+        let engine = GitHubEngine(
+            keychainService: configStore.keychainService,
+            storage: StorageManager(rootPath: configStore.storageRootPath)
+        )
+        return try await engine.repositoryInstallationId(
+            owner: owner,
+            repositoryName: repositoryName,
+            appId: appId,
+            privateKeyData: privateKeyData
+        )
     }
 
     func findOrganizationInstallationId(
@@ -590,9 +611,9 @@ enum SettingsError: LocalizedError {
         case .fileAccessDenied: "Could not access the selected file"
         case .keychainSaveFailed: "Failed to save key to keychain"
         case .missingCredentials:
-            "Add the account credentials (App private key or enterprise access token) before creating a scale set."
+            "Add the account credentials (App private key or runner access token) before creating a scale set."
         case .missingAccountName:
-            "Enter the organization name or enterprise slug before creating a scale set."
+            "Enter the repository owner, organization name, or enterprise slug before creating a scale set."
         }
     }
 }

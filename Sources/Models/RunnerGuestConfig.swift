@@ -53,6 +53,8 @@ extension Organization {
     /// GitHub URL passed to `config.sh --url` for registration-token runners.
     var runnerRegistrationURL: String {
         switch accountType {
+        case .repository:
+            "https://github.com/\(name)/\(repositoryName ?? "")"
         case .organization:
             "https://github.com/orgs/\(name)"
         case .enterprise:

@@ -99,6 +99,8 @@ struct SettingsViewModelTests {
             for: org,
             newType: .enterprise,
             previousType: .organization,
+            newCredentialMode: .accessToken,
+            previousCredentialMode: .githubApp,
             accessToken: "github_pat_enterprise"
         )
 
@@ -120,6 +122,8 @@ struct SettingsViewModelTests {
             for: org,
             newType: .organization,
             previousType: .enterprise,
+            newCredentialMode: .githubApp,
+            previousCredentialMode: .accessToken,
             accessToken: ""
         )
 
@@ -139,10 +143,34 @@ struct SettingsViewModelTests {
             for: org,
             newType: .organization,
             previousType: .organization,
+            newCredentialMode: .githubApp,
+            previousCredentialMode: .githubApp,
             accessToken: ""
         )
 
         #expect(vm.hasPrivateKey(for: org))
+    }
+
+    @Test("reconcileCredentials drops the App private key when switching org to token mode")
+    func reconcileDropsPrivateKeyOnTokenModeSwitch() {
+        let (vm, _, keychain) = makeVM()
+        var org = TestFactories.makeOrg(name: "acme")
+
+        _ = keychain.save(key: org.privateKeyKeychainKey, data: Data([0x01]))
+        #expect(vm.hasPrivateKey(for: org))
+
+        org.credentialMode = .accessToken
+        vm.reconcileCredentials(
+            for: org,
+            newType: .organization,
+            previousType: .organization,
+            newCredentialMode: .accessToken,
+            previousCredentialMode: .githubApp,
+            accessToken: "github_pat_org_runner"
+        )
+
+        #expect(!vm.hasPrivateKey(for: org))
+        #expect(vm.hasAccessToken(for: org))
     }
 
     @Test("validateConfiguration returns empty when fully configured")
@@ -166,7 +194,7 @@ struct SettingsViewModelTests {
         let (vm, _, _) = makeVM()
 
         let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
-        #expect(issues.contains { $0.contains("GitHub organization") })
+        #expect(issues.contains { $0.contains("GitHub runner account") })
         #expect(issues.contains { $0.contains("storage location") })
         #expect(issues.contains { $0.contains("base image") })
     }

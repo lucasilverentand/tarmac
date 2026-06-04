@@ -196,17 +196,22 @@ struct RunnerHostReadiness: Equatable, Sendable {
         configStore: ConfigStore
     ) {
         if configStore.organizations.isEmpty {
-            issues.append(.init(category: .github, message: "Add a GitHub organization."))
+            issues.append(.init(category: .github, message: "Add a GitHub runner account."))
             return
         }
 
         let enabled = configStore.organizations.filter(\.isEnabled)
         if enabled.isEmpty {
-            issues.append(.init(category: .github, message: "Enable at least one GitHub organization."))
+            issues.append(.init(category: .github, message: "Enable at least one GitHub runner account."))
             return
         }
 
         for org in enabled {
+            if org.accountType == .repository,
+                org.repositoryName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            {
+                issues.append(.init(category: .github, message: "\(org.name): Repository name is not configured."))
+            }
             if org.requiresGitHubAppCredentials && org.appId.isEmpty {
                 issues.append(.init(category: .github, message: "\(org.name): GitHub App ID is not configured."))
             }
@@ -225,11 +230,11 @@ struct RunnerHostReadiness: Equatable, Sendable {
             if org.requiresGitHubAppCredentials && !configStore.hasPrivateKey(for: org) {
                 issues.append(.init(category: .github, message: "\(org.name): Private key is not imported."))
             }
-            if org.requiresEnterpriseAccessToken && !configStore.hasAccessToken(for: org) {
+            if org.requiresAccessToken && !configStore.hasAccessToken(for: org) {
                 issues.append(
                     .init(
                         category: .github,
-                        message: "\(org.name): Enterprise access token is not configured."
+                        message: "\(org.name): Runner access token is not configured."
                     )
                 )
             }

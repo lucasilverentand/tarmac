@@ -76,18 +76,17 @@ actor GitHubEngine {
     }
 
     func authorizationToken(for org: Organization) async throws -> String {
-        switch org.accountType {
-        case .organization:
-            return try await installationToken(for: org)
-        case .enterprise:
-            guard let token = enterpriseAccessToken(for: org) else {
+        if org.requiresAccessToken {
+            guard let token = accessToken(for: org) else {
                 throw GitHubEnterpriseTokenError.noAccessToken
             }
             return token
         }
+
+        return try await installationToken(for: org)
     }
 
-    private func enterpriseAccessToken(for org: Organization) -> String? {
+    private func accessToken(for org: Organization) -> String? {
         guard let data = keychainService.load(key: org.accessTokenKeychainKey),
             let token = String(data: data, encoding: .utf8)
         else {
@@ -120,6 +119,36 @@ actor GitHubEngine {
         let response: InstallationResponse = try await client.request(
             method: "GET",
             path: "/orgs/\(org)/installation",
+            body: nil,
+            headers: ["Authorization": "Bearer \(jwt)"],
+            timeoutInterval: 30
+        )
+        return response.id
+    }
+
+    func repositoryInstallationId(
+        owner: String,
+        repositoryName: String,
+        appId: String,
+        privateKeyData: Data
+    ) async throws -> Int {
+        struct InstallationResponse: Decodable, Sendable {
+            let id: Int
+        }
+
+        let trimmedOwner = owner.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedOwner.isEmpty else {
+            throw GitHubInstallationDiscoveryError.missingOrganizationName
+        }
+        let repo = repositoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !repo.isEmpty else {
+            throw GitHubInstallationDiscoveryError.missingRepositoryName
+        }
+
+        let jwt = try await tokenManager.appJWT(appId: appId, privateKeyData: privateKeyData)
+        let response: InstallationResponse = try await client.request(
+            method: "GET",
+            path: "/repos/\(trimmedOwner)/\(repo)/installation",
             body: nil,
             headers: ["Authorization": "Bearer \(jwt)"],
             timeoutInterval: 30
@@ -547,18 +576,20 @@ enum GitHubEnterpriseTokenError: Error, LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .noAccessToken: "No enterprise access token found in Keychain"
+        case .noAccessToken: "No runner access token found in Keychain"
         }
     }
 }
 
 enum GitHubInstallationDiscoveryError: Error, LocalizedError, Sendable {
     case missingOrganizationName
+    case missingRepositoryName
     case missingEnterpriseSlug
 
     var errorDescription: String? {
         switch self {
         case .missingOrganizationName: "Enter the organization name before finding the installation."
+        case .missingRepositoryName: "Enter the repository name before finding the installation."
         case .missingEnterpriseSlug: "Enter the enterprise slug before using the enterprise setup path."
         }
     }

@@ -25,9 +25,9 @@ extension GitHubSetupGuidance {
 
     static let repository = GitHubSetupGuidance(
         scope: .repository,
-        title: "Repository filters do not replace GitHub visibility",
+        title: "Use a repository runner scale set for one repo",
         detail:
-            "The repository filter only decides which queued jobs Tarmac accepts after GitHub sends them. Configure runner group repository access in GitHub so workflows can only target the repositories you intend."
+            "Enter the repository owner and name. Use a GitHub App installed on that repository when possible, or a token that can manage self-hosted runners for the repository."
     )
 
     static let enterprise = GitHubSetupGuidance(
@@ -41,7 +41,7 @@ extension GitHubSetupGuidance {
         scope: .permissions,
         title: "Grant self-hosted runner access",
         detail:
-            "The GitHub App needs organization self-hosted runner permission to read runner groups, inspect runner downloads, and verify the configured runner scale set."
+            "The GitHub App or token must be able to read runner downloads, create JIT runner configuration, and create or find the runner scale set for the selected owner."
     )
 
     static let setupOverview: [GitHubSetupGuidance] = [
@@ -64,6 +64,8 @@ struct GitHubAppSetupGuide: Equatable, Sendable {
 
     static func guide(for accountType: GitHubAccountType) -> GitHubAppSetupGuide {
         switch accountType {
+        case .repository:
+            organization
         case .organization:
             organization
         case .enterprise:
@@ -127,6 +129,8 @@ struct GitHubAppSetupGuide: Equatable, Sendable {
         }
 
         switch accountType {
+        case .repository:
+            return "https://github.com/\(owner)"
         case .organization:
             return "https://github.com/\(owner)"
         case .enterprise:

@@ -158,7 +158,7 @@ struct GitHubSetupCheckTests {
         #expect(!result.isReady)
         #expect(
             result.issues.contains {
-                $0.kind == .missingAccessToken && $0.message.contains("Enterprise access token")
+                $0.kind == .missingAccessToken && $0.message.contains("Runner access token")
             }
         )
         #expect(await client.requestCount == 0)
