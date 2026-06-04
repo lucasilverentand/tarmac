@@ -64,6 +64,9 @@ struct GuestBootstrapResourceTests {
             #expect(contents.contains(target.environmentVariable))
         }
         #expect(contents.contains("/sbin/mount_virtiofs"))
+        #expect(contents.contains("/sbin/mount_virtiofs -u root -g wheel"))
+        #expect(contents.contains("while [[ \"${attempt}\" -le 30 ]]"))
+        #expect(!contents.contains("/usr/bin/seq"))
         #expect(contents.contains("./run.sh --jitconfig"))
         #expect(contents.contains("registration-token"))
         #expect(contents.contains("./config.sh"))
