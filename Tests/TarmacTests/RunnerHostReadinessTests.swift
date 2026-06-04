@@ -100,6 +100,7 @@ struct RunnerHostReadinessTests {
 
         #expect(!readiness.isReady)
         #expect(readiness.issues.contains { $0.category == .vm && $0.message.contains("guest bootstrap") })
+        #expect(readiness.issues.contains { $0.message.contains("rerun verification") })
     }
 
     @Test("GitHub credential failures stay distinguishable")

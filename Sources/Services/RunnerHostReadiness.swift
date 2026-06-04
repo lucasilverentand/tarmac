@@ -155,7 +155,8 @@ struct RunnerHostReadiness: Equatable, Sendable {
                 issues.append(
                     .init(
                         category: .vm,
-                        message: "Verify the guest bootstrap before starting jobs."
+                        message:
+                            "Install the guest bootstrap in the base image, then rerun verification before starting jobs."
                     )
                 )
             }

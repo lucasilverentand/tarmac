@@ -166,6 +166,7 @@ struct VMStatusCard: View {
                 }
 
                 setupBaseImageButton
+                guestBootstrapGuidance
 
                 if vmStatusViewModel.isInstalling {
                     VStack(alignment: .leading, spacing: 6) {
@@ -178,6 +179,25 @@ struct VMStatusCard: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var guestBootstrapGuidance: some View {
+        if shouldShowGuestBootstrapGuidance {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Guest bootstrap required", systemImage: "terminal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+
+                Text(
+                    "Install `Resources/GuestBootstrap/install-tarmac-runner-bootstrap.sh` inside the base image, then rerun base image verification so jobs can start."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -338,6 +358,12 @@ struct VMStatusCard: View {
 
     private var readinessSubtitle: String {
         vmStatusViewModel.readinessStatusText
+    }
+
+    private var shouldShowGuestBootstrapGuidance: Bool {
+        vmStatusViewModel.readiness.issues.contains {
+            $0.category == .vm && $0.message.localizedCaseInsensitiveContains("guest bootstrap")
+        }
     }
 
     private func readinessImage(for category: RunnerHostReadinessCategory) -> String {
