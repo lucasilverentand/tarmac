@@ -76,8 +76,11 @@ permissions and the support matrix.
 
 **Both:**
 
-3. Create a runner scale set on GitHub and set its numeric **scale set ID** in
-   the Tarmac org config. Polling will not start without it.
+3. In Tarmac → Accounts → Runner, use **Create / Find Scale Set**. Tarmac
+   lists existing runner scale sets for the account, reuses the default
+   `tarmac-macos` set when present, or creates it through the Actions-service
+   scale-set API. The returned numeric **scale set ID** is written back to the
+   account config. Polling will not start without that ID.
 4. Set the runner **labels** (default `self-hosted, macOS, ARM64`) to match the
    workflow `runs-on` contract. The runner group is taken automatically from the
    scale set when the polling session is created — no manual group ID needed
@@ -121,9 +124,6 @@ group, labels) and surfaces failures in the Accounts UI immediately.
 
 ## Known rough edges (follow-up, not blockers)
 
-- No pre-flight check that the base image, platform data, and guest bootstrap
-  are present before a job is queued. A missing piece manifests as a long
-  completion-timeout rather than an early, clear error.
 - If the app crashes mid-teardown, the cloned disk and job directory can linger
   until the 24h transient-file cleanup runs.
 - The downloaded runner tarball checksum (`RunnerDownloadInfo.sha256Checksum`)

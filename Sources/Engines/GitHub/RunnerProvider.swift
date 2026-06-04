@@ -108,6 +108,68 @@ actor RunnerProvider {
         return response.encoded_jit_config
     }
 
+    /// List the runner scale sets for an account. Used to reconcile a
+    /// configured scale set by name before creating a duplicate.
+    ///
+    /// The runner scale-set endpoints are the ARC/Actions-service surface
+    /// (camelCase JSON), the same one the polling session response already
+    /// decodes into `RunnerScaleSet`.
+    func listScaleSets(token: String, accountPath: String) async throws -> [RunnerScaleSet] {
+        struct ListResponse: Decodable, Sendable {
+            let value: [RunnerScaleSet]?
+        }
+
+        let response: ListResponse = try await client.request(
+            method: "GET",
+            path: "\(accountPath)/actions/runner-scale-sets",
+            body: nil as String?,
+            headers: ["Authorization": "Bearer \(token)"],
+            timeoutInterval: 30
+        )
+
+        return response.value ?? []
+    }
+
+    /// Create a runner scale set in the given runner group and return it.
+    func createScaleSet(
+        token: String,
+        accountPath: String,
+        name: String,
+        runnerGroupId: Int,
+        labels: [String]
+    ) async throws -> RunnerScaleSet {
+        struct CreateRequest: Encodable, Sendable {
+            struct Label: Encodable, Sendable {
+                let name: String
+                let type = "User"
+            }
+            struct RunnerSetting: Encodable, Sendable {
+                let ephemeral = true
+                let disableUpdate = true
+            }
+            let name: String
+            let runnerGroupId: Int
+            let labels: [Label]
+            let runnerSetting = RunnerSetting()
+        }
+
+        let request = CreateRequest(
+            name: name,
+            runnerGroupId: runnerGroupId,
+            labels: labels.map { CreateRequest.Label(name: $0) }
+        )
+
+        let response: RunnerScaleSet = try await client.request(
+            method: "POST",
+            path: "\(accountPath)/actions/runner-scale-sets",
+            body: request,
+            headers: ["Authorization": "Bearer \(token)"],
+            timeoutInterval: 30
+        )
+
+        return response
+    }
+
     func generateRegistrationToken(token: String, accountPath: String) async throws -> String {
         struct RegistrationTokenResponse: Decodable, Sendable {
             let token: String

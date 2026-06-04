@@ -641,6 +641,9 @@ private struct OrganizationFormSheet: View {
     @State private var appId: String = ""
     @State private var installationId: String = ""
     @State private var scaleSetId: String = ""
+    @State private var scaleSetName: String = SettingsViewModel.defaultScaleSetName
+    @State private var scaleSetCreationInFlight = false
+    @State private var scaleSetCreationError: String?
     @State private var labels: String = "self-hosted, macOS, ARM64"
     @State private var imageProfileEnabled = false
     @State private var imageProfileName = "Apple Platform"
@@ -935,6 +938,36 @@ private struct OrganizationFormSheet: View {
                             TextField("Scale Set ID", text: $scaleSetId)
                                 .help("The numeric ID of your Actions Runner Scale Set for this account")
                             FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
+
+                            TextField("Scale set name", text: $scaleSetName)
+                                .help("Name used to create the scale set, and to find it again later.")
+
+                            HStack {
+                                Button {
+                                    createScaleSet()
+                                } label: {
+                                    if scaleSetCreationInFlight {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Label("Create / Find Scale Set", systemImage: "plus.rectangle.on.folder")
+                                    }
+                                }
+                                .controlSize(.small)
+                                .disabled(!canCreateScaleSet || scaleSetCreationInFlight)
+
+                                Spacer()
+                            }
+                            FieldInlineHint(
+                                text:
+                                    "GitHub has no web UI to create a runner scale set. This creates one (or reuses an existing one with the same name) in the default runner group and fills in the ID above."
+                            )
+                            if let scaleSetCreationError {
+                                Text(scaleSetCreationError)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
 
                         Section("Runner Labels") {
@@ -1479,6 +1512,64 @@ private struct OrganizationFormSheet: View {
                     "Could not find an installation for \(trimmedName). Confirm the app is installed on that organization and the App ID/private key match."
             }
             installationLookupInFlight = false
+        }
+    }
+
+    private var canCreateScaleSet: Bool {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        switch accountType {
+        case .enterprise:
+            return hasAccessToken || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .organization:
+            let hasKey = hasPrivateKey || pendingKeyData != nil
+            return hasKey
+                && !appId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && Int(installationId) != nil
+        }
+    }
+
+    private func createScaleSet() {
+        scaleSetCreationError = nil
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            scaleSetCreationError = SettingsError.missingAccountName.errorDescription
+            return
+        }
+
+        let parsedLabels =
+            labels
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let draft = Organization(
+            id: existing?.id ?? UUID(),
+            name: trimmedName,
+            accountType: accountType,
+            appId: accountType == .organization ? appId : "",
+            installationId: Int(installationId) ?? 0,
+            labels: parsedLabels
+        )
+        let trimmedScaleSetName = scaleSetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = trimmedScaleSetName.isEmpty ? SettingsViewModel.defaultScaleSetName : trimmedScaleSetName
+        let inFlightToken = accountType == .enterprise ? accessToken : nil
+        let inFlightKey = pendingKeyData
+
+        scaleSetCreationInFlight = true
+        Task {
+            defer { scaleSetCreationInFlight = false }
+            do {
+                let id = try await viewModel.createScaleSet(
+                    for: draft,
+                    scaleSetName: resolvedName,
+                    runnerGroupId: 1,
+                    inFlightAccessToken: inFlightToken,
+                    inFlightPrivateKey: inFlightKey
+                )
+                scaleSetId = String(id)
+                scaleSetCreationError = nil
+            } catch {
+                scaleSetCreationError = error.localizedDescription
+            }
         }
     }
 
