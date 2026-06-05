@@ -366,7 +366,7 @@ struct BaseImageWizardView: View {
                 .font(.title3.weight(.medium))
 
             Text(
-                "Tarmac is booting a clone of the base image to confirm it works. This usually takes under a minute."
+                "Tarmac is booting a clone of the base image and checking that the guest bootstrap LaunchDaemon can see the shared job directory."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -393,6 +393,17 @@ struct BaseImageWizardView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
                 .lineLimit(4)
+
+            if message.localizedCaseInsensitiveContains("guest bootstrap") {
+                Text(
+                    "Install `Resources/GuestBootstrap/install-tarmac-runner-bootstrap.sh` inside the base image, then retry verification."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .fixedSize(horizontal: false, vertical: true)
+            }
 
             Button("Retry Verification") {
                 startVerify()
