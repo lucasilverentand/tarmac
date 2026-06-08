@@ -5,9 +5,14 @@ PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
 SHARED_TAG="shared"
 SHARED_MOUNT="/Volumes/tarmac-shared"
+SHARED_AUTOMOUNT="/Volumes/My Shared Files"
 CACHE_TAG="actions-cache"
 CACHE_MOUNT="/Volumes/actions-cache"
 LOCAL_LOG="/var/log/tarmac-runner-bootstrap.log"
+RUNNER_USER="tarmac"
+RUNNER_UID="501"
+RUNNER_GID="20"
+RUNNER_HOME="/Users/tarmac"
 
 BOOTSTRAP_LOG=""
 RUNNER_LOG=""
@@ -22,8 +27,35 @@ log() {
     line="$(date -u '+%Y-%m-%dT%H:%M:%SZ') ${message}"
     echo "${line}" >> "${LOCAL_LOG}"
     if [[ -n "${BOOTSTRAP_LOG}" ]]; then
-        echo "${line}" >> "${BOOTSTRAP_LOG}"
+        runner_shell "printf '%s\\n' $(shell_quote "${line}") >> $(shell_quote "${BOOTSTRAP_LOG}")" 2>> "${LOCAL_LOG}" || true
     fi
+}
+
+shell_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | /usr/bin/sed "s/'/'\\\\''/g")"
+}
+
+ensure_runner_user() {
+    if /usr/bin/id -u "${RUNNER_USER}" >/dev/null 2>&1; then
+        /usr/bin/dscl . -create "/Users/${RUNNER_USER}" NFSHomeDirectory "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1 || true
+        /bin/mkdir -p "${RUNNER_HOME}"
+        /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1
+        return 0
+    fi
+
+    log "Creating guest runner user ${RUNNER_USER} (${RUNNER_UID}:${RUNNER_GID})"
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" >> "${LOCAL_LOG}" 2>&1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" UserShell /bin/bash >> "${LOCAL_LOG}" 2>&1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" RealName "Tarmac Runner" >> "${LOCAL_LOG}" 2>&1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" UniqueID "${RUNNER_UID}" >> "${LOCAL_LOG}" 2>&1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" PrimaryGroupID "${RUNNER_GID}" >> "${LOCAL_LOG}" 2>&1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" NFSHomeDirectory "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1
+    /bin/mkdir -p "${RUNNER_HOME}"
+    /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1
+}
+
+runner_shell() {
+    HOME="${RUNNER_HOME}" USER="${RUNNER_USER}" LOGNAME="${RUNNER_USER}" /usr/bin/su -m "${RUNNER_USER}" -c "$1"
 }
 
 shutdown_guest() {
@@ -39,10 +71,12 @@ shutdown_guest() {
 finish() {
     local exit_code="$1"
     if [[ -n "${EXIT_CODE_FILE}" ]]; then
-        echo "${exit_code}" > "${EXIT_CODE_FILE}"
+        runner_shell "printf '%s\\n' $(shell_quote "${exit_code}") > $(shell_quote "${EXIT_CODE_FILE}")" 2>> "${LOCAL_LOG}" || true
     fi
     if [[ -n "${COMPLETION_MARKER_FILE}" ]]; then
-        printf '{"exitCode":%s,"completedAt":"%s"}\n' "${exit_code}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "${COMPLETION_MARKER_FILE}"
+        local completion
+        completion="$(printf '{"exitCode":%s,"completedAt":"%s"}\n' "${exit_code}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
+        runner_shell "printf '%s\\n' $(shell_quote "${completion}") > $(shell_quote "${COMPLETION_MARKER_FILE}")" 2>> "${LOCAL_LOG}" || true
     fi
     log "Bootstrap finished with exit code ${exit_code}"
     shutdown_guest
@@ -58,6 +92,12 @@ mount_required_virtiofs() {
     local tag="$1"
     local mount_point="$2"
 
+    if [[ "${tag}" == "${SHARED_TAG}" && -d "${SHARED_AUTOMOUNT}" ]]; then
+        SHARED_MOUNT="${SHARED_AUTOMOUNT}"
+        log "Using macOS automounted VirtioFS share at ${SHARED_MOUNT}"
+        return 0
+    fi
+
     /bin/mkdir -p "${mount_point}"
     if is_mounted "${mount_point}"; then
         log "VirtioFS tag ${tag} is already mounted at ${mount_point}"
@@ -67,7 +107,7 @@ mount_required_virtiofs() {
     local attempt=1
     while [[ "${attempt}" -le 30 ]]; do
         log "Mounting required VirtioFS tag ${tag} at ${mount_point} (attempt ${attempt})"
-        if /sbin/mount_virtiofs -u root -g wheel "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
+        if /sbin/mount_virtiofs "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
             log "Mounted VirtioFS tag ${tag} at ${mount_point}"
             return 0
         fi
@@ -90,7 +130,7 @@ mount_optional_virtiofs() {
     fi
 
     log "Trying optional VirtioFS tag ${tag} at ${mount_point}"
-    if /sbin/mount_virtiofs -u root -g wheel "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
+    if /sbin/mount_virtiofs "${tag}" "${mount_point}" >> "${LOCAL_LOG}" 2>&1; then
         log "Mounted optional VirtioFS tag ${tag} at ${mount_point}"
     else
         log "Optional VirtioFS tag ${tag} is not available"
@@ -105,13 +145,16 @@ prepare_shared_logging() {
     CACHE_ENV_FILE="${SHARED_MOUNT}/cache-env"
     SIGNING_IMPORT_SCRIPT_FILE="${SHARED_MOUNT}/apple-signing/import-signing-assets.sh"
 
-    /usr/bin/touch "${BOOTSTRAP_LOG}" "${RUNNER_LOG}" "${EXIT_CODE_FILE}" 2>> "${LOCAL_LOG}" || {
+    /sbin/mount >> "${LOCAL_LOG}" 2>&1 || true
+    /bin/ls -ldeO@ "${SHARED_MOUNT}" >> "${LOCAL_LOG}" 2>&1 || true
+
+    runner_shell ": >> $(shell_quote "${BOOTSTRAP_LOG}") && : >> $(shell_quote "${RUNNER_LOG}") && : >> $(shell_quote "${EXIT_CODE_FILE}")" 2>> "${LOCAL_LOG}" || {
         log "Cannot write bootstrap files into ${SHARED_MOUNT}"
         return 1
     }
 
     if [[ -f "${LOCAL_LOG}" ]]; then
-        /bin/cat "${LOCAL_LOG}" >> "${BOOTSTRAP_LOG}"
+        runner_shell "cat $(shell_quote "${LOCAL_LOG}") >> $(shell_quote "${BOOTSTRAP_LOG}")" 2>> "${LOCAL_LOG}" || true
     fi
 }
 
@@ -120,7 +163,9 @@ ensure_cache_link() {
     local guest_path="$2"
 
     /bin/mkdir -p "${cache_path}"
+    /bin/chmod -R 0777 "${cache_path}" >> "${LOCAL_LOG}" 2>&1 || true
     /bin/mkdir -p "$(/usr/bin/dirname "${guest_path}")"
+    /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "$(/usr/bin/dirname "${guest_path}")" >> "${LOCAL_LOG}" 2>&1 || true
 
     if [[ -L "${guest_path}" ]]; then
         local existing
@@ -131,22 +176,37 @@ ensure_cache_link() {
         fi
         /bin/rm "${guest_path}"
     elif [[ -e "${guest_path}" ]]; then
-        log "Cache path ${guest_path} already exists and is not a symlink; leaving it untouched"
+        log "Cache path ${guest_path} already exists and is not a symlink; repairing runner ownership"
+        /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "${guest_path}" >> "${LOCAL_LOG}" 2>&1 || true
+        /bin/chmod -R u+rwX "${guest_path}" >> "${LOCAL_LOG}" 2>&1 || true
         return 0
     fi
 
     /bin/ln -s "${cache_path}" "${guest_path}"
+    /usr/sbin/chown -h "${RUNNER_UID}:${RUNNER_GID}" "${guest_path}" >> "${LOCAL_LOG}" 2>&1 || true
     log "Configured cache link: ${guest_path} -> ${cache_path}"
 }
 
+ensure_local_cache_dirs() {
+    local swiftpm_cache="${RUNNER_HOME}/Library/Caches/org.swift.swiftpm"
+    local module_cache="${RUNNER_HOME}/.cache/clang/ModuleCache"
+
+    /bin/mkdir -p "${swiftpm_cache}" "${module_cache}"
+    /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" \
+        "${RUNNER_HOME}/Library" \
+        "${RUNNER_HOME}/.cache" >> "${LOCAL_LOG}" 2>&1 || true
+    /bin/chmod -R u+rwX "${RUNNER_HOME}/Library" "${RUNNER_HOME}/.cache" >> "${LOCAL_LOG}" 2>&1 || true
+}
+
 configure_cache_paths() {
+    ensure_local_cache_dirs
+
     if ! is_mounted "${CACHE_MOUNT}"; then
         log "Actions cache mount is unavailable; runner will use clone-local tool caches"
         return 0
     fi
 
     local swiftpm_cache="${CACHE_MOUNT}/swiftpm"
-    local derived_data_cache="${CACHE_MOUNT}/xcode-derived-data"
     local cocoapods_cache="${CACHE_MOUNT}/cocoapods"
     local pub_cache="${CACHE_MOUNT}/pub-cache"
     local npm_cache="${CACHE_MOUNT}/npm"
@@ -154,20 +214,18 @@ configure_cache_paths() {
     local pnpm_store="${CACHE_MOUNT}/pnpm-store"
     local bun_install_cache="${CACHE_MOUNT}/bun-install-cache"
 
-    /bin/mkdir -p "${swiftpm_cache}" "${derived_data_cache}" "${cocoapods_cache}" "${pub_cache}" "${npm_cache}" "${yarn_cache}" "${pnpm_store}" "${bun_install_cache}"
-    ensure_cache_link "${swiftpm_cache}" "/var/root/Library/Caches/org.swift.swiftpm"
-    ensure_cache_link "${derived_data_cache}" "/var/root/Library/Developer/Xcode/DerivedData"
-    ensure_cache_link "${cocoapods_cache}" "/var/root/.cocoapods"
-    ensure_cache_link "${pub_cache}" "/var/root/.pub-cache"
-    ensure_cache_link "${npm_cache}" "/var/root/.npm"
-    ensure_cache_link "${yarn_cache}" "/var/root/.cache/yarn"
-    ensure_cache_link "${pnpm_store}" "/var/root/.pnpm-store"
-    ensure_cache_link "${bun_install_cache}" "/var/root/.bun/install/cache"
+    /bin/mkdir -p "${swiftpm_cache}" "${cocoapods_cache}" "${pub_cache}" "${npm_cache}" "${yarn_cache}" "${pnpm_store}" "${bun_install_cache}"
+    ensure_cache_link "${swiftpm_cache}" "${RUNNER_HOME}/Library/Caches/org.swift.swiftpm"
+    ensure_cache_link "${cocoapods_cache}" "${RUNNER_HOME}/.cocoapods"
+    ensure_cache_link "${pub_cache}" "${RUNNER_HOME}/.pub-cache"
+    ensure_cache_link "${npm_cache}" "${RUNNER_HOME}/.npm"
+    ensure_cache_link "${yarn_cache}" "${RUNNER_HOME}/.cache/yarn"
+    ensure_cache_link "${pnpm_store}" "${RUNNER_HOME}/.pnpm-store"
+    ensure_cache_link "${bun_install_cache}" "${RUNNER_HOME}/.bun/install/cache"
 
     /bin/cat > "${CACHE_ENV_FILE}" <<EOF
 export TARMAC_ACTIONS_CACHE="${CACHE_MOUNT}"
 export TARMAC_SWIFTPM_CACHE_PATH="${swiftpm_cache}"
-export TARMAC_XCODE_DERIVED_DATA_PATH="${derived_data_cache}"
 export TARMAC_COCOAPODS_CACHE_PATH="${cocoapods_cache}"
 export TARMAC_FLUTTER_PUB_CACHE_PATH="${pub_cache}"
 export PUB_CACHE="${pub_cache}"
@@ -198,6 +256,23 @@ configure_apple_signing() {
     fi
 
     log "Failed to configure ephemeral Apple signing assets"
+    return 1
+}
+
+ensure_xcode_first_launch() {
+    local xcodebuild="/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild"
+    if [[ ! -x "${xcodebuild}" ]]; then
+        log "Xcode is not installed; skipping xcodebuild first launch"
+        return 0
+    fi
+
+    log "Running xcodebuild first-launch setup"
+    if DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" "${xcodebuild}" -runFirstLaunch >> "${LOCAL_LOG}" 2>&1; then
+        log "xcodebuild first-launch setup completed"
+        return 0
+    fi
+
+    log "xcodebuild first-launch setup failed"
     return 1
 }
 
@@ -261,33 +336,44 @@ run_runner() {
     local runner_dir="${SHARED_MOUNT}/runner"
     local jit_config="${SHARED_MOUNT}/jitconfig"
     local registration_token="${SHARED_MOUNT}/registration-token"
+    local quoted_runner_dir
+    local quoted_cache_env
+    local quoted_jit_config
+    local quoted_registration_token
+
+    quoted_runner_dir="$(shell_quote "${runner_dir}")"
+    quoted_cache_env="$(shell_quote "${CACHE_ENV_FILE}")"
+    quoted_jit_config="$(shell_quote "${jit_config}")"
+    quoted_registration_token="$(shell_quote "${registration_token}")"
 
     log "Starting GitHub Actions runner"
-    (
-        cd "${runner_dir}" || exit 127
-        if [[ -f "${CACHE_ENV_FILE}" ]]; then
-            # shellcheck disable=SC1090
-            . "${CACHE_ENV_FILE}"
+    runner_shell "
+        cd ${quoted_runner_dir} || exit 127
+        if [[ -f ${quoted_cache_env} ]]; then
+            . ${quoted_cache_env}
         fi
-        if [[ -s "${jit_config}" ]]; then
-            ./run.sh --jitconfig "${jit_config}"
-        elif [[ -s "${registration_token}" ]]; then
+        if [[ -s ${quoted_jit_config} ]]; then
+            jit_payload=\"\$(/bin/cat ${quoted_jit_config})\"
+            ./run.sh --jitconfig \"\${jit_payload}\"
+        elif [[ -s ${quoted_registration_token} ]]; then
             configure_runner_with_registration_token || exit "$?"
             ./run.sh
         else
             exit 12
         fi
-    ) >> "${RUNNER_LOG}" 2>&1
+    " >> "${RUNNER_LOG}" 2>&1
     return "$?"
 }
 
 write_job_result() {
     local exit_code="$1"
     if [[ -n "${EXIT_CODE_FILE}" ]]; then
-        echo "${exit_code}" > "${EXIT_CODE_FILE}"
+        runner_shell "printf '%s\\n' $(shell_quote "${exit_code}") > $(shell_quote "${EXIT_CODE_FILE}")" 2>> "${LOCAL_LOG}" || true
     fi
     if [[ -n "${COMPLETION_MARKER_FILE}" ]]; then
-        printf '{"exitCode":%s,"completedAt":"%s"}\n' "${exit_code}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "${COMPLETION_MARKER_FILE}"
+        local completion
+        completion="$(printf '{"exitCode":%s,"completedAt":"%s"}\n' "${exit_code}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
+        runner_shell "printf '%s\\n' $(shell_quote "${completion}") > $(shell_quote "${COMPLETION_MARKER_FILE}")" 2>> "${LOCAL_LOG}" || true
     fi
     log "Job finished with exit code ${exit_code}"
 }
@@ -374,6 +460,7 @@ run_warm_loop() {
 
 main() {
     log "Tarmac guest bootstrap starting"
+    ensure_runner_user
 
     if ! mount_required_virtiofs "${SHARED_TAG}" "${SHARED_MOUNT}"; then
         finish 10
@@ -385,6 +472,9 @@ main() {
 
     mount_optional_virtiofs "${CACHE_TAG}" "${CACHE_MOUNT}"
     configure_cache_paths
+    if ! ensure_xcode_first_launch; then
+        finish 23
+    fi
 
     if warm_mode_enabled; then
         run_warm_loop

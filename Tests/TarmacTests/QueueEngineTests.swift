@@ -463,6 +463,41 @@ struct QueueEngineTests {
         #expect(jobs.first?.repositoryName == "allowed-repo")
     }
 
+    @Test("queued workflow jobs are sorted and enqueued before dispatch")
+    func queuedWorkflowJobsAreSortedBeforeDispatch() async throws {
+        let (engine, store, _) = try makeEngine()
+        let org = TestFactories.makeOrg(
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["allowed-repo"]
+        )
+        let later = GitHubQueuedWorkflowJob(
+            id: 20,
+            runId: 200,
+            name: "later",
+            repositoryName: "allowed-repo",
+            labels: ["self-hosted", "macOS", "ARM64"],
+            queuedAt: Date(timeIntervalSince1970: 200),
+            htmlURL: nil
+        )
+        let earlier = GitHubQueuedWorkflowJob(
+            id: 10,
+            runId: 100,
+            name: "earlier",
+            repositoryName: "allowed-repo",
+            labels: ["self-hosted", "macOS", "ARM64"],
+            queuedAt: Date(timeIntervalSince1970: 100),
+            htmlURL: nil
+        )
+
+        await engine.handleQueuedWorkflowJobs([later, earlier], org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.map(\.id) == [10, 20])
+        #expect(jobs.first { $0.id == 10 }?.status == .provisioning)
+        #expect(jobs.first { $0.id == 20 }?.status == .pending)
+    }
+
     @Test("reconcileInterruptedLeases removes cleaned stale leases")
     func reconcileInterruptedLeasesRemovesCleanedLeases() async throws {
         let org = TestFactories.makeOrg()

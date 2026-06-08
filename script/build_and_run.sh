@@ -78,7 +78,12 @@ open_app() {
     exit 1
   fi
 
-  /usr/bin/open -n "$app_bundle"
+  local open_args=(-n)
+  if [[ -n "${TARMAC_JOBS_DIRECTORY:-}" ]]; then
+    open_args+=(--env "TARMAC_JOBS_DIRECTORY=$TARMAC_JOBS_DIRECTORY")
+  fi
+
+  /usr/bin/open "${open_args[@]}" "$app_bundle"
 }
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true

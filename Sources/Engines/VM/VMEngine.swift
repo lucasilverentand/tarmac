@@ -814,6 +814,8 @@ final class VMEngine: VMManagerProtocol {
         if fm.fileExists(atPath: sharedDirectory.path) {
             try fm.removeItem(at: sharedDirectory)
         }
+        try fm.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: sharedDirectory.path)
         let runnerDirectory = sharedDirectory.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         try fm.createDirectory(at: runnerDirectory, withIntermediateDirectories: true)
         try "inventory-scan\n".write(
@@ -821,6 +823,7 @@ final class VMEngine: VMManagerProtocol {
             atomically: true,
             encoding: .utf8
         )
+        try precreateGuestWritableResultFiles(in: sharedDirectory, fileManager: fm)
 
         let runScriptURL = runnerDirectory.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
         try Self.inventoryRunScript.write(to: runScriptURL, atomically: true, encoding: .utf8)
@@ -832,6 +835,8 @@ final class VMEngine: VMManagerProtocol {
         if fm.fileExists(atPath: sharedDirectory.path) {
             try fm.removeItem(at: sharedDirectory)
         }
+        try fm.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: sharedDirectory.path)
 
         let runnerDirectory = sharedDirectory.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         try fm.createDirectory(at: runnerDirectory, withIntermediateDirectories: true)
@@ -840,6 +845,7 @@ final class VMEngine: VMManagerProtocol {
             atomically: true,
             encoding: .utf8
         )
+        try precreateGuestWritableResultFiles(in: sharedDirectory, fileManager: fm)
 
         let runScriptURL = runnerDirectory.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
         try Self.bootstrapProbeRunScript.write(to: runScriptURL, atomically: true, encoding: .utf8)
@@ -857,13 +863,31 @@ final class VMEngine: VMManagerProtocol {
 
         while Date() < deadline {
             try Task.checkCancellation()
-            if FileManager.default.fileExists(atPath: markerURL.path) {
+            let rawExitCode = (try? String(contentsOf: exitCodeURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if FileManager.default.fileExists(atPath: markerURL.path),
+                rawExitCode?.isEmpty == false
+            {
                 return readCompletionResult(exitCodeURL: exitCodeURL)
             }
             try await Task.sleep(for: .seconds(1))
         }
 
         return .failure("Timed out waiting for \(context)")
+    }
+
+    private func precreateGuestWritableResultFiles(in directory: URL, fileManager fm: FileManager) throws {
+        for fileName in [
+            GuestBootstrapContract.bootstrapLogFileName,
+            GuestBootstrapContract.runnerLogFileName,
+        ] {
+            let url = directory.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: url.path) {
+                try fm.removeItem(at: url)
+            }
+            fm.createFile(atPath: url.path, contents: Data())
+            try fm.setAttributes([.posixPermissions: 0o666], ofItemAtPath: url.path)
+        }
     }
 }
 

@@ -135,7 +135,7 @@ actor RunnerProvider {
             // fall back to the default group 1 when GitHub did not report one.
             runner_group_id: runnerGroupId ?? 1,
             labels: labels,
-            work_folder: "_work"
+            work_folder: "/private/var/tmp/tarmac-work"
         )
 
         let response: JITResponse = try await client.request(

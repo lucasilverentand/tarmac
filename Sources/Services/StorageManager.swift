@@ -30,7 +30,15 @@ struct StorageManager: Sendable {
     var ipswResumeDataURL: URL { rootDirectory.appendingPathComponent("ipsw-resume.json") }
     var platformDirectory: URL { rootDirectory.appendingPathComponent("Platform", isDirectory: true) }
     var runnerDirectory: URL { rootDirectory.appendingPathComponent("runner", isDirectory: true) }
-    var jobsDirectory: URL { rootDirectory.appendingPathComponent("jobs", isDirectory: true) }
+    var jobsDirectory: URL {
+        if let override = ProcessInfo.processInfo.environment["TARMAC_JOBS_DIRECTORY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !override.isEmpty
+        {
+            return URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
+        }
+        return rootDirectory.appendingPathComponent("jobs", isDirectory: true)
+    }
     var disksDirectory: URL { rootDirectory.appendingPathComponent("disks", isDirectory: true) }
     var diagnosticsDirectory: URL { rootDirectory.appendingPathComponent("diagnostics", isDirectory: true) }
     var actionsCacheDirectory: URL { rootDirectory.appendingPathComponent("actions-cache", isDirectory: true) }

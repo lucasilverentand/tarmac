@@ -332,12 +332,13 @@ actor QueueEngine {
     // MARK: - Message Handling
 
     func handleMessages(_ messages: [ScaleSetMessage], org: Organization) async {
+        let key = accountKey(for: org)
         for message in messages {
-            if processedMessageIdsByOrg[org.name, default: []].contains(message.messageId) {
+            if processedMessageIdsByOrg[key, default: []].contains(message.messageId) {
                 Log.queue.debug("Skipping duplicate GitHub message \(message.messageId) for org \(org.name)")
                 continue
             }
-            processedMessageIdsByOrg[org.name, default: []].insert(message.messageId)
+            processedMessageIdsByOrg[key, default: []].insert(message.messageId)
 
             switch message.messageType {
             case "JobAvailable":
@@ -351,13 +352,28 @@ actor QueueEngine {
     }
 
     func handleQueuedWorkflowJobs(_ jobs: [GitHubQueuedWorkflowJob], org: Organization) async {
-        for queuedJob in jobs {
-            if processedMessageIdsByOrg[org.name, default: []].contains(queuedJob.id) {
+        let key = accountKey(for: org)
+        let orderedJobs = jobs.sorted {
+            switch ($0.queuedAt, $1.queuedAt) {
+            case let (lhs?, rhs?) where lhs != rhs:
+                return lhs < rhs
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            default:
+                return $0.id < $1.id
+            }
+        }
+        var enqueuedJob = false
+
+        for queuedJob in orderedJobs {
+            if processedMessageIdsByOrg[key, default: []].contains(queuedJob.id) {
                 Log.queue.debug("Skipping duplicate queued workflow job \(queuedJob.id) for org \(org.name)")
                 continue
             }
             if await jobStore.job(byId: queuedJob.id) != nil {
-                processedMessageIdsByOrg[org.name, default: []].insert(queuedJob.id)
+                processedMessageIdsByOrg[key, default: []].insert(queuedJob.id)
                 continue
             }
             guard org.acceptsRepository(queuedJob.repositoryName) else {
@@ -367,7 +383,7 @@ actor QueueEngine {
                 continue
             }
 
-            processedMessageIdsByOrg[org.name, default: []].insert(queuedJob.id)
+            processedMessageIdsByOrg[key, default: []].insert(queuedJob.id)
             let job = RunnerJob(
                 id: queuedJob.id,
                 organizationName: org.name,
@@ -379,6 +395,10 @@ actor QueueEngine {
             )
 
             await jobStore.addJob(job)
+            enqueuedJob = true
+        }
+
+        if enqueuedJob {
             await tryDispatch()
         }
     }

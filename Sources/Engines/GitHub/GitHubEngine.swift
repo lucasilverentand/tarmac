@@ -355,19 +355,11 @@ actor GitHubEngine {
     }
 
     private func runnerAPIPath(for org: Organization, repositoryName: String?) -> String {
-        guard org.usesRepositoryWorkflowPolling, let repositoryName else {
-            return org.accountPath
-        }
-
-        return "/repos/\(org.name)/\(repositoryName)"
+        org.accountPath
     }
 
     private func runnerRegistrationURL(for org: Organization, repositoryName: String?) -> String {
-        guard org.usesRepositoryWorkflowPolling, let repositoryName else {
-            return org.runnerRegistrationURL
-        }
-
-        return "https://github.com/\(org.name)/\(repositoryName)"
+        org.runnerRegistrationURL
     }
 
     func listOrganizationRunners(for org: Organization) async throws -> [GitHubRunner] {
@@ -411,6 +403,12 @@ actor GitHubEngine {
 
         struct WorkflowRun: Decodable, Sendable {
             let id: Int64
+            let createdAt: Date?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case createdAt = "created_at"
+            }
         }
 
         struct WorkflowJobsResponse: Decodable, Sendable {
@@ -471,14 +469,25 @@ actor GitHubEngine {
                         name: job.name,
                         repositoryName: repository,
                         labels: job.labels,
-                        queuedAt: job.startedAt,
+                        queuedAt: job.startedAt ?? run.createdAt,
                         htmlURL: job.htmlURL
                     )
                 )
             }
         }
 
-        return queuedJobs
+        return queuedJobs.sorted {
+            switch ($0.queuedAt, $1.queuedAt) {
+            case let (lhs?, rhs?) where lhs != rhs:
+                return lhs < rhs
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            default:
+                return $0.id < $1.id
+            }
+        }
     }
 
     func deleteOrganizationRunner(id runnerId: Int64, for org: Organization) async throws {

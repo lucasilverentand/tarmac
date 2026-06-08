@@ -29,16 +29,19 @@ struct SharedDirectoryManager: Sendable {
             try fm.removeItem(at: jobDir)
         }
         try fm.createDirectory(at: jobDir, withIntermediateDirectories: true)
+        try allowGuestWrites(to: jobDir, fileManager: fm)
 
         let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         try fm.copyItem(at: runnerPath, to: runnerDestination)
         try writeGuestConfig(guestConfig, in: jobDir, fileManager: fm)
+        try precreateGuestWritableResultFiles(in: jobDir, fileManager: fm)
 
         if let signingInjection {
             try writeSigningInjection(signingInjection, in: jobDir, fileManager: fm)
         }
 
         try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
+        try allowGuestWrites(to: storage.actionsCacheDirectory, fileManager: fm)
 
         Log.vm.info("Shared directory prepared for job \(jobId) at \(jobDir.path)")
         return jobDir
@@ -68,6 +71,7 @@ struct SharedDirectoryManager: Sendable {
         try validateGuestConfig(guestConfig)
 
         try fm.createDirectory(at: jobDir, withIntermediateDirectories: true)
+        try allowGuestWrites(to: jobDir, fileManager: fm)
         try clearWarmRunnerJobArtifacts(in: jobDir, fileManager: fm)
 
         let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
@@ -76,6 +80,7 @@ struct SharedDirectoryManager: Sendable {
         }
         try fm.copyItem(at: runnerPath, to: runnerDestination)
         try writeGuestConfig(guestConfig, in: jobDir, fileManager: fm)
+        try precreateGuestWritableResultFiles(in: jobDir, fileManager: fm)
 
         if let signingInjection {
             try writeSigningInjection(signingInjection, in: jobDir, fileManager: fm)
@@ -90,6 +95,7 @@ struct SharedDirectoryManager: Sendable {
         }
 
         try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
+        try allowGuestWrites(to: storage.actionsCacheDirectory, fileManager: fm)
 
         Log.vm.info("Warm runner shared directory prepared for job \(jobId) at \(jobDir.path)")
         return jobDir
@@ -208,6 +214,24 @@ struct SharedDirectoryManager: Sendable {
         }
         guard fm.isExecutableFile(atPath: runScript.path) else {
             throw SharedDirectoryError.runnerEntrypointNotExecutable(runScript)
+        }
+    }
+
+    private func allowGuestWrites(to directory: URL, fileManager fm: FileManager) throws {
+        try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: directory.path)
+    }
+
+    private func precreateGuestWritableResultFiles(in directory: URL, fileManager fm: FileManager) throws {
+        for fileName in [
+            GuestBootstrapContract.bootstrapLogFileName,
+            GuestBootstrapContract.runnerLogFileName,
+        ] {
+            let url = directory.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: url.path) {
+                try fm.removeItem(at: url)
+            }
+            fm.createFile(atPath: url.path, contents: Data())
+            try fm.setAttributes([.posixPermissions: 0o666], ofItemAtPath: url.path)
         }
     }
 

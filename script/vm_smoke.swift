@@ -11,6 +11,7 @@ private struct SmokeConfig {
     var install = false
     var boot = true
     var keepRunning = false
+    var verifyBootstrap = false
     var bootHoldSeconds: UInt64 = 30
     var cpuCount = 4
     var memoryGB = 8
@@ -23,7 +24,21 @@ private struct SmokeStorage {
     var baseImage: URL { root.appendingPathComponent("BaseImage.img") }
     var restoreIPSW: URL { root.appendingPathComponent("restore.ipsw") }
     var platformDirectory: URL { root.appendingPathComponent("Platform", isDirectory: true) }
+    var baseImageVerifiedMarker: URL { platformDirectory.appendingPathComponent("baseImageVerified.json") }
+    var guestBootstrapVerifiedMarker: URL { platformDirectory.appendingPathComponent("guestBootstrapVerified.json") }
     var disksDirectory: URL { root.appendingPathComponent("disks", isDirectory: true) }
+    var jobsDirectory: URL {
+        if let override = ProcessInfo.processInfo.environment["TARMAC_JOBS_DIRECTORY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !override.isEmpty
+        {
+            return URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
+        }
+        return root.appendingPathComponent("jobs", isDirectory: true)
+    }
+    var usesSharedRootAsJobDirectory: Bool {
+        ProcessInfo.processInfo.environment["TARMAC_SHARED_ROOT_IS_JOB"] == "1"
+    }
     var tmpDirectory: URL { root.appendingPathComponent("tmp", isDirectory: true) }
     var smokeSharedDirectory: URL { root.appendingPathComponent("smoke-shared", isDirectory: true) }
     var hardwareModel: URL { platformDirectory.appendingPathComponent("hardwareModel.bin") }
@@ -31,7 +46,7 @@ private struct SmokeStorage {
     var auxiliaryStorage: URL { platformDirectory.appendingPathComponent("auxiliaryStorage.bin") }
 
     func prepare() throws {
-        for directory in [root, platformDirectory, disksDirectory, tmpDirectory, smokeSharedDirectory] {
+        for directory in [root, platformDirectory, disksDirectory, jobsDirectory, tmpDirectory, smokeSharedDirectory] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
     }
@@ -110,6 +125,8 @@ private struct TarmacVMSmoke {
                 config.install = true
             case "--no-boot":
                 config.boot = false
+            case "--verify-bootstrap":
+                config.verifyBootstrap = true
             case "--keep-running":
                 config.keepRunning = true
             case "--boot-hold-seconds":
@@ -156,6 +173,7 @@ private struct TarmacVMSmoke {
               --ipsw <path>               Install from this IPSW.
               --download-latest           Download Apple's latest supported IPSW, then install.
               --no-boot                   Install only.
+              --verify-bootstrap          Verify the guest bootstrap and write verification markers.
               --keep-running              Leave the VM running until this process is stopped.
               --boot-hold-seconds <n>     Seconds to keep the VM running after start. Default: 30.
               --cpus <n>                  Requested CPU count. Default: 4.
@@ -195,7 +213,11 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
             return
         }
 
-        try await bootSmoke()
+        if config.verifyBootstrap {
+            try await verifyGuestBootstrap()
+        } else {
+            try await bootSmoke()
+        }
     }
 
     private func resolveIPSW() async throws -> URL {
@@ -350,6 +372,237 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         virtualMachine = nil
     }
 
+    private func verifyGuestBootstrap() async throws {
+        let verificationId = UUID()
+        let disk = storage.disksDirectory.appendingPathComponent("verify-\(verificationId.uuidString).img")
+        let sharedDir =
+            storage.usesSharedRootAsJobDirectory
+            ? storage.jobsDirectory
+            : storage.jobsDirectory.appendingPathComponent("verify-\(verificationId.uuidString)", isDirectory: true)
+        var shouldCleanUp = false
+
+        try cloneDisk(from: storage.baseImage, to: disk)
+        defer {
+            if shouldCleanUp {
+                try? FileManager.default.removeItem(at: disk)
+                if storage.usesSharedRootAsJobDirectory {
+                    try? removeSharedRootArtifacts(in: sharedDir)
+                } else {
+                    try? FileManager.default.removeItem(at: sharedDir)
+                }
+            } else {
+                print("Preserved bootstrap probe disk: \(disk.path)")
+                print("Preserved bootstrap probe directory: \(sharedDir.path)")
+            }
+        }
+
+        try prepareBootstrapProbeSharedDirectory(sharedDir)
+
+        let platform = try existingPlatform()
+        let vmConfig = try virtualMachineConfiguration(platform: platform, disk: disk, sharedDirectory: sharedDir)
+        let vm = VZVirtualMachine(configuration: vmConfig)
+        vm.delegate = self
+        virtualMachine = vm
+
+        print("Starting VM bootstrap probe from clone \(disk.lastPathComponent)")
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            vm.start { result in
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+
+        let exitCode = try await waitForBootstrapCompletion(in: sharedDir, timeoutSeconds: 300)
+        if exitCode != 0 {
+            let details = bootstrapProbeDetails(in: sharedDir)
+            throw SmokeError.badArgument("Guest bootstrap probe exited \(exitCode).\n\(details)")
+        }
+
+        try? await waitForGuestShutdown(vm, timeoutSeconds: 30)
+        if vm.state != .stopped {
+            try await stop(vm)
+        }
+        virtualMachine = nil
+
+        try writeVerificationMarker(at: storage.baseImageVerifiedMarker)
+        try writeVerificationMarker(at: storage.guestBootstrapVerifiedMarker)
+        shouldCleanUp = true
+        print("Guest bootstrap verified.")
+        print("Wrote \(storage.guestBootstrapVerifiedMarker.path)")
+    }
+
+    private func prepareBootstrapProbeSharedDirectory(_ sharedDir: URL) throws {
+        let runnerDir = sharedDir.appendingPathComponent("runner", isDirectory: true)
+        if FileManager.default.fileExists(atPath: sharedDir.path) {
+            if storage.usesSharedRootAsJobDirectory {
+                try removeSharedRootArtifacts(in: sharedDir)
+            } else {
+                try FileManager.default.removeItem(at: sharedDir)
+            }
+        }
+        try prepareSharedDirectory(sharedDir, usesExistingRoot: storage.usesSharedRootAsJobDirectory)
+        try "bootstrap-probe\n".write(
+            to: sharedDir.appendingPathComponent("jitconfig"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runScript = runnerDir.appendingPathComponent("run.sh")
+        if let scriptPath = ProcessInfo.processInfo.environment["TARMAC_SMOKE_RUN_SCRIPT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !scriptPath.isEmpty
+        {
+            try FileManager.default.copyItem(at: URL(fileURLWithPath: scriptPath), to: runScript)
+        } else {
+            try """
+            #!/bin/bash
+            set -euo pipefail
+            echo "Tarmac guest bootstrap probe"
+            """.write(to: runScript, atomically: true, encoding: .utf8)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runScript.path)
+    }
+
+    private func waitForBootstrapCompletion(in sharedDir: URL, timeoutSeconds: Int) async throws -> Int32 {
+        let marker = sharedDir.appendingPathComponent("completion.json")
+        let exitCodeFile = sharedDir.appendingPathComponent("exit-code")
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+
+        while Date() < deadline {
+            let rawExitCode = (try? String(contentsOf: exitCodeFile, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if FileManager.default.fileExists(atPath: marker.path),
+                let rawExitCode,
+                !rawExitCode.isEmpty
+            {
+                return Int32(rawExitCode) ?? 1
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
+
+        throw SmokeError.badArgument(
+            "Timed out waiting for guest bootstrap probe.\n\(bootstrapProbeDetails(in: sharedDir))"
+        )
+    }
+
+    private func bootstrapProbeDetails(in sharedDir: URL) -> String {
+        ["bootstrap.log", "runner.log"]
+            .map { sharedDir.appendingPathComponent($0) }
+            .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
+    }
+
+    private func waitForGuestShutdown(_ vm: VZVirtualMachine, timeoutSeconds: Int) async throws {
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        while vm.state != .stopped, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    private func writeVerificationMarker(at url: URL) throws {
+        let formatter = ISO8601DateFormatter()
+        let json = #"{"verifiedAt":"\#(formatter.string(from: Date()))"}"#
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try json.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func prepareSharedDirectory(_ directory: URL, usesExistingRoot: Bool) throws {
+        if usesExistingRoot {
+            try prepareExistingSharedRootWithLaunchd(directory)
+        } else {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.posixPermissions: 0o777], ofItemAtPath: directory.path)
+        }
+
+        let runner = directory.appendingPathComponent("runner", isDirectory: true)
+        try FileManager.default.createDirectory(at: runner, withIntermediateDirectories: true)
+        for name in ["bootstrap.log", "runner.log", "exit-code", "completion.json"] {
+            let url = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            FileManager.default.createFile(atPath: url.path, contents: Data())
+            try FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: url.path)
+        }
+    }
+
+    private func prepareExistingSharedRootWithLaunchd(_ directory: URL) throws {
+        let command = """
+            set -e
+            cd \(shellQuote(directory.path))
+            rm -rf runner jitconfig registration-token runner-url runner-name runner-labels apple-signing bootstrap.log runner.log exit-code completion.json cache-env job-ready warm-mode warm-shutdown
+            mkdir -p runner
+            : > bootstrap.log
+            : > runner.log
+            : > exit-code
+            : > completion.json
+            chmod 666 bootstrap.log runner.log exit-code completion.json
+            """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = [
+            "submit",
+            "-l",
+            "tarmac.vm-smoke.prepare.\(UUID().uuidString)",
+            "--",
+            "/bin/zsh",
+            "-lc",
+            command,
+        ]
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw SmokeError.badArgument("launchctl failed to prepare shared directory at \(directory.path)")
+        }
+
+        let completion = directory.appendingPathComponent("completion.json")
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: completion.path) {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        throw SmokeError.badArgument("Timed out preparing shared directory at \(directory.path)")
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func removeSharedRootArtifacts(in directory: URL) throws {
+        let names = [
+            "runner",
+            "jitconfig",
+            "registration-token",
+            "runner-url",
+            "runner-name",
+            "runner-labels",
+            "apple-signing",
+            "bootstrap.log",
+            "runner.log",
+            "exit-code",
+            "completion.json",
+            "cache-env",
+            "job-ready",
+            "warm-mode",
+            "warm-shutdown",
+        ]
+        for name in names {
+            let item = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: item.path) {
+                try FileManager.default.removeItem(at: item)
+            }
+        }
+    }
+
     private func existingPlatform() throws -> VZMacPlatformConfiguration {
         guard
             let hardwareModelData = try? Data(contentsOf: storage.hardwareModel),
@@ -403,7 +656,11 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         if let sharedDirectory {
             let shared = VZSharedDirectory(url: sharedDirectory, readOnly: false)
             let share = VZSingleDirectoryShare(directory: shared)
-            let fs = VZVirtioFileSystemDeviceConfiguration(tag: "shared")
+            let fs = VZVirtioFileSystemDeviceConfiguration(
+                tag: config.verifyBootstrap
+                    ? VZVirtioFileSystemDeviceConfiguration.macOSGuestAutomountTag
+                    : "shared"
+            )
             fs.share = share
             configuration.directorySharingDevices = [fs]
         }

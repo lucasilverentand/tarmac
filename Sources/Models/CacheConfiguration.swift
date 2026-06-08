@@ -14,7 +14,6 @@ struct CacheConfiguration: Codable, Sendable {
     static let guestMountPoint = "/Volumes/actions-cache"
 
     static let swiftPMDirectoryName = "swiftpm"
-    static let xcodeDerivedDataDirectoryName = "xcode-derived-data"
     static let cocoaPodsDirectoryName = "cocoapods"
     static let pubCacheDirectoryName = "pub-cache"
     static let npmDirectoryName = "npm"
@@ -29,12 +28,6 @@ struct CacheConfiguration: Codable, Sendable {
                 directoryName: swiftPMDirectoryName,
                 guestPath: "\(guestMountPoint)/\(swiftPMDirectoryName)",
                 environmentVariable: "TARMAC_SWIFTPM_CACHE_PATH"
-            ),
-            GuestCacheTarget(
-                name: "Xcode DerivedData",
-                directoryName: xcodeDerivedDataDirectoryName,
-                guestPath: "\(guestMountPoint)/\(xcodeDerivedDataDirectoryName)",
-                environmentVariable: "TARMAC_XCODE_DERIVED_DATA_PATH"
             ),
             GuestCacheTarget(
                 name: "CocoaPods",
