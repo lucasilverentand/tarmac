@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct TarmacApp: App {
     @NSApplicationDelegateAdaptor(TarmacAppDelegate.self) private var appDelegate
-    @State private var appState = AppState()
+    @State private var appState = TarmacRuntime.shared.appState
 
     @Environment(\.openWindow) private var openWindow
 
@@ -23,11 +23,6 @@ struct TarmacApp: App {
                 queueViewModel: appState.queueViewModel,
                 vmStatusViewModel: appState.vmStatusViewModel
             )
-            .task {
-                appDelegate.appState = appState
-                await appState.start()
-                appState.syncVMControlServer()
-            }
         }
         .menuBarExtraStyle(.window)
 
@@ -59,11 +54,29 @@ struct TarmacApp: App {
 }
 
 @MainActor
+final class TarmacRuntime {
+    static let shared = TarmacRuntime()
+
+    let appState = AppState()
+
+    private init() {}
+}
+
+@MainActor
 final class TarmacAppDelegate: NSObject, NSApplicationDelegate {
     weak var appState: AppState?
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let appState = TarmacRuntime.shared.appState
+        self.appState = appState
+        Task { @MainActor in
+            await appState.start()
+            appState.syncVMControlServer()
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        guard let appState else { return }
+        let appState = appState ?? TarmacRuntime.shared.appState
         let semaphore = DispatchSemaphore(value: 0)
         Task { @MainActor in
             await appState.shutdownForTermination()

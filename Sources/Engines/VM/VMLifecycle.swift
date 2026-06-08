@@ -77,7 +77,9 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
         if let sharedDirURL = sharedDirectoryURL {
             let sharedDir = VZSharedDirectory(url: sharedDirURL, readOnly: false)
             let share = VZSingleDirectoryShare(directory: sharedDir)
-            let fsDevice = VZVirtioFileSystemDeviceConfiguration(tag: "shared")
+            let fsDevice = VZVirtioFileSystemDeviceConfiguration(
+                tag: VZVirtioFileSystemDeviceConfiguration.macOSGuestAutomountTag
+            )
             fsDevice.share = share
             fsDevices.append(fsDevice)
         }

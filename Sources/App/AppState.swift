@@ -53,7 +53,7 @@ final class AppState {
     private let githubClientFactory: () -> any GitHubClientProtocol
     private let queueEngineFactory: (GitHubEngine, any GitHubClientProtocol) -> QueueEngine
     private let vmEngineFactory:
-        (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine
+        @MainActor (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine
 
     init() {
         let configStore = ConfigStore()
@@ -85,7 +85,8 @@ final class AppState {
             QueueEngine(github: github, client: client)
         },
         vmEngineFactory:
-            @escaping (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) -> VMEngine = {
+            @escaping @MainActor (String, String, String, CacheConfiguration, DiagnosticsRetentionConfiguration) ->
+            VMEngine = {
                 cachePath,
                 basePath,
                 platformPath,
@@ -121,6 +122,21 @@ final class AppState {
     internal func testing_handleScaleSetMessages(_ messages: [ScaleSetMessage], org: Organization) async {
         await queueEngine?.handleMessages(messages, org: org)
     }
+
+    #if DEBUG
+        /// Delivers repository-polled workflow jobs through the live queue engine (test access).
+        @discardableResult
+        internal func testing_handleQueuedWorkflowJobs(
+            _ jobs: [GitHubQueuedWorkflowJob],
+            org: Organization
+        ) async -> Bool {
+            guard let queueEngine else {
+                return false
+            }
+            await queueEngine.handleQueuedWorkflowJobs(jobs, org: org)
+            return true
+        }
+    #endif
 
     // MARK: - Engine Lifecycle
 

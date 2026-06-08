@@ -540,7 +540,6 @@ struct ModelCodableTests {
         #expect(
             CacheConfiguration.guestCacheTargets.map(\.directoryName) == [
                 "swiftpm",
-                "xcode-derived-data",
                 "cocoapods",
                 "pub-cache",
                 "npm",
@@ -554,6 +553,9 @@ struct ModelCodableTests {
         #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("YARN_CACHE_FOLDER"))
         #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("PNPM_STORE_PATH"))
         #expect(CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("BUN_INSTALL_CACHE_DIR"))
+        #expect(
+            !CacheConfiguration.guestCacheTargets.map(\.environmentVariable).contains("TARMAC_XCODE_DERIVED_DATA_PATH")
+        )
     }
 
     @Test("DiagnosticsRetentionConfiguration round-trip")

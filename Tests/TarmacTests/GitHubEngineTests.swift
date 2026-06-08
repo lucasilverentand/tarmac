@@ -429,6 +429,73 @@ struct GitHubEngineTests {
         #expect(jobs.isEmpty)
     }
 
+    @Test("queuedWorkflowJobs returns matching jobs in queue order across runs")
+    func queuedWorkflowJobsSortsAcrossRuns() async throws {
+        let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+        let client = RecordingGitHubClient()
+        await client.addResponse(
+            forPathContaining: "access_tokens",
+            json: """
+                {"token":"ghs_jobs","expires_at":"\(futureDate)"}
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs?status=queued&per_page=20",
+            json: """
+                {
+                  "workflow_runs": [
+                    {"id": 200, "created_at": "2026-06-03T12:00:00Z"},
+                    {"id": 100, "created_at": "2026-06-03T11:59:00Z"}
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs/200/jobs?per_page=100",
+            json: """
+                {
+                  "jobs": [
+                    {
+                      "id": 20,
+                      "run_id": 200,
+                      "name": "later",
+                      "status": "queued",
+                      "conclusion": null,
+                      "labels": ["self-hosted", "macOS", "ARM64"],
+                      "started_at": "2026-06-03T12:00:00Z",
+                      "html_url": null
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+        await client.addResponse(
+            forPathContaining: "/repos/test-org/allowed-repo/actions/runs/100/jobs?per_page=100",
+            json: """
+                {
+                  "jobs": [
+                    {
+                      "id": 10,
+                      "run_id": 100,
+                      "name": "earlier",
+                      "status": "queued",
+                      "conclusion": null,
+                      "labels": ["self-hosted", "macOS", "ARM64"],
+                      "started_at": "2026-06-03T11:59:00Z",
+                      "html_url": null
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!
+        )
+
+        let (engine, _, _) = try makeEngine(client: client)
+        let jobs = try await engine.queuedWorkflowJobs(for: Self.testOrg, repositoryName: "allowed-repo")
+
+        #expect(jobs.map(\.id) == [10, 20])
+        #expect(jobs.map(\.runId) == [100, 200])
+    }
+
     @Test("Missing private key throws TokenError.noPrivateKey")
     func missingPrivateKeyThrows() async throws {
         let client = RecordingGitHubClient()
@@ -571,8 +638,8 @@ struct GitHubEngineTests {
         #expect(requests.contains { $0.path.contains("registration-token") })
     }
 
-    @Test("generateRunnerGuestConfig uses repository runner endpoints for repository polling")
-    func generateRunnerGuestConfigUsesRepositoryRunnerEndpoints() async throws {
+    @Test("generateRunnerGuestConfig uses org runner endpoints for repository polling")
+    func generateRunnerGuestConfigUsesOrgRunnerEndpointsForRepositoryPolling() async throws {
         let futureDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
         let repositoryOrg = Organization(
             id: Self.testOrg.id,
@@ -616,7 +683,7 @@ struct GitHubEngineTests {
             Issue.record("Expected repository registration token fallback config")
             return
         }
-        #expect(url == "https://github.com/lucasilverentand/mac-ephemeral-runner")
+        #expect(url == "https://github.com/orgs/lucasilverentand")
         #expect(token == "REPOREGTOKEN")
         #expect(runnerName == "ephemeral-9")
         #expect(labels == repositoryOrg.runnerLabels)
@@ -624,12 +691,12 @@ struct GitHubEngineTests {
         let requests = await client2.requests
         #expect(
             requests.contains {
-                $0.path == "/repos/lucasilverentand/mac-ephemeral-runner/actions/runners/generate-jitconfig"
+                $0.path == "/orgs/lucasilverentand/actions/runners/generate-jitconfig"
             }
         )
         #expect(
             requests.contains {
-                $0.path == "/repos/lucasilverentand/mac-ephemeral-runner/actions/runners/registration-token"
+                $0.path == "/orgs/lucasilverentand/actions/runners/registration-token"
             }
         )
     }
