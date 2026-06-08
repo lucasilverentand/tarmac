@@ -5,6 +5,9 @@ let project = Project(
     settings: .settings(
         base: [
             "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+            "CURRENT_PROJECT_VERSION": "1",
+            "ENABLE_HARDENED_RUNTIME": "YES",
+            "MARKETING_VERSION": "0.1.0",
             "SWIFT_VERSION": "6.2",
         ],
         configurations: [
@@ -21,7 +24,7 @@ let project = Project(
                 name: "Release",
                 settings: [
                     "CODE_SIGN_STYLE": "Automatic",
-                    "CODE_SIGN_IDENTITY": "Apple Development",
+                    "CODE_SIGN_IDENTITY": "Developer ID Application",
                 ]
             ),
         ]
@@ -51,7 +54,7 @@ let project = Project(
                     .release(
                         name: "Release",
                         settings: [
-                            "CODE_SIGN_IDENTITY": "Apple Development",
+                            "CODE_SIGN_IDENTITY": "Developer ID Application",
                             "CODE_SIGN_STYLE": "Automatic",
                         ]
                     ),
@@ -66,7 +69,7 @@ let project = Project(
             deploymentTargets: .macOS("26.0"),
             sources: ["Tests/**"],
             dependencies: [
-                .target(name: "Tarmac"),
+                .target(name: "Tarmac")
             ]
         ),
     ]
