@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     let appState: AppState
+    @State private var displaySource = VMDisplaySource.shared
 
     @Environment(\.openWindow) private var openWindow
 
@@ -85,6 +86,28 @@ struct MenuBarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+
+            if displaySource.activeVM != nil {
+                Button {
+                    displaySource.observe()
+                    openWindow(id: "vm-display")
+                    NSApp.activate()
+                } label: {
+                    Label("Observe VM", systemImage: "eye")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    displaySource.takeOver()
+                    openWindow(id: "vm-display")
+                    NSApp.activate()
+                } label: {
+                    Label("Take Over VM", systemImage: "keyboard")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
 
             Button {
                 appState.selectedSection = .storage

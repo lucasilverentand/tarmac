@@ -522,6 +522,8 @@ struct AppStateTests {
 
         #expect(appState.isWarmRunnerIdleReleaseScheduled)
         #expect(appState.vmStatusViewModel.activeVM != nil)
+        #expect(appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle)
+        #expect(appState.vmStatusViewModel.warmRunnerJobsServed == 0)
         #expect(mock.stopCallCount == 0)
 
         await appState.stop()

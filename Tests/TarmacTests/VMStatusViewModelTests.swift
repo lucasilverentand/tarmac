@@ -10,6 +10,8 @@ struct VMStatusViewModelTests {
     func initialActiveVM() {
         let vm = VMStatusViewModel()
         #expect(vm.activeVM == nil)
+        #expect(vm.activeVMRole == nil)
+        #expect(!vm.hasDisplayableVM)
     }
 
     @Test("Initial state has baseImageExists false")
@@ -45,8 +47,25 @@ struct VMStatusViewModelTests {
             state: .running
         )
         vm.activeVM = instance
+        vm.activeVMRole = .jobRunner
         #expect(vm.activeVM?.jobId == 42)
         #expect(vm.activeVM?.state == .running)
+        #expect(vm.activeVMRole == .jobRunner)
+        #expect(vm.hasDisplayableVM)
+    }
+
+    @Test("Warm runner role carries display metadata")
+    @MainActor
+    func warmRunnerRoleMetadata() {
+        let vm = VMStatusViewModel()
+        vm.activeVMRole = .warmRunnerIdle
+        vm.warmRunnerJobsServed = 3
+        vm.warmRunnerLastActivityAt = Date(timeIntervalSince1970: 100)
+
+        #expect(vm.activeVMRole?.displayTitle == "Warm runner idle")
+        #expect(vm.activeVMRole?.statusText == "Warm runner waiting for reuse")
+        #expect(vm.activeVMRole?.isWarmRunner == true)
+        #expect(vm.warmRunnerJobsServed == 3)
     }
 
     @Test("Setting baseImageExists updates property")

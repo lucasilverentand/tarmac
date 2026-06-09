@@ -359,6 +359,10 @@ final class VMEngine: VMManagerProtocol {
 
         instance.state = .running
         currentInstance = instance
+        VMDisplaySource.shared.updateMetadata(
+            label: "Job \(jobId) runner",
+            detail: "Running job \(jobId)"
+        )
 
         appendHostLifecycle("VM booted and is running", jobId: jobId, sharedDirectory: sharedDirectory)
         Log.vm.info("VM running for job \(jobId)")
@@ -504,6 +508,12 @@ final class VMEngine: VMManagerProtocol {
                 )
             }
             warmRunnerState?.lastActivityAt = Date()
+            if let jobId {
+                VMDisplaySource.shared.updateMetadata(
+                    label: "Warm runner idle",
+                    detail: "Last job \(jobId), waiting for reuse"
+                )
+            }
             Log.vm.info("Warm runner kept running after job \(jobId.map { String($0) } ?? "unknown")")
             return
         }
@@ -763,6 +773,10 @@ final class VMEngine: VMManagerProtocol {
                 jobsServed: 0,
                 lastActivityAt: Date()
             )
+            VMDisplaySource.shared.updateMetadata(
+                label: "Warm runner",
+                detail: "Running job \(job.id)"
+            )
             try sharedDirManager.signalJobReady(in: sharedDir)
             appendHostLifecycle("Signaled warm runner job ready", jobId: job.id, sharedDirectory: sharedDir)
             return instance
@@ -803,6 +817,10 @@ final class VMEngine: VMManagerProtocol {
         warmRunnerState?.jobsServed += 1
         warmRunnerState?.lastActivityAt = Date()
         warmRunnerState?.sharedDirectory = sharedDir
+        VMDisplaySource.shared.updateMetadata(
+            label: "Warm runner",
+            detail: "Running job \(job.id)"
+        )
 
         try sharedDirManager.signalJobReady(in: sharedDir)
         appendHostLifecycle("Signaled warm runner job ready", jobId: job.id, sharedDirectory: sharedDir)

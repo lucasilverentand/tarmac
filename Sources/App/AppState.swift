@@ -252,6 +252,7 @@ final class AppState {
             try? await controlVMEngine.teardown()
         }
 
+        clearVMStatus()
         stopVMControlServer()
         controlVMEngine = nil
 
@@ -427,7 +428,7 @@ final class AppState {
             await queueEngine.jobStore.updateVMInstance(jobId: job.id, vmInstanceId: instance.id)
 
             queueViewModel.updateJobStatus(id: job.id, status: .running)
-            vmStatusViewModel.activeVM = vmEngine.currentInstance
+            syncVMStatus(from: vmEngine, role: vmEngine.warmRunnerState == nil ? .jobRunner : .warmRunnerActive)
 
             Log.app.info("Job \(job.id) is running in VM")
             startCompletionMonitor(
@@ -466,7 +467,7 @@ final class AppState {
                     }
                     await queueEngine.jobStore.updateDiagnosticsBundle(jobId: job.id, path: diagnosticsPath)
                 }
-                vmStatusViewModel.activeVM = nil
+                clearVMStatus()
             }
             await queueEngine.tryDispatch()
         }
@@ -537,7 +538,7 @@ final class AppState {
 
         if teardownPolicy == .keepWarmRunner, vmEngine.hasWarmRunner {
             scheduleWarmRunnerIdleRelease(using: vmEngine)
-            vmStatusViewModel.activeVM = vmEngine.currentInstance
+            syncVMStatus(from: vmEngine, role: .warmRunnerIdle)
         } else {
             warmRunnerIdleReleaseTask?.cancel()
             warmRunnerIdleReleaseTask = nil
@@ -561,7 +562,9 @@ final class AppState {
             }
         queueViewModel.updateJobStatus(id: job.id, status: result.jobStatus, failureReason: failureReason)
         if !vmEngine.hasWarmRunner {
-            vmStatusViewModel.activeVM = nil
+            clearVMStatus()
+        } else {
+            syncVMStatus(from: vmEngine, role: .warmRunnerIdle)
         }
         completionMonitorTasks[job.id] = nil
     }
@@ -587,7 +590,7 @@ final class AppState {
             } catch {
                 Log.app.error("Failed to release idle warm runner: \(error.localizedDescription)")
             }
-            self.vmStatusViewModel.activeVM = nil
+            self.clearVMStatus()
             self.warmRunnerIdleReleaseTask = nil
         }
     }
@@ -604,7 +607,7 @@ final class AppState {
                 self.queueViewModel.allJobs = jobs
 
                 if let vmEngine = self.vmEngine {
-                    self.vmStatusViewModel.activeVM = vmEngine.currentInstance
+                    self.syncVMStatus(from: vmEngine)
                     self.vmStatusViewModel.baseImageExists = vmEngine.baseImageExists
                     self.vmStatusViewModel.baseImageVerified = vmEngine.baseImageVerified
                 }
@@ -625,5 +628,33 @@ final class AppState {
             configStore: configStore,
             storageHealth: settingsViewModel.storageHealth
         )
+    }
+
+    private func syncVMStatus(from vmEngine: VMEngine, role forcedRole: ActiveVMRole? = nil) {
+        vmStatusViewModel.activeVM = vmEngine.currentInstance
+        guard vmEngine.currentInstance != nil else {
+            vmStatusViewModel.activeVMRole = nil
+            vmStatusViewModel.warmRunnerJobsServed = nil
+            vmStatusViewModel.warmRunnerLastActivityAt = nil
+            return
+        }
+
+        if let warmRunnerState = vmEngine.warmRunnerState {
+            vmStatusViewModel.activeVMRole =
+                forcedRole ?? (queueViewModel.activeJob == nil ? .warmRunnerIdle : .warmRunnerActive)
+            vmStatusViewModel.warmRunnerJobsServed = warmRunnerState.jobsServed
+            vmStatusViewModel.warmRunnerLastActivityAt = warmRunnerState.lastActivityAt
+        } else {
+            vmStatusViewModel.activeVMRole = forcedRole ?? .jobRunner
+            vmStatusViewModel.warmRunnerJobsServed = nil
+            vmStatusViewModel.warmRunnerLastActivityAt = nil
+        }
+    }
+
+    private func clearVMStatus() {
+        vmStatusViewModel.activeVM = nil
+        vmStatusViewModel.activeVMRole = nil
+        vmStatusViewModel.warmRunnerJobsServed = nil
+        vmStatusViewModel.warmRunnerLastActivityAt = nil
     }
 }
