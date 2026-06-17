@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct VMStatusCard: View {
@@ -79,11 +80,10 @@ struct VMStatusCard: View {
     }
 
     private var vmHeroStatusTitle: String {
-        guard vmStatusViewModel.activeVM != nil else { return "Idle" }
-        if settingsViewModel.warmRunnerConfig.isEnabled {
-            return "Warm"
+        guard vmStatusViewModel.activeVM != nil else {
+            return "Idle"
         }
-        return "Running"
+        return vmStatusViewModel.activeVMRole?.displayTitle ?? "Running"
     }
 
     private var header: some View {
@@ -250,20 +250,51 @@ struct VMStatusCard: View {
         InspectorSection(title: "Status") {
             VStack(alignment: .leading, spacing: 10) {
                 if let vm = vmStatusViewModel.activeVM {
-                    StatusLine(title: "VM running", systemImage: "play.circle.fill", tint: .green)
-                    DetailRow(title: "Job ID", value: "\(vm.jobId)")
+                    StatusLine(
+                        title: vmStatusViewModel.activeVMRole?.statusText ?? "VM running",
+                        systemImage: "play.circle.fill",
+                        tint: .green
+                    )
+                    DetailRow(
+                        title: vmStatusViewModel.activeVMRole == .warmRunnerIdle ? "Last job ID" : "Job ID",
+                        value: "\(vm.jobId)"
+                    )
                     DetailRow(title: "Boot time", value: vm.startedAt.formatted(.relative(presentation: .named)))
+                    if vmStatusViewModel.activeVMRole?.isWarmRunner == true {
+                        if let jobsServed = vmStatusViewModel.warmRunnerJobsServed {
+                            DetailRow(title: "Warm jobs", value: "\(jobsServed)")
+                        }
+                        if let lastActivityAt = vmStatusViewModel.warmRunnerLastActivityAt {
+                            DetailRow(
+                                title: "Last activity",
+                                value: lastActivityAt.formatted(.relative(presentation: .named))
+                            )
+                        }
+                    }
                 } else {
                     StatusLine(title: "No VM running", systemImage: "stop.circle", tint: .secondary)
                 }
 
                 if displaySource.activeVM != nil {
-                    Button {
-                        openWindow(id: "vm-display")
-                    } label: {
-                        Label("Show VM display", systemImage: "display")
+                    HStack {
+                        Button {
+                            displaySource.observe()
+                            openWindow(id: "vm-display")
+                            NSApp.activate()
+                        } label: {
+                            Label("Observe", systemImage: "eye")
+                        }
+                        .controlSize(.small)
+
+                        Button {
+                            displaySource.takeOver()
+                            openWindow(id: "vm-display")
+                            NSApp.activate()
+                        } label: {
+                            Label("Take over", systemImage: "keyboard")
+                        }
+                        .controlSize(.small)
                     }
-                    .controlSize(.small)
                 }
             }
         }
