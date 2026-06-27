@@ -1,0 +1,98 @@
+name: Tarmac Machine Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tarmac-machine-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Tarmac machine smoke
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+
+    steps:
+      - name: Runner identity
+        run: |
+          set -euo pipefail
+
+          echo "runner_name=${RUNNER_NAME}"
+          echo "runner_os=${RUNNER_OS}"
+          echo "runner_arch=${RUNNER_ARCH}"
+          echo "workspace=${GITHUB_WORKSPACE}"
+          sw_vers
+          uname -a
+          xcodebuild -version
+          swift --version
+
+          test "${RUNNER_OS}" = "macOS"
+          test "${RUNNER_ARCH}" = "ARM64"
+
+      - name: Checkout main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+          git rev-parse --verify HEAD
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -f Project.swift
+          test -d Sources
+
+      - name: Compile host capability probe
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/TarmacRunnerProbe.swift <<'SWIFT'
+          import Foundation
+          import Virtualization
+
+          let process = ProcessInfo.processInfo
+          #if arch(arm64)
+          let isAppleSilicon = true
+          let architecture = "arm64"
+          #else
+          let isAppleSilicon = false
+          let architecture = "unsupported"
+          #endif
+
+          print("host=\(process.operatingSystemVersionString)")
+          print("arch=\(architecture)")
+          print("virtualization.framework=available")
+
+          guard isAppleSilicon else {
+              fputs("Tarmac requires an Apple Silicon host.\n", stderr)
+              exit(1)
+          }
+          SWIFT
+
+          swiftc /tmp/TarmacRunnerProbe.swift -o /tmp/TarmacRunnerProbe
+          /tmp/TarmacRunnerProbe
+
+      - name: Build Tarmac if Tuist is available
+        run: |
+          set -euo pipefail
+
+          if ! command -v tuist >/dev/null 2>&1; then
+            echo "::notice::Tuist is not installed on this runner image; skipping app build."
+            exit 0
+          fi
+
+          tuist generate --no-open
+          xcodebuild build \
+            -scheme Tarmac \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
