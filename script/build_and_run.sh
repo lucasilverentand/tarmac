@@ -11,13 +11,37 @@ DERIVED_DATA_PATH="$PWD/.build/xcode-derived-data"
 BUILT_APP_PATH_FILE="$DERIVED_DATA_PATH/tarmac-built-app-path"
 WORKSPACE="Tarmac.xcworkspace"
 PROJECT="Tarmac.xcodeproj"
+CODE_SIGN_STYLE="${TARMAC_CODE_SIGN_STYLE:-Manual}"
+CODE_SIGN_IDENTITY="${TARMAC_CODE_SIGN_IDENTITY:-Apple Development: Luca Silverentand (R377UCHFT2)}"
+DEVELOPMENT_TEAM="${TARMAC_DEVELOPMENT_TEAM:-96452FLT2P}"
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS="${TARMAC_CODE_SIGN_INJECT_BASE_ENTITLEMENTS:-NO}"
 
 usage() {
-  echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+  echo "usage: $0 [build|run|--debug|--logs|--telemetry|--verify]" >&2
+}
+
+project_needs_generation() {
+  if [[ ! -d "$WORKSPACE" && ! -d "$PROJECT" ]]; then
+    return 0
+  fi
+
+  if [[ "${TARMAC_REGENERATE_PROJECT:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  if [[ -d "$PROJECT" && ( Project.swift -nt "$PROJECT" || Tuist.swift -nt "$PROJECT" ) ]]; then
+    return 0
+  fi
+
+  if [[ -d "$WORKSPACE" && ( Project.swift -nt "$WORKSPACE" || Tuist.swift -nt "$WORKSPACE" ) ]]; then
+    return 0
+  fi
+
+  return 1
 }
 
 build_project() {
-  if [[ ! -d "$WORKSPACE" && ! -d "$PROJECT" ]]; then
+  if project_needs_generation; then
     tuist generate --no-open
   fi
 
@@ -31,15 +55,22 @@ build_project() {
     exit 1
   fi
 
+  local signing_args=(
+    CODE_SIGN_STYLE="$CODE_SIGN_STYLE"
+    CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY"
+    DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
+    CODE_SIGNING_ALLOWED=YES
+    CODE_SIGNING_REQUIRED=YES
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS="$CODE_SIGN_INJECT_BASE_ENTITLEMENTS"
+  )
+
   xcodebuild \
     "${build_args[@]}" \
     -scheme "$SCHEME" \
     -configuration "$CONFIGURATION" \
     -destination "$DESTINATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
-    CODE_SIGN_STYLE=Manual \
-    CODE_SIGN_IDENTITY=- \
-    DEVELOPMENT_TEAM= \
+    "${signing_args[@]}" \
     build
 
   local products_dir
@@ -50,9 +81,7 @@ build_project() {
       -configuration "$CONFIGURATION" \
       -destination "$DESTINATION" \
       -derivedDataPath "$DERIVED_DATA_PATH" \
-      CODE_SIGN_STYLE=Manual \
-      CODE_SIGN_IDENTITY=- \
-      DEVELOPMENT_TEAM= \
+      "${signing_args[@]}" \
       -showBuildSettings |
       awk -F'= ' '/^[[:space:]]*BUILT_PRODUCTS_DIR = / { print $2; exit }'
   )"
@@ -90,6 +119,8 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 build_project
 
 case "$MODE" in
+  build|--build)
+    ;;
   run)
     open_app
     ;;
