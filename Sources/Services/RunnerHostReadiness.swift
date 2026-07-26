@@ -235,7 +235,8 @@ struct RunnerHostReadiness: Equatable, Sendable {
                 issues.append(
                     .init(
                         category: .github,
-                        message: "\(org.name): \(org.provider.displayName) API or runner access token is not configured."
+                        message:
+                            "\(org.name): \(org.provider.displayName) API or runner access token is not configured."
                     )
                 )
             }

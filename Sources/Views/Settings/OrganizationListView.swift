@@ -60,15 +60,20 @@ private struct AccountsEmptyState: View {
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(Color.accentColor)
                         .frame(width: 52, height: 52)
-                        .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .background(
+                            .quaternary.opacity(0.65),
+                            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        )
 
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Connect your first Actions provider")
                             .font(.headline)
-                        Text("Tarmac needs an organization or repository account before it can listen for self-hosted runner jobs.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text(
+                            "Tarmac needs an organization or repository account before it can listen for self-hosted runner jobs."
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer(minLength: 20)
@@ -946,7 +951,8 @@ private struct OrganizationFormSheet: View {
         switch setupStep {
         case .account:
             return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && ((provider == .gitea ? accountScope : RunnerAccountScope(rawValue: accountType.rawValue) ?? .instance) != .repository
+                && ((provider == .gitea
+                    ? accountScope : RunnerAccountScope(rawValue: accountType.rawValue) ?? .instance) != .repository
                     || !repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         case .credentials:
             return credentialsAreReady
@@ -1036,41 +1042,42 @@ private struct OrganizationFormSheet: View {
                                         .disabled(locksAccountIdentity)
                                 }
                                 FieldInlineHint(
-                                    text: "Tarmac polls Gitea outbound and registers a fresh ephemeral act_runner for every job."
+                                    text:
+                                        "Tarmac polls Gitea outbound and registers a fresh ephemeral act_runner for every job."
                                 )
                             } else {
-                              if !locksAccountIdentity {
-                                Picker("Owned by", selection: $accountType) {
-                                    ForEach(availableAccountTypes) { type in
-                                        Text("\(type.displayName) owned").tag(type)
+                                if !locksAccountIdentity {
+                                    Picker("Owned by", selection: $accountType) {
+                                        ForEach(availableAccountTypes) { type in
+                                            Text("\(type.displayName) owned").tag(type)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .disabled(locksAccountIdentity)
+
+                                    if accountType == .enterprise {
+                                        GuidanceCallout(item: .enterprise)
                                     }
                                 }
-                                .pickerStyle(.segmented)
-                                .disabled(locksAccountIdentity)
 
-                                if accountType == .enterprise {
-                                    GuidanceCallout(item: .enterprise)
+                                switch accountType {
+                                case .repository:
+                                    TextField("Owner", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The user or organization login from github.com/<owner>/<repo>")
+                                    TextField("Repository", text: $repositoryName)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The repository name only, without the owner")
+                                case .organization:
+                                    TextField("Organization name", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The organization login as shown in github.com/<name>")
+                                case .enterprise:
+                                    TextField("Enterprise slug", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The enterprise slug as shown in github.com/enterprises/<slug>")
                                 }
-                            }
-
-                            switch accountType {
-                            case .repository:
-                                TextField("Owner", text: $name)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The user or organization login from github.com/<owner>/<repo>")
-                                TextField("Repository", text: $repositoryName)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The repository name only, without the owner")
-                            case .organization:
-                                TextField("Organization name", text: $name)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The organization login as shown in github.com/<name>")
-                            case .enterprise:
-                                TextField("Enterprise slug", text: $name)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The enterprise slug as shown in github.com/enterprises/<slug>")
-                            }
-                            FieldInlineHint(text: tarmacFieldDetail(.accountName))
+                                FieldInlineHint(text: tarmacFieldDetail(.accountName))
                             }
                         }
                     }
@@ -1201,43 +1208,43 @@ private struct OrganizationFormSheet: View {
 
                     if shouldShow(.runner) {
                         if provider == .github {
-                          Section("Runner Scale Set") {
-                            TextField("Scale set name", text: $scaleSetName)
-                                .help("Name used to create the scale set, and to find it again later.")
+                            Section("Runner Scale Set") {
+                                TextField("Scale set name", text: $scaleSetName)
+                                    .help("Name used to create the scale set, and to find it again later.")
 
-                            HStack {
-                                Button {
-                                    createScaleSet()
-                                } label: {
-                                    if scaleSetCreationInFlight {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Label("Create / Find Scale Set", systemImage: "plus.rectangle.on.folder")
+                                HStack {
+                                    Button {
+                                        createScaleSet()
+                                    } label: {
+                                        if scaleSetCreationInFlight {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Label("Create / Find Scale Set", systemImage: "plus.rectangle.on.folder")
+                                        }
                                     }
+                                    .controlSize(.small)
+                                    .disabled(!canCreateScaleSet || scaleSetCreationInFlight)
+
+                                    Spacer()
                                 }
-                                .controlSize(.small)
-                                .disabled(!canCreateScaleSet || scaleSetCreationInFlight)
+                                FieldInlineHint(
+                                    text:
+                                        "GitHub has no web UI to create a runner scale set. This creates one, or reuses an existing set with the same name, then keeps the numeric ID internally for polling."
+                                )
+                                if let scaleSetCreationError {
+                                    Text(scaleSetCreationError)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
 
-                                Spacer()
+                                DisclosureGroup("Advanced") {
+                                    TextField("Scale Set ID", text: $scaleSetId)
+                                        .help("Manual fallback for the numeric Actions Runner Scale Set ID")
+                                    FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
+                                }
                             }
-                            FieldInlineHint(
-                                text:
-                                    "GitHub has no web UI to create a runner scale set. This creates one, or reuses an existing set with the same name, then keeps the numeric ID internally for polling."
-                            )
-                            if let scaleSetCreationError {
-                                Text(scaleSetCreationError)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            DisclosureGroup("Advanced") {
-                                TextField("Scale Set ID", text: $scaleSetId)
-                                    .help("Manual fallback for the numeric Actions Runner Scale Set ID")
-                                FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
-                            }
-                        }
                         }
 
                         Section("Runner Labels") {
@@ -2142,7 +2149,8 @@ private struct OrganizationFormSheet: View {
             let previousAccountType = org.accountType
             let previousCredentialMode = org.credentialMode
             org.provider = provider
-            org.serverURL = provider == .gitea ? serverURL.trimmingCharacters(in: .whitespacesAndNewlines) : "https://github.com"
+            org.serverURL =
+                provider == .gitea ? serverURL.trimmingCharacters(in: .whitespacesAndNewlines) : "https://github.com"
             org.scope = provider == .gitea ? accountScope : resolvedScope(for: resolvedAccountType)
             org.name = trimmedName
             org.accountType = resolvedAccountType
@@ -2174,7 +2182,8 @@ private struct OrganizationFormSheet: View {
         } else {
             var org = Organization(
                 provider: provider,
-                serverURL: provider == .gitea ? serverURL.trimmingCharacters(in: .whitespacesAndNewlines) : "https://github.com",
+                serverURL: provider == .gitea
+                    ? serverURL.trimmingCharacters(in: .whitespacesAndNewlines) : "https://github.com",
                 scope: provider == .gitea ? accountScope : resolvedScope(for: resolvedAccountType),
                 name: trimmedName,
                 accountType: resolvedAccountType,

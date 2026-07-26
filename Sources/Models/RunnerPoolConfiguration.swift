@@ -111,16 +111,19 @@ extension RunnerPoolConfiguration {
         defaultVMConfiguration: VMConfiguration
     ) -> [RunnerPoolConfiguration] {
         let root = URL(fileURLWithPath: storageRootPath)
-        let stableRoot = root
+        let stableRoot =
+            root
             .appendingPathComponent("Images", isDirectory: true)
             .appendingPathComponent("app-store-macos-26", isDirectory: true)
         let betaRoot = URL(fileURLWithPath: defaultBaseImagePath).deletingLastPathComponent()
         let legacyProfile = account.imageProfile
-        let legacyLooksStable = legacyProfile.map {
-            $0.baseMacOSVersion.hasPrefix("26") || $0.xcodeVersion.hasPrefix("26")
-        } ?? false
+        let legacyLooksStable =
+            legacyProfile.map {
+                $0.baseMacOSVersion.hasPrefix("26") || $0.xcodeVersion.hasPrefix("26")
+            } ?? false
 
-        let stableProfile = legacyLooksStable
+        let stableProfile =
+            legacyLooksStable
             ? legacyProfile!
             : RunnerImageProfile(
                 name: "macOS 26 + Xcode 26.6",
@@ -132,10 +135,12 @@ extension RunnerPoolConfiguration {
                 commandLineToolsInstalled: true,
                 capabilities: [.xcode]
             )
-        let betaProfile = legacyLooksStable
+        let betaProfile =
+            legacyLooksStable
             ? RunnerImageProfile(
                 name: "macOS 27 + Xcode 27 beta 3",
-                baseImagePath: root
+                baseImagePath:
+                    root
                     .appendingPathComponent("Images", isDirectory: true)
                     .appendingPathComponent("beta-macos-27", isDirectory: true)
                     .appendingPathComponent("BaseImage.img")
@@ -147,16 +152,17 @@ extension RunnerPoolConfiguration {
                 commandLineToolsInstalled: true,
                 capabilities: [.xcode]
             )
-            : legacyProfile ?? RunnerImageProfile(
-                name: "macOS 27 + Xcode 27 beta 3",
-                baseImagePath: defaultBaseImagePath,
-                vmConfiguration: defaultVMConfiguration,
-                baseMacOSVersion: "27",
-                xcodeVersion: "27 beta 3",
-                developerDirectory: "/Applications/Xcode-beta.app/Contents/Developer",
-                commandLineToolsInstalled: true,
-                capabilities: [.xcode]
-            )
+            : legacyProfile
+                ?? RunnerImageProfile(
+                    name: "macOS 27 + Xcode 27 beta 3",
+                    baseImagePath: defaultBaseImagePath,
+                    vmConfiguration: defaultVMConfiguration,
+                    baseMacOSVersion: "27",
+                    xcodeVersion: "27 beta 3",
+                    developerDirectory: "/Applications/Xcode-beta.app/Contents/Developer",
+                    commandLineToolsInstalled: true,
+                    capabilities: [.xcode]
+                )
 
         return [
             RunnerPoolConfiguration(

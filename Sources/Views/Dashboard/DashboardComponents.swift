@@ -55,12 +55,12 @@ struct DashboardStatusBadge: View {
         } icon: {
             Image(systemName: systemImage)
         }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(tint.opacity(0.10), in: Capsule())
-            .accessibilityElement(children: .combine)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(tint.opacity(0.10), in: Capsule())
+        .accessibilityElement(children: .combine)
     }
 }
 

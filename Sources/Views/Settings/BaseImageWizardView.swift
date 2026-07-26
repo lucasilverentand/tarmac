@@ -373,8 +373,8 @@ struct BaseImageWizardView: View {
                     ? "person.crop.circle.badge.checkmark"
                     : (usesAutomatedProvisioning ? "gearshape.2" : "hand.tap")
             )
-                .font(.system(size: 42))
-                .foregroundStyle(preparationStatus == .ready ? Color.green : Color.accentColor)
+            .font(.system(size: 42))
+            .foregroundStyle(preparationStatus == .ready ? Color.green : Color.accentColor)
 
             Text(preparationTitle)
                 .font(.title3.weight(.medium))

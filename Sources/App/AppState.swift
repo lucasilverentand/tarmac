@@ -468,12 +468,14 @@ final class AppState {
         guard vmEngine.currentInstance == nil else { return vmEngine.hasWarmRunner }
 
         let pool = poolConfiguration(for: vmEngine)
-        let vmConfiguration = pool?.imageProfile.resolvedVMConfiguration(
-            defaultConfiguration: configStore.vmConfiguration
-        ) ?? configStore.vmConfiguration
-        let baseImagePath = pool?.resolvedBaseImagePath(
-            defaultPath: configStore.resolvedBaseImagePath
-        ) ?? configStore.resolvedBaseImagePath
+        let vmConfiguration =
+            pool?.imageProfile.resolvedVMConfiguration(
+                defaultConfiguration: configStore.vmConfiguration
+            ) ?? configStore.vmConfiguration
+        let baseImagePath =
+            pool?.resolvedBaseImagePath(
+                defaultPath: configStore.resolvedBaseImagePath
+            ) ?? configStore.resolvedBaseImagePath
 
         beginIdleVMControl(.starting, using: vmEngine)
         do {
@@ -524,8 +526,9 @@ final class AppState {
                 await queueEngine.tryDispatch()
                 return
             }
-            guard let pool = org.runnerPool(id: job.runnerPoolID)
-                ?? org.runnerPool(matching: job.requestedLabels)
+            guard
+                let pool = org.runnerPool(id: job.runnerPoolID)
+                    ?? org.runnerPool(matching: job.requestedLabels)
             else {
                 throw RunnerPoolDispatchError.noMatchingPool(labels: job.requestedLabels)
             }
@@ -595,9 +598,9 @@ final class AppState {
             let sharedDirectoryPath = StorageManager(
                 rootPath: pool.runtimeStorageRootPath(storageRootPath: configStore.storageRootPath)
             )
-                .jobsDirectory
-                .appendingPathComponent("\(job.id)", isDirectory: true)
-                .path
+            .jobsDirectory
+            .appendingPathComponent("\(job.id)", isDirectory: true)
+            .path
             if let startedLease = await queueEngine.runnerLeaseStore.recordVMStarted(
                 jobId: job.id,
                 vmInstanceId: instance.id,
@@ -610,11 +613,13 @@ final class AppState {
             await queueEngine.jobStore.updateVMInstance(jobId: job.id, vmInstanceId: instance.id)
 
             if runtimeOrg.provider == .gitea {
-                guard let claimed = try await queueEngine.waitForProviderClaim(
-                    jobID: job.id,
-                    account: runtimeOrg,
-                    runnerName: runnerName
-                ) else {
+                guard
+                    let claimed = try await queueEngine.waitForProviderClaim(
+                        jobID: job.id,
+                        account: runtimeOrg,
+                        runnerName: runnerName
+                    )
+                else {
                     throw ProviderDispatchError.claimTimedOut(runnerName)
                 }
                 Log.gitea.info(
@@ -742,7 +747,8 @@ final class AppState {
         source: JobCompletionSource
     ) async {
         let poolID = activeJobPoolIDs[job.id] ?? job.runnerPoolID
-        let completedEngine = poolID.flatMap { vmEngines[$0] }
+        let completedEngine =
+            poolID.flatMap { vmEngines[$0] }
             ?? vmEngines.values.first { $0.currentInstance?.jobId == job.id }
         guard let vmEngine = completedEngine, let queueEngine else { return }
         guard vmEngine.currentInstance?.jobId == job.id else { return }
@@ -1079,7 +1085,8 @@ final class AppState {
             if let forcedRole = forcedRoles[poolID] {
                 role = forcedRole
             } else if engine.warmRunnerState != nil {
-                role = instance.jobId.map { queueViewModel.activeJob?.id == $0 } == true
+                role =
+                    instance.jobId.map { queueViewModel.activeJob?.id == $0 } == true
                     ? .warmRunnerActive
                     : .warmRunnerIdle
             } else {

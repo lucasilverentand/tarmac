@@ -88,9 +88,16 @@ protocol ActionsProvider: Actor {
     func queuedJobs(for account: RunnerAccount) async throws -> [ProviderQueuedJob]
     func prepareRunner(for account: RunnerAccount, runnerName: String) async throws -> PreparedRunner
     func claimedJob(for account: RunnerAccount, runnerName: String) async throws -> ProviderQueuedJob?
-    func terminalResult(for account: RunnerAccount, remoteJobID: String, repositoryName: String?) async throws
+    func terminalResult(
+        for account: RunnerAccount,
+        remoteJobID: String,
+        repositoryName: String?
+    ) async throws
         -> JobResult?
-    func reconcileStaleRunners(for account: RunnerAccount, leases: [RunnerLease]) async
+    func reconcileStaleRunners(
+        for account: RunnerAccount,
+        leases: [RunnerLease]
+    ) async
         -> RunnerReconciliationReport
 }
 

@@ -133,7 +133,9 @@ actor QueueEngine {
                     orgReport = await provider.reconcileStaleRunners(for: org, leases: activeLeases)
                 } catch {
                     orgReport = RunnerReconciliationReport(
-                        failures: [RunnerReconciliationFailure(organizationName: org.name, message: error.localizedDescription)]
+                        failures: [
+                            RunnerReconciliationFailure(organizationName: org.name, message: error.localizedDescription)
+                        ]
                     )
                 }
             } else {
@@ -575,7 +577,9 @@ actor QueueEngine {
                 try await sleep(seconds: 2)
             }
         } catch {
-            Log.gitea.warning("Terminal status reconciliation failed for remote job \(remoteJobID): \(error.localizedDescription)")
+            Log.gitea.warning(
+                "Terminal status reconciliation failed for remote job \(remoteJobID): \(error.localizedDescription)"
+            )
         }
         return fallback
     }

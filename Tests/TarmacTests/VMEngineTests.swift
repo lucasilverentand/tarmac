@@ -25,7 +25,8 @@ struct VMEngineTests {
             lifecycle: mock
         )
         try Data([0x01]).write(
-            to: tempDir
+            to:
+                tempDir
                 .appendingPathComponent("Platform", isDirectory: true)
                 .appendingPathComponent("auxiliaryStorage.bin")
         )

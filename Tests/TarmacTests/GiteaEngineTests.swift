@@ -8,10 +8,14 @@ struct GiteaEngineTests {
     @Test("Repository polling deduplicates queued demand and filters labels")
     func repositoryPolling() async throws {
         MockURLProtocol.reset()
-        let jobs = #"{"jobs":[{"id":42,"run_id":7,"name":"build","status":"queued","labels":["macos-arm64"],"created_at":"2026-07-16T00:00:00Z","html_url":"https://git.example.test/owner/repo/actions/runs/7/jobs/42"},{"id":43,"status":"queued","labels":["ubuntu-latest"]}],"total_count":2}"#
-        MockURLProtocol.addHandler(matching: { request in
-            request.url?.path == "/api/v1/repos/owner/repo/actions/jobs"
-        }, responseData: Data(jobs.utf8))
+        let jobs =
+            #"{"jobs":[{"id":42,"run_id":7,"name":"build","status":"queued","labels":["macos-arm64"],"created_at":"2026-07-16T00:00:00Z","html_url":"https://git.example.test/owner/repo/actions/runs/7/jobs/42"},{"id":43,"status":"queued","labels":["ubuntu-latest"]}],"total_count":2}"#
+        MockURLProtocol.addHandler(
+            matching: { request in
+                request.url?.path == "/api/v1/repos/owner/repo/actions/jobs"
+            },
+            responseData: Data(jobs.utf8)
+        )
 
         let account = makeAccount(scope: .repository)
         let engine = makeEngine(account: account)
@@ -25,10 +29,14 @@ struct GiteaEngineTests {
     @Test("Claim correlation rejects multiple in-progress jobs for one runner")
     func ambiguousClaim() async {
         MockURLProtocol.reset()
-        let jobs = #"{"jobs":[{"id":42,"status":"in_progress","labels":["macos-arm64"],"runner_name":"tarmac-test"},{"id":43,"status":"in_progress","labels":["macos-arm64"],"runner_name":"tarmac-test"}],"total_count":2}"#
-        MockURLProtocol.addHandler(matching: { request in
-            request.url?.path == "/api/v1/repos/owner/repo/actions/jobs"
-        }, responseData: Data(jobs.utf8))
+        let jobs =
+            #"{"jobs":[{"id":42,"status":"in_progress","labels":["macos-arm64"],"runner_name":"tarmac-test"},{"id":43,"status":"in_progress","labels":["macos-arm64"],"runner_name":"tarmac-test"}],"total_count":2}"#
+        MockURLProtocol.addHandler(
+            matching: { request in
+                request.url?.path == "/api/v1/repos/owner/repo/actions/jobs"
+            },
+            responseData: Data(jobs.utf8)
+        )
 
         let account = makeAccount(scope: .repository)
         let engine = makeEngine(account: account)
@@ -40,9 +48,12 @@ struct GiteaEngineTests {
     @Test("Instance scope uses administrator jobs endpoint")
     func instanceScope() async throws {
         MockURLProtocol.reset()
-        MockURLProtocol.addHandler(matching: { request in
-            request.url?.path == "/api/v1/admin/actions/jobs"
-        }, responseData: Data(#"{"jobs":[],"total_count":0}"#.utf8))
+        MockURLProtocol.addHandler(
+            matching: { request in
+                request.url?.path == "/api/v1/admin/actions/jobs"
+            },
+            responseData: Data(#"{"jobs":[],"total_count":0}"#.utf8)
+        )
 
         let account = makeAccount(scope: .instance)
         let jobs = try await makeEngine(account: account).queuedJobs(for: account)
@@ -69,13 +80,20 @@ struct GiteaEngineTests {
     @Test("Startup cleanup removes only offline Tarmac runners")
     func staleRunnerCleanup() async throws {
         MockURLProtocol.reset()
-        let runners = #"{"runners":[{"id":1,"name":"tarmac-gitea-42","status":"offline","busy":false,"labels":[]},{"id":2,"name":"someone-else","status":"offline","busy":false,"labels":[]},{"id":3,"name":"tarmac-gitea-43","status":"online","busy":false,"labels":[]}]}"#
-        MockURLProtocol.addHandler(matching: { request in
-            request.httpMethod == "GET" && request.url?.path == "/api/v1/repos/owner/repo/actions/runners"
-        }, responseData: Data(runners.utf8))
-        MockURLProtocol.addHandler(matching: { request in
-            request.httpMethod == "DELETE" && request.url?.path == "/api/v1/repos/owner/repo/actions/runners/1"
-        }, statusCode: 204)
+        let runners =
+            #"{"runners":[{"id":1,"name":"tarmac-gitea-42","status":"offline","busy":false,"labels":[]},{"id":2,"name":"someone-else","status":"offline","busy":false,"labels":[]},{"id":3,"name":"tarmac-gitea-43","status":"online","busy":false,"labels":[]}]}"#
+        MockURLProtocol.addHandler(
+            matching: { request in
+                request.httpMethod == "GET" && request.url?.path == "/api/v1/repos/owner/repo/actions/runners"
+            },
+            responseData: Data(runners.utf8)
+        )
+        MockURLProtocol.addHandler(
+            matching: { request in
+                request.httpMethod == "DELETE" && request.url?.path == "/api/v1/repos/owner/repo/actions/runners/1"
+            },
+            statusCode: 204
+        )
 
         let account = makeAccount(scope: .repository)
         let report = await makeEngine(account: account).reconcileStaleRunners(for: account, leases: [])
@@ -107,8 +125,10 @@ struct GiteaEngineTests {
         configuration.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: configuration)
         let client = GiteaClient(instanceURL: account.normalizedServerURL!, session: session)
-        let storage = StorageManager(rootPath: FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString).path)
+        let storage = StorageManager(
+            rootPath: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString).path
+        )
         return GiteaEngine(
             client: client,
             keychainService: keychain,

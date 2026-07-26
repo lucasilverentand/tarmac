@@ -117,7 +117,9 @@ private struct WorkersPageContent: View {
                 activeWorkerCount: activeWorkerCount,
                 workingWorkerCount: workingWorkerCount,
                 warmIdleWorkerCount: warmIdleWorkerCount,
-                allocatedCPUCount: workers.reduce(0) { $0 + ($1.lifecycleState.isActive ? $1.configuration.cpuCount : 0) },
+                allocatedCPUCount: workers.reduce(0) {
+                    $0 + ($1.lifecycleState.isActive ? $1.configuration.cpuCount : 0)
+                },
                 allocatedMemoryGB: workers.reduce(0) {
                     $0 + ($1.lifecycleState.isActive ? $1.configuration.memorySizeGB : 0)
                 }
@@ -182,8 +184,11 @@ private struct RunnerPoolStrip: View {
                 let worker = workers.first { $0.runnerPoolID == pool.id }
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label(pool.displayName, systemImage: pool.releaseChannel == .appStore ? "shippingbox" : "testtube.2")
-                            .font(.subheadline.weight(.semibold))
+                        Label(
+                            pool.displayName,
+                            systemImage: pool.releaseChannel == .appStore ? "shippingbox" : "testtube.2"
+                        )
+                        .font(.subheadline.weight(.semibold))
                         Spacer()
                         Text(status(for: pool, worker: worker))
                             .font(.caption.weight(.semibold))
@@ -441,8 +446,8 @@ private struct WorkerInventoryRow: View {
                     }
                     Text(worker.lifecycleState.title)
                 }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 0)
@@ -697,9 +702,11 @@ private struct WorkerDiskUsageCard: View {
                     .tint(.accentColor)
             }
             if let hostAllocatedBytes {
-                Text("\(hostAllocatedBytes, format: .byteCount(style: .file)) on host · \(configuredDiskGB) GB capacity")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    "\(hostAllocatedBytes, format: .byteCount(style: .file)) on host · \(configuredDiskGB) GB capacity"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             } else {
                 Text("\(configuredDiskGB) GB capacity")
                     .font(.caption)
@@ -888,7 +895,10 @@ private struct WorkerActionsCard: View {
     @ViewBuilder
     private var idleControlButtons: some View {
         Button(action: worker.isPinned ? onResumeAutomaticShutdown : onKeepAlive) {
-            Label(worker.isPinned ? "Resume Auto Shutdown" : "Keep Alive", systemImage: worker.isPinned ? "timer" : "pin")
+            Label(
+                worker.isPinned ? "Resume Auto Shutdown" : "Keep Alive",
+                systemImage: worker.isPinned ? "timer" : "pin"
+            )
         }
         Button(action: onRestart) {
             Label("Restart", systemImage: "arrow.clockwise")

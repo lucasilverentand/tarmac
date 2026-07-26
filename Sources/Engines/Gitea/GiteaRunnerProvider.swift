@@ -75,14 +75,18 @@ actor GiteaRunnerProvider {
         }
 
         let fm = FileManager.default
-        let staging = storage.tmpDirectory.appendingPathComponent("gitea-runner-\(UUID().uuidString)", isDirectory: true)
+        let staging = storage.tmpDirectory.appendingPathComponent(
+            "gitea-runner-\(UUID().uuidString)",
+            isDirectory: true
+        )
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
         let artifact = staging.appendingPathComponent(binaryAsset.name)
         try binaryData.write(to: artifact, options: .atomic)
         let binary = staging.appendingPathComponent("act_runner")
 
-        if binaryAsset.name.hasSuffix(".xz") || binaryAsset.name.hasSuffix(".gz") || binaryAsset.name.hasSuffix(".tgz") {
+        if binaryAsset.name.hasSuffix(".xz") || binaryAsset.name.hasSuffix(".gz") || binaryAsset.name.hasSuffix(".tgz")
+        {
             try extract(artifact: artifact, into: staging)
             guard let discovered = try findBinary(in: staging) else { throw GiteaAPIError.extractionFailed }
             if discovered != binary { try fm.moveItem(at: discovered, to: binary) }

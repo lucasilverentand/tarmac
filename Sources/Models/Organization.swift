@@ -151,7 +151,8 @@ struct RunnerAccount: Identifiable, Codable, Hashable, Sendable {
         self.serverURL = try container.decodeIfPresent(String.self, forKey: .serverURL) ?? "https://github.com"
         self.name = try container.decode(String.self, forKey: .name)
         self.accountType = try container.decodeIfPresent(GitHubAccountType.self, forKey: .accountType) ?? .organization
-        self.scope = try container.decodeIfPresent(RunnerAccountScope.self, forKey: .scope)
+        self.scope =
+            try container.decodeIfPresent(RunnerAccountScope.self, forKey: .scope)
             ?? Self.scope(for: accountType)
         self.repositoryName = try container.decodeIfPresent(String.self, forKey: .repositoryName)
         self.credentialMode =
@@ -276,7 +277,6 @@ extension RunnerAccount {
         }
     }
 
-
     var normalizedServerURL: URL? {
         let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed),
@@ -299,9 +299,11 @@ extension RunnerAccount {
     }
 
     var giteaRunnerLabels: [String] {
-        Self.normalizedLabels(runnerLabels.map { label in
-            label.contains(":") ? label : "\(label):host"
-        })
+        Self.normalizedLabels(
+            runnerLabels.map { label in
+                label.contains(":") ? label : "\(label):host"
+            }
+        )
     }
 
     private static func normalizedLabels(_ labels: [String]) -> [String] {

@@ -153,7 +153,9 @@ actor GiteaEngine: ActionsProvider {
                     let path = "/repos/\(repository.fullName)/actions/jobs"
                     let jobs = try await pagedJobs(path: path, status: status, token: token)
                     discovered.append(
-                        contentsOf: jobs.compactMap { providerJob($0, account: account, repository: repository.fullName) }
+                        contentsOf: jobs.compactMap {
+                            providerJob($0, account: account, repository: repository.fullName)
+                        }
                     )
                 }
             }
@@ -197,9 +199,11 @@ actor GiteaEngine: ActionsProvider {
                     status: "in_progress",
                     token: token
                 )
-                matches.append(contentsOf: jobs.filter { $0.runnerName == runnerName }.compactMap {
-                    providerJob($0, account: account, repository: repository.fullName, requireQueued: false)
-                })
+                matches.append(
+                    contentsOf: jobs.filter { $0.runnerName == runnerName }.compactMap {
+                        providerJob($0, account: account, repository: repository.fullName, requireQueued: false)
+                    }
+                )
             }
         }
         guard matches.count <= 1 else { throw GiteaAPIError.ambiguousClaim(runnerName) }
@@ -222,7 +226,8 @@ actor GiteaEngine: ActionsProvider {
         )
         let status = job.status.lowercased()
         let conclusion = job.conclusion?.lowercased()
-        guard ["completed", "success", "failure", "cancelled", "canceled", "skipped"].contains(status)
+        guard
+            ["completed", "success", "failure", "cancelled", "canceled", "skipped"].contains(status)
                 || conclusion != nil
         else { return nil }
         switch conclusion ?? status {
@@ -287,7 +292,9 @@ actor GiteaEngine: ActionsProvider {
             return report
         } catch {
             return RunnerReconciliationReport(
-                failures: [RunnerReconciliationFailure(organizationName: account.name, message: error.localizedDescription)]
+                failures: [
+                    RunnerReconciliationFailure(organizationName: account.name, message: error.localizedDescription)
+                ]
             )
         }
     }
@@ -377,9 +384,14 @@ actor GiteaEngine: ActionsProvider {
         requireQueued: Bool = true
     ) -> ProviderQueuedJob? {
         if requireQueued, !["pending", "queued"].contains(job.status.lowercased()) { return nil }
-        let offeredLabels = Set(account.giteaRunnerLabels.map { $0.split(separator: ":", maxSplits: 1).first.map(String.init) ?? $0 }.map { $0.lowercased() })
+        let offeredLabels = Set(
+            account.giteaRunnerLabels.map { $0.split(separator: ":", maxSplits: 1).first.map(String.init) ?? $0 }.map {
+                $0.lowercased()
+            }
+        )
         guard job.labels.allSatisfy({ offeredLabels.contains($0.lowercased()) }) else { return nil }
-        let repositoryName = repository ?? repositoryFrom(htmlURL: job.htmlURL, instanceURL: account.normalizedServerURL)
+        let repositoryName =
+            repository ?? repositoryFrom(htmlURL: job.htmlURL, instanceURL: account.normalizedServerURL)
         guard account.acceptsRepository(repositoryName?.split(separator: "/").last.map(String.init)) else { return nil }
         let key = ProviderJobKey(accountID: account.id, remoteJobID: String(job.id))
         return ProviderQueuedJob(
