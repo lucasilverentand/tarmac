@@ -1,15 +1,25 @@
+import AppKit
 import SwiftUI
 
 struct MenuBarIcon: View {
+    private static let glyph: NSImage = {
+        guard let source = NSImage(named: "TarmacMenuBarIcon"),
+            let image = source.copy() as? NSImage
+        else {
+            return NSImage(size: NSSize(width: 18, height: 18))
+        }
+
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }()
+
     let queueViewModel: QueueViewModel
     let vmStatusViewModel: VMStatusViewModel
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Image("TarmacMenuBarIcon")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
+            Image(nsImage: Self.glyph)
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.primary)
 
