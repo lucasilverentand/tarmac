@@ -66,7 +66,16 @@ final class TarmacRuntime {
 final class TarmacAppDelegate: NSObject, NSApplicationDelegate {
     weak var appState: AppState?
 
+    private var isRunningUnitTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !isRunningUnitTests else {
+            Log.app.debug("Skipping automatic runtime startup inside the unit-test host")
+            return
+        }
         let appState = TarmacRuntime.shared.appState
         self.appState = appState
         Task { @MainActor in
@@ -76,6 +85,7 @@ final class TarmacAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        guard !isRunningUnitTests else { return }
         let appState = appState ?? TarmacRuntime.shared.appState
         let semaphore = DispatchSemaphore(value: 0)
         Task { @MainActor in

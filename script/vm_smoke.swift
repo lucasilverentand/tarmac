@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import AppKit
 import Virtualization
 
 private struct SmokeConfig {
@@ -12,6 +13,7 @@ private struct SmokeConfig {
     var boot = true
     var keepRunning = false
     var verifyBootstrap = false
+    var showWindow = false
     var bootHoldSeconds: UInt64 = 30
     var cpuCount = 4
     var memoryGB = 8
@@ -127,6 +129,8 @@ private struct TarmacVMSmoke {
                 config.boot = false
             case "--verify-bootstrap":
                 config.verifyBootstrap = true
+            case "--show-window":
+                config.showWindow = true
             case "--keep-running":
                 config.keepRunning = true
             case "--boot-hold-seconds":
@@ -174,6 +178,7 @@ private struct TarmacVMSmoke {
               --download-latest           Download Apple's latest supported IPSW, then install.
               --no-boot                   Install only.
               --verify-bootstrap          Verify the guest bootstrap and write verification markers.
+              --show-window               Show the VM console for interactive inspection and takeover.
               --keep-running              Leave the VM running until this process is stopped.
               --boot-hold-seconds <n>     Seconds to keep the VM running after start. Default: 30.
               --cpus <n>                  Requested CPU count. Default: 4.
@@ -189,6 +194,7 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
     private let config: SmokeConfig
     private let storage: SmokeStorage
     private var virtualMachine: VZVirtualMachine?
+    private var consoleWindow: NSWindow?
 
     init(config: SmokeConfig) {
         self.config = config
@@ -329,6 +335,7 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
 
     private func bootSmoke() async throws {
         let disk = storage.disksDirectory.appendingPathComponent("smoke-\(UUID().uuidString).img")
+        let auxiliaryStorage = auxiliaryStorageURL(for: disk)
         let sharedDir = storage.smokeSharedDirectory
         try "tarmac vm smoke\n".write(
             to: sharedDir.appendingPathComponent("README.txt"),
@@ -336,10 +343,14 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
             encoding: .utf8
         )
 
+        defer {
+            try? FileManager.default.removeItem(at: disk)
+            try? FileManager.default.removeItem(at: auxiliaryStorage)
+        }
         try cloneDisk(from: storage.baseImage, to: disk)
-        defer { try? FileManager.default.removeItem(at: disk) }
+        try cloneDisk(from: storage.auxiliaryStorage, to: auxiliaryStorage)
 
-        let platform = try existingPlatform()
+        let platform = try existingPlatform(auxiliaryStorage: auxiliaryStorage)
         let vmConfig = try virtualMachineConfiguration(platform: platform, disk: disk, sharedDirectory: sharedDir)
         let vm = VZVirtualMachine(configuration: vmConfig)
         vm.delegate = self
@@ -358,6 +369,7 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         }
 
         print("VM start succeeded.")
+        showConsoleIfRequested(for: vm)
         if config.keepRunning {
             print("VM is running. Stop this process to end the smoke run.")
             while !Task.isCancelled {
@@ -375,16 +387,17 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
     private func verifyGuestBootstrap() async throws {
         let verificationId = UUID()
         let disk = storage.disksDirectory.appendingPathComponent("verify-\(verificationId.uuidString).img")
+        let auxiliaryStorage = auxiliaryStorageURL(for: disk)
         let sharedDir =
             storage.usesSharedRootAsJobDirectory
             ? storage.jobsDirectory
             : storage.jobsDirectory.appendingPathComponent("verify-\(verificationId.uuidString)", isDirectory: true)
         var shouldCleanUp = false
 
-        try cloneDisk(from: storage.baseImage, to: disk)
         defer {
             if shouldCleanUp {
                 try? FileManager.default.removeItem(at: disk)
+                try? FileManager.default.removeItem(at: auxiliaryStorage)
                 if storage.usesSharedRootAsJobDirectory {
                     try? removeSharedRootArtifacts(in: sharedDir)
                 } else {
@@ -392,13 +405,16 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
                 }
             } else {
                 print("Preserved bootstrap probe disk: \(disk.path)")
+                print("Preserved bootstrap probe auxiliary storage: \(auxiliaryStorage.path)")
                 print("Preserved bootstrap probe directory: \(sharedDir.path)")
             }
         }
+        try cloneDisk(from: storage.baseImage, to: disk)
+        try cloneDisk(from: storage.auxiliaryStorage, to: auxiliaryStorage)
 
         try prepareBootstrapProbeSharedDirectory(sharedDir)
 
-        let platform = try existingPlatform()
+        let platform = try existingPlatform(auxiliaryStorage: auxiliaryStorage)
         let vmConfig = try virtualMachineConfiguration(platform: platform, disk: disk, sharedDirectory: sharedDir)
         let vm = VZVirtualMachine(configuration: vmConfig)
         vm.delegate = self
@@ -415,6 +431,7 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
                 }
             }
         }
+        showConsoleIfRequested(for: vm)
 
         let exitCode = try await waitForBootstrapCompletion(in: sharedDir, timeoutSeconds: 300)
         if exitCode != 0 {
@@ -429,7 +446,16 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         virtualMachine = nil
 
         try writeVerificationMarker(at: storage.baseImageVerifiedMarker)
-        try writeVerificationMarker(at: storage.guestBootstrapVerifiedMarker)
+        let interactiveSessionMarker = sharedDir.appendingPathComponent("interactive-session-ready")
+        let consoleUser = (try? String(contentsOf: interactiveSessionMarker, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard consoleUser == "tarmac" else {
+            throw SmokeError.badArgument(
+                "Guest bootstrap completed without confirming the tarmac desktop session."
+            )
+        }
+
+        try writeGuestBootstrapVerificationMarker(at: storage.guestBootstrapVerifiedMarker)
         shouldCleanUp = true
         print("Guest bootstrap verified.")
         print("Wrote \(storage.guestBootstrapVerifiedMarker.path)")
@@ -533,11 +559,18 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         }
     }
 
+    private func writeGuestBootstrapVerificationMarker(at url: URL) throws {
+        let formatter = ISO8601DateFormatter()
+        let json = #"{"verifiedAt":"\#(formatter.string(from: Date()))","contractVersion":2}"#
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try json.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     private func prepareExistingSharedRootWithLaunchd(_ directory: URL) throws {
         let command = """
             set -e
             cd \(shellQuote(directory.path))
-            rm -rf runner jitconfig registration-token runner-url runner-name runner-labels apple-signing bootstrap.log runner.log exit-code completion.json cache-env job-ready warm-mode warm-shutdown
+            rm -rf runner jitconfig registration-token runner-url runner-name runner-labels apple-signing bootstrap.log runner.log exit-code completion.json cache-env interactive-session-ready job-ready warm-mode warm-shutdown
             mkdir -p runner
             : > bootstrap.log
             : > runner.log
@@ -591,6 +624,7 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
             "exit-code",
             "completion.json",
             "cache-env",
+            "interactive-session-ready",
             "job-ready",
             "warm-mode",
             "warm-shutdown",
@@ -603,7 +637,7 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         }
     }
 
-    private func existingPlatform() throws -> VZMacPlatformConfiguration {
+    private func existingPlatform(auxiliaryStorage: URL? = nil) throws -> VZMacPlatformConfiguration {
         guard
             let hardwareModelData = try? Data(contentsOf: storage.hardwareModel),
             let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData),
@@ -617,7 +651,9 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
         let platform = VZMacPlatformConfiguration()
         platform.hardwareModel = hardwareModel
         platform.machineIdentifier = machineIdentifier
-        platform.auxiliaryStorage = VZMacAuxiliaryStorage(url: storage.auxiliaryStorage)
+        platform.auxiliaryStorage = VZMacAuxiliaryStorage(
+            url: auxiliaryStorage ?? storage.auxiliaryStorage
+        )
         return platform
     }
 
@@ -652,6 +688,8 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
             VZMacGraphicsDisplayConfiguration(widthInPixels: 1280, heightInPixels: 800, pixelsPerInch: 144)
         ]
         configuration.graphicsDevices = [graphics]
+        configuration.keyboards = [VZUSBKeyboardConfiguration()]
+        configuration.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
 
         if let sharedDirectory {
             let shared = VZSharedDirectory(url: sharedDirectory, readOnly: false)
@@ -667,6 +705,36 @@ private final class SmokeRunner: NSObject, VZVirtualMachineDelegate {
 
         try configuration.validate()
         return configuration
+    }
+
+    private func auxiliaryStorageURL(for disk: URL) -> URL {
+        disk.deletingPathExtension().appendingPathExtension("auxiliaryStorage")
+    }
+
+    private func showConsoleIfRequested(for vm: VZVirtualMachine) {
+        guard config.showWindow else { return }
+
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
+        application.finishLaunching()
+
+        let displayView = VZVirtualMachineView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
+        displayView.virtualMachine = vm
+        displayView.capturesSystemKeys = true
+
+        let window = NSWindow(
+            contentRect: displayView.frame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Tarmac VM Smoke Console"
+        window.contentView = displayView
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        application.activate(ignoringOtherApps: true)
+        window.makeFirstResponder(displayView)
+        consoleWindow = window
     }
 
     private func createSparseDisk(at url: URL, sizeGB: Int, overwrite: Bool) throws {

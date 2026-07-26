@@ -2,6 +2,11 @@ import Foundation
 
 struct RunnerJob: Identifiable, Codable, Sendable {
     let id: Int64
+    var accountID: UUID? = nil
+    var provider: ProviderKind = .github
+    var remoteJobID: String? = nil
+    var runnerPoolID: UUID? = nil
+    var requestedLabels: [String] = []
     let organizationName: String
     var runnerRequestId: Int64? = nil
     var status: JobStatus
@@ -28,5 +33,10 @@ struct RunnerJob: Identifiable, Codable, Sendable {
         guard let start = startedAt else { return nil }
         let end = completedAt ?? Date()
         return end.timeIntervalSince(start)
+    }
+
+    var providerJobKey: ProviderJobKey? {
+        guard let accountID, let remoteJobID else { return nil }
+        return ProviderJobKey(accountID: accountID, remoteJobID: remoteJobID)
     }
 }

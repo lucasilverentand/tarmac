@@ -7,6 +7,7 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
     private var stateChangeContinuation: CheckedContinuation<Void, Error>?
 
     var isBooted: Bool { vm?.state == .running }
+    private(set) var networkMACAddress: String?
 
     func bootVM(
         vmConfig: VMConfiguration,
@@ -23,6 +24,23 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
             cacheDirectoryURL: cacheDirectoryURL
         )
         _ = try await boot(configuration: configuration)
+    }
+
+    func bootProvisionedVM(
+        vmConfig: VMConfiguration,
+        diskPath: URL,
+        platformStore: PlatformDataStore,
+        sharedDirectoryURL: URL,
+        provisioning: MacGuestProvisioningConfiguration
+    ) async throws {
+        let configuration = try createConfiguration(
+            vmConfig: vmConfig,
+            diskPath: diskPath,
+            platformStore: platformStore,
+            sharedDirectoryURL: sharedDirectoryURL,
+            cacheDirectoryURL: nil
+        )
+        _ = try await boot(configuration: configuration, provisioning: provisioning)
     }
 
     func stopVM() async throws {
@@ -68,8 +86,11 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
 
         // Network
         let network = VZVirtioNetworkDeviceConfiguration()
+        let macAddress = VZMACAddress.randomLocallyAdministered()
+        network.macAddress = macAddress
         network.attachment = VZNATNetworkDeviceAttachment()
         configuration.networkDevices = [network]
+        networkMACAddress = macAddress.string
 
         // Shared directories via VirtioFS
         var fsDevices: [VZVirtioFileSystemDeviceConfiguration] = []
@@ -105,24 +126,42 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
         ]
         configuration.graphicsDevices = [graphics]
 
+        VMInputDeviceConfigurator.attachInteractiveDevices(to: configuration)
+
         try configuration.validate()
         Log.vm.info("VM configuration created and validated")
         return configuration
     }
 
-    func boot(configuration: VZVirtualMachineConfiguration) async throws -> VZVirtualMachine {
+    func boot(
+        configuration: VZVirtualMachineConfiguration,
+        provisioning: MacGuestProvisioningConfiguration? = nil
+    ) async throws -> VZVirtualMachine {
         let virtualMachine = VZVirtualMachine(configuration: configuration)
         virtualMachine.delegate = self
         do {
             self.vm = virtualMachine
 
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                virtualMachine.start { result in
-                    switch result {
-                    case .success:
-                        continuation.resume()
-                    case .failure(let error):
-                        continuation.resume(throwing: error)
+            if let provisioning {
+                let options = try provisioning.makeStartOptions()
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    virtualMachine.start(options: options) { error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            continuation.resume()
+                        }
+                    }
+                }
+            } else {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    virtualMachine.start { result in
+                        switch result {
+                        case .success:
+                            continuation.resume()
+                        case .failure(let error):
+                            continuation.resume(throwing: error)
+                        }
                     }
                 }
             }
@@ -138,6 +177,17 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
     }
 
     func stop(vm: VZVirtualMachine) async throws {
+        // The guest bootstrap normally shuts macOS down as soon as it writes its
+        // completion record. Treat that as a successful stop instead of trying
+        // to force an already-stopped VZVirtualMachine through an invalid state
+        // transition.
+        if vm.state == .stopped {
+            self.vm = nil
+            VMDisplaySource.shared.clear()
+            Log.vm.info("VM already stopped by guest")
+            return
+        }
+
         guard vm.canRequestStop else {
             Log.vm.warning("VM cannot request stop, forcing stop")
             try await forceStop(vm: vm)
@@ -182,6 +232,12 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
     // MARK: - Private
 
     private func forceStop(vm: VZVirtualMachine) async throws {
+        if vm.state == .stopped {
+            self.vm = nil
+            VMDisplaySource.shared.clear()
+            return
+        }
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             vm.stop { error in
                 if let error {
@@ -191,6 +247,9 @@ final class VMLifecycle: NSObject, VMLifecycleProtocol, VZVirtualMachineDelegate
                 }
             }
         }
+        self.vm = nil
+        VMDisplaySource.shared.clear()
+        Log.vm.info("VM force-stopped")
     }
 }
 

@@ -9,6 +9,7 @@ mkdir -p "$BUILD_DIR"
 
 xcrun swiftc \
   -parse-as-library \
+  -framework AppKit \
   -framework Virtualization \
   "$ROOT_DIR/script/vm_smoke.swift" \
   -o "$BIN"

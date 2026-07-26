@@ -8,7 +8,7 @@ import Testing
 struct RunnerHostReadinessTests {
     private static let supportedHost = HostCapability(
         isVirtualizationSupported: true,
-        operatingSystemVersion: OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+        operatingSystemVersion: OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0)
     )
 
     @Test("ready when storage, VM platform data, and GitHub config are complete")
@@ -185,7 +185,7 @@ struct RunnerHostReadinessTests {
         )
 
         #expect(!readiness.isReady)
-        #expect(readiness.issues.contains { $0.message.contains("Runner access token") })
+        #expect(readiness.issues.contains { $0.message.contains("access token") })
     }
 
     @Test("image profile readiness failures block startup")

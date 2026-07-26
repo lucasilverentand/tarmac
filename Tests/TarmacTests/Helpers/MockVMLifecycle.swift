@@ -14,6 +14,7 @@ final class MockVMLifecycle: VMLifecycleProtocol {
     var shouldThrowOnBoot = false
     var shouldThrowOnStop = false
     var completeBootstrapProbeOnBoot = true
+    var completeWarmReadinessOnBoot = true
     var bootError: Error = VMEngineError.missingJITConfig
     var stopError: Error = VMEngineError.missingJITConfig
 
@@ -49,6 +50,26 @@ final class MockVMLifecycle: VMLifecycleProtocol {
             )
             try #"{"exitCode":0}"#.write(
                 to: sharedDirectoryURL.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName),
+                atomically: true,
+                encoding: .utf8
+            )
+            try "tarmac\n".write(
+                to: sharedDirectoryURL.appendingPathComponent(
+                    GuestBootstrapContract.interactiveSessionReadyFileName
+                ),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        if completeWarmReadinessOnBoot,
+            let sharedDirectoryURL,
+            FileManager.default.fileExists(
+                atPath: sharedDirectoryURL.appendingPathComponent(GuestBootstrapContract.warmModeFileName).path
+            )
+        {
+            try "ready\n".write(
+                to: sharedDirectoryURL.appendingPathComponent(GuestBootstrapContract.warmReadyFileName),
                 atomically: true,
                 encoding: .utf8
             )

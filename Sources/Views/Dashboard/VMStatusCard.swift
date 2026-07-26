@@ -5,6 +5,10 @@ struct VMStatusCard: View {
     let vmStatusViewModel: VMStatusViewModel
     let configStore: ConfigStore
     @Bindable var settingsViewModel: SettingsViewModel
+    let onKeepIdleVMAlive: () -> Void
+    let onResumeIdleVMAutomaticShutdown: () -> Void
+    let onRestartIdleVM: () -> Void
+    let onShutDownIdleVM: () -> Void
     var onWizardDismiss: (() -> Void)? = nil
 
     @State private var showingImageWizard = false
@@ -117,7 +121,7 @@ struct VMStatusCard: View {
             Spacer()
         }
         .padding(14)
-        .dashboardGlassSurface(tint: statusTint.opacity(0.12))
+        .dashboardSurface(tint: statusTint)
     }
 
     @ViewBuilder
@@ -191,7 +195,7 @@ struct VMStatusCard: View {
                     .foregroundStyle(.orange)
 
                 Text(
-                    "Install `Resources/GuestBootstrap/install-tarmac-runner-bootstrap.sh` inside the base image, then rerun base image verification so jobs can start."
+                    "Install `Resources/GuestBootstrap/install-tarmac-runner-bootstrap.sh` inside the base image, enable automatic login for the tarmac account, then rerun base image verification so jobs can start."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -255,10 +259,14 @@ struct VMStatusCard: View {
                         systemImage: "play.circle.fill",
                         tint: .green
                     )
-                    DetailRow(
-                        title: vmStatusViewModel.activeVMRole == .warmRunnerIdle ? "Last job ID" : "Job ID",
-                        value: "\(vm.jobId)"
-                    )
+                    if let jobId = vm.jobId {
+                        DetailRow(
+                            title: vmStatusViewModel.activeVMRole == .warmRunnerIdle ? "Last job ID" : "Job ID",
+                            value: "\(jobId)"
+                        )
+                    } else if vmStatusViewModel.activeVMRole == .warmRunnerIdle {
+                        DetailRow(title: "Runner state", value: "Prewarmed")
+                    }
                     DetailRow(title: "Boot time", value: vm.startedAt.formatted(.relative(presentation: .named)))
                     if vmStatusViewModel.activeVMRole?.isWarmRunner == true {
                         if let jobsServed = vmStatusViewModel.warmRunnerJobsServed {
@@ -295,6 +303,20 @@ struct VMStatusCard: View {
                         }
                         .controlSize(.small)
                     }
+                }
+
+                if vmStatusViewModel.activeVMRole == .warmRunnerIdle {
+                    IdleVMControlPanel(
+                        isPinned: vmStatusViewModel.isWarmRunnerPinned,
+                        automaticShutdownAt: vmStatusViewModel.warmRunnerIdleShutdownAt,
+                        operation: vmStatusViewModel.idleVMControlOperation,
+                        errorMessage: vmStatusViewModel.idleVMControlErrorMessage,
+                        canControl: vmStatusViewModel.canControlIdleVM,
+                        onKeepAlive: onKeepIdleVMAlive,
+                        onResumeAutomaticShutdown: onResumeIdleVMAutomaticShutdown,
+                        onRestart: onRestartIdleVM,
+                        onShutDown: onShutDownIdleVM
+                    )
                 }
             }
         }
@@ -443,7 +465,7 @@ private struct InspectorSection<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
-        .dashboardGlassSurface()
+        .dashboardSurface()
     }
 }
 
@@ -473,6 +495,106 @@ private struct DetailRow: View {
                 .monospacedDigit()
         }
         .font(.caption)
+    }
+}
+
+private struct IdleVMControlPanel: View {
+    let isPinned: Bool
+    let automaticShutdownAt: Date?
+    let operation: IdleVMControlOperation?
+    let errorMessage: String?
+    let canControl: Bool
+    let onKeepAlive: () -> Void
+    let onResumeAutomaticShutdown: () -> Void
+    let onRestart: () -> Void
+    let onShutDown: () -> Void
+
+    @State private var isConfirmingShutdown = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let operation {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(operation.statusText)
+                        .font(.caption.weight(.medium))
+                }
+            } else if isPinned {
+                Label("Automatic shutdown paused", systemImage: "pin.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            } else if let automaticShutdownAt {
+                HStack(spacing: 6) {
+                    Label("Automatic shutdown", systemImage: "timer")
+                    Text(automaticShutdownAt, style: .relative)
+                        .monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            IdleVMActionButtons(
+                isPinned: isPinned,
+                isEnabled: canControl,
+                onKeepAlive: onKeepAlive,
+                onResumeAutomaticShutdown: onResumeAutomaticShutdown,
+                onRestart: onRestart,
+                onRequestShutdown: { isConfirmingShutdown = true }
+            )
+
+            if let errorMessage {
+                Label {
+                    Text("Control failed: \(errorMessage)")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.red)
+            }
+        }
+        .padding(.top, 4)
+        .confirmationDialog(
+            "Shut down the idle machine?",
+            isPresented: $isConfirmingShutdown,
+            titleVisibility: .visible
+        ) {
+            Button("Shut Down", role: .destructive, action: onShutDown)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The warm runner will be removed. The next job will start a fresh machine.")
+        }
+    }
+}
+
+private struct IdleVMActionButtons: View {
+    let isPinned: Bool
+    let isEnabled: Bool
+    let onKeepAlive: () -> Void
+    let onResumeAutomaticShutdown: () -> Void
+    let onRestart: () -> Void
+    let onRequestShutdown: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: isPinned ? onResumeAutomaticShutdown : onKeepAlive) {
+                Label(
+                    isPinned ? "Resume Auto Shutdown" : "Keep Alive",
+                    systemImage: isPinned ? "timer" : "pin"
+                )
+            }
+
+            Button(action: onRestart) {
+                Label("Restart", systemImage: "arrow.clockwise")
+            }
+
+            Button(role: .destructive, action: onRequestShutdown) {
+                Label("Shut Down…", systemImage: "power")
+            }
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .disabled(!isEnabled)
     }
 }
 

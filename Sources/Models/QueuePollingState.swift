@@ -13,6 +13,7 @@ struct QueuePollingState: Equatable, Sendable {
     var lastFailureMessage: String?
     var retryAttempt: Int
     var nextRetryDelay: TimeInterval?
+    var lastSuccessfulPollAt: Date? = nil
 }
 
 enum QueuePollingFailureKind: String, Equatable, Sendable {

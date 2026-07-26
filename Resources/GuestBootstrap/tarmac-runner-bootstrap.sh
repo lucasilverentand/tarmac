@@ -10,9 +10,10 @@ CACHE_TAG="actions-cache"
 CACHE_MOUNT="/Volumes/actions-cache"
 LOCAL_LOG="/var/log/tarmac-runner-bootstrap.log"
 RUNNER_USER="tarmac"
-RUNNER_UID="501"
-RUNNER_GID="20"
+RUNNER_UID=""
+RUNNER_GID=""
 RUNNER_HOME="/Users/tarmac"
+AUTO_LOGIN_PASSWORD_FILE="/var/db/tarmac-runner-autologin-password"
 
 BOOTSTRAP_LOG=""
 RUNNER_LOG=""
@@ -20,6 +21,7 @@ EXIT_CODE_FILE=""
 COMPLETION_MARKER_FILE=""
 CACHE_ENV_FILE=""
 SIGNING_IMPORT_SCRIPT_FILE=""
+INTERACTIVE_SESSION_READY_FILE=""
 
 log() {
     local message="$1"
@@ -35,27 +37,99 @@ shell_quote() {
     printf "'%s'" "$(printf '%s' "$1" | /usr/bin/sed "s/'/'\\\\''/g")"
 }
 
+refresh_runner_identity() {
+    RUNNER_UID="$(/usr/bin/id -u "${RUNNER_USER}")" || return 1
+    RUNNER_GID="$(/usr/bin/id -g "${RUNNER_USER}")" || return 1
+}
+
+next_available_runner_uid() {
+    local candidate=501
+    while /usr/bin/dscl . -search /Users UniqueID "${candidate}" 2>/dev/null | /usr/bin/grep -q .; do
+        candidate=$((candidate + 1))
+    done
+    printf '%s\n' "${candidate}"
+}
+
 ensure_runner_user() {
     if /usr/bin/id -u "${RUNNER_USER}" >/dev/null 2>&1; then
         /usr/bin/dscl . -create "/Users/${RUNNER_USER}" NFSHomeDirectory "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1 || true
         /bin/mkdir -p "${RUNNER_HOME}"
+        refresh_runner_identity || return 1
         /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1
         return 0
     fi
 
-    log "Creating guest runner user ${RUNNER_USER} (${RUNNER_UID}:${RUNNER_GID})"
-    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" >> "${LOCAL_LOG}" 2>&1
-    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" UserShell /bin/bash >> "${LOCAL_LOG}" 2>&1
-    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" RealName "Tarmac Runner" >> "${LOCAL_LOG}" 2>&1
-    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" UniqueID "${RUNNER_UID}" >> "${LOCAL_LOG}" 2>&1
-    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" PrimaryGroupID "${RUNNER_GID}" >> "${LOCAL_LOG}" 2>&1
-    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" NFSHomeDirectory "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1
+    local runner_uid
+    runner_uid="$(next_available_runner_uid)"
+    log "Creating guest runner user ${RUNNER_USER} (${runner_uid}:20)"
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" >> "${LOCAL_LOG}" 2>&1 || return 1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" UserShell /bin/bash >> "${LOCAL_LOG}" 2>&1 || return 1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" RealName "Tarmac Runner" >> "${LOCAL_LOG}" 2>&1 || return 1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" UniqueID "${runner_uid}" >> "${LOCAL_LOG}" 2>&1 || return 1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" PrimaryGroupID "20" >> "${LOCAL_LOG}" 2>&1 || return 1
+    /usr/bin/dscl . -create "/Users/${RUNNER_USER}" NFSHomeDirectory "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1 || return 1
     /bin/mkdir -p "${RUNNER_HOME}"
+    refresh_runner_identity || return 1
     /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "${RUNNER_HOME}" >> "${LOCAL_LOG}" 2>&1
 }
 
 runner_shell() {
     HOME="${RUNNER_HOME}" USER="${RUNNER_USER}" LOGNAME="${RUNNER_USER}" /usr/bin/su -m "${RUNNER_USER}" -c "$1"
+}
+
+configure_interactive_session_defaults() {
+    local preferences="${RUNNER_HOME}/Library/Preferences/com.apple.screensaver"
+    /bin/mkdir -p "${RUNNER_HOME}/Library/Preferences"
+    /usr/bin/defaults write "${preferences}" idleTime -int 0
+    /usr/bin/defaults write "${preferences}" askForPassword -int 0
+    /usr/bin/defaults write "${preferences}" askForPasswordDelay -int 2147483647
+    /usr/sbin/chown -R "${RUNNER_UID}:${RUNNER_GID}" "${RUNNER_HOME}/Library"
+    /usr/bin/pmset -a sleep 0 displaysleep 0 disksleep 0
+    log "Disabled screen locking and sleep for ${RUNNER_USER}"
+}
+
+configure_seeded_interactive_session() {
+    if [[ ! -s "${AUTO_LOGIN_PASSWORD_FILE}" ]]; then
+        return 0
+    fi
+
+    if /usr/bin/fdesetup status | /usr/bin/grep -q 'FileVault is On'; then
+        log "Cannot configure automatic login while FileVault is enabled"
+        return 1
+    fi
+
+    local runner_password
+    IFS= read -r runner_password < "${AUTO_LOGIN_PASSWORD_FILE}"
+    if [[ -z "${runner_password}" ]]; then
+        log "Seeded automatic-login password is empty"
+        return 1
+    fi
+
+    log "Configuring seeded automatic desktop login for ${RUNNER_USER}"
+    /usr/bin/dscl . -passwd "/Users/${RUNNER_USER}" "${runner_password}" >> "${LOCAL_LOG}" 2>&1 || return 1
+    /usr/sbin/sysadminctl \
+        -autologin set \
+        -userName "${RUNNER_USER}" \
+        -password "${runner_password}" >> "${LOCAL_LOG}" 2>&1 || return 1
+
+    local configured_user
+    configured_user="$(/usr/bin/defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null || true)"
+    if [[ "${configured_user}" != "${RUNNER_USER}" || ! -f /etc/kcpassword ]]; then
+        log "macOS did not persist automatic login for ${RUNNER_USER}"
+        return 1
+    fi
+
+    configure_interactive_session_defaults || return 1
+
+    /bin/rm -f "${AUTO_LOGIN_PASSWORD_FILE}"
+    unset runner_password
+
+    local console_user
+    console_user="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
+    if [[ "${console_user}" != "${RUNNER_USER}" ]]; then
+        log "Restarting loginwindow to activate automatic login"
+        /usr/bin/killall loginwindow >> "${LOCAL_LOG}" 2>&1 || true
+    fi
 }
 
 shutdown_guest() {
@@ -144,6 +218,7 @@ prepare_shared_logging() {
     COMPLETION_MARKER_FILE="${SHARED_MOUNT}/completion.json"
     CACHE_ENV_FILE="${SHARED_MOUNT}/cache-env"
     SIGNING_IMPORT_SCRIPT_FILE="${SHARED_MOUNT}/apple-signing/import-signing-assets.sh"
+    INTERACTIVE_SESSION_READY_FILE="${SHARED_MOUNT}/interactive-session-ready"
 
     /sbin/mount >> "${LOCAL_LOG}" 2>&1 || true
     /bin/ls -ldeO@ "${SHARED_MOUNT}" >> "${LOCAL_LOG}" 2>&1 || true
@@ -156,6 +231,25 @@ prepare_shared_logging() {
     if [[ -f "${LOCAL_LOG}" ]]; then
         runner_shell "cat $(shell_quote "${LOCAL_LOG}") >> $(shell_quote "${BOOTSTRAP_LOG}")" 2>> "${LOCAL_LOG}" || true
     fi
+}
+
+wait_for_interactive_session() {
+    local timeout_seconds="${1:-90}"
+    local deadline=$(( $(/bin/date +%s) + timeout_seconds ))
+
+    while [[ $(/bin/date +%s) -lt "${deadline}" ]]; do
+        local console_user
+        console_user="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
+        if [[ "${console_user}" == "${RUNNER_USER}" ]]; then
+            runner_shell "printf '%s\n' $(shell_quote "${RUNNER_USER}") > $(shell_quote "${INTERACTIVE_SESSION_READY_FILE}")" 2>> "${LOCAL_LOG}" || return 1
+            log "Interactive desktop session is ready for ${RUNNER_USER}"
+            return 0
+        fi
+        /bin/sleep 2
+    done
+
+    log "Timed out waiting for ${RUNNER_USER} to become the console user"
+    return 1
 }
 
 ensure_cache_link() {
@@ -284,6 +378,7 @@ validate_job_payload() {
     local runner_url="${SHARED_MOUNT}/runner-url"
     local runner_name="${SHARED_MOUNT}/runner-name"
     local runner_labels="${SHARED_MOUNT}/runner-labels"
+    local runner_provider="${SHARED_MOUNT}/runner-provider"
 
     if [[ ! -d "${runner_dir}" ]]; then
         log "Missing runner package at ${runner_dir}"
@@ -300,6 +395,10 @@ validate_job_payload() {
     fi
 
     if [[ -s "${registration_token}" && -s "${runner_url}" && -s "${runner_name}" && -s "${runner_labels}" ]]; then
+        if [[ -s "${runner_provider}" ]] && [[ "$(/bin/cat "${runner_provider}")" == "gitea" ]] && [[ ! -x "${runner_dir}/act_runner" ]]; then
+            log "Missing executable Gitea act_runner at ${runner_dir}/act_runner"
+            return 1
+        fi
         return 0
     fi
 
@@ -320,22 +419,55 @@ configure_runner_with_registration_token() {
     runner_labels="$(/bin/cat "${SHARED_MOUNT}/runner-labels")"
 
     log "Configuring GitHub Actions runner with registration token"
-    (
-        cd "${runner_dir}" || exit 127
-        ./config.sh \
-            --url "${runner_url}" \
-            --token "${registration_token}" \
-            --name "${runner_name}" \
-            --labels "${runner_labels}" \
-            --unattended \
+    runner_shell "
+        cd $(shell_quote "${runner_dir}") || exit 127
+        ./config.sh \\
+            --url $(shell_quote "${runner_url}") \\
+            --token $(shell_quote "${registration_token}") \\
+            --name $(shell_quote "${runner_name}") \\
+            --labels $(shell_quote "${runner_labels}") \\
+            --unattended \\
             --replace
-    ) >> "${RUNNER_LOG}" 2>&1
+    " >> "${RUNNER_LOG}" 2>&1
+}
+
+configure_gitea_ephemeral_runner() {
+    local runner_dir="${SHARED_MOUNT}/runner"
+    local registration_token
+    local runner_url
+    local runner_name
+    local runner_labels
+
+    registration_token="$(/bin/cat "${SHARED_MOUNT}/registration-token")"
+    runner_url="$(/bin/cat "${SHARED_MOUNT}/runner-url")"
+    runner_name="$(/bin/cat "${SHARED_MOUNT}/runner-name")"
+    runner_labels="$(/bin/cat "${SHARED_MOUNT}/runner-labels")"
+
+    log "Registering ephemeral Gitea Actions runner"
+    runner_shell "
+        cd $(shell_quote "${runner_dir}") || exit 127
+        ./act_runner register \\
+            --no-interactive \\
+            --ephemeral \\
+            --instance $(shell_quote "${runner_url}") \\
+            --token $(shell_quote "${registration_token}") \\
+            --name $(shell_quote "${runner_name}") \\
+            --labels $(shell_quote "${runner_labels}")
+    " >> "${RUNNER_LOG}" 2>&1
+    local registration_status="$?"
+
+    # The registration token can create more runners. Remove it before any
+    # untrusted workflow step starts; the ephemeral .runner credential remains.
+    /bin/rm -f "${SHARED_MOUNT}/registration-token"
+    unset registration_token
+    return "${registration_status}"
 }
 
 run_runner() {
     local runner_dir="${SHARED_MOUNT}/runner"
     local jit_config="${SHARED_MOUNT}/jitconfig"
     local registration_token="${SHARED_MOUNT}/registration-token"
+    local runner_provider="${SHARED_MOUNT}/runner-provider"
     local quoted_runner_dir
     local quoted_cache_env
     local quoted_jit_config
@@ -346,7 +478,15 @@ run_runner() {
     quoted_jit_config="$(shell_quote "${jit_config}")"
     quoted_registration_token="$(shell_quote "${registration_token}")"
 
-    log "Starting GitHub Actions runner"
+    if [[ ! -s "${jit_config}" && -s "${registration_token}" ]]; then
+        if [[ -s "${runner_provider}" ]] && [[ "$(/bin/cat "${runner_provider}")" == "gitea" ]]; then
+            configure_gitea_ephemeral_runner || return "$?"
+        else
+            configure_runner_with_registration_token || return "$?"
+        fi
+    fi
+
+    log "Starting Actions runner"
     runner_shell "
         cd ${quoted_runner_dir} || exit 127
         if [[ -f ${quoted_cache_env} ]]; then
@@ -356,7 +496,8 @@ run_runner() {
             jit_payload=\"\$(/bin/cat ${quoted_jit_config})\"
             ./run.sh --jitconfig \"\${jit_payload}\"
         elif [[ -s ${quoted_registration_token} ]]; then
-            configure_runner_with_registration_token || exit "$?"
+            ./run.sh
+        elif [[ -f .runner ]]; then
             ./run.sh
         else
             exit 12
@@ -420,12 +561,17 @@ run_single_job() {
     local runner_exit_code="$?"
     log "Runner exited with code ${runner_exit_code}"
     write_job_result "${runner_exit_code}"
+    if [[ -s "${SHARED_MOUNT}/runner-provider" ]] && [[ "$(/bin/cat "${SHARED_MOUNT}/runner-provider")" == "gitea" ]]; then
+        /bin/rm -f "${SHARED_MOUNT}/runner/.runner"
+    fi
     return "${runner_exit_code}"
 }
 
 run_warm_loop() {
     log "Warm runner mode enabled"
     export TARMAC_SKIP_SHUTDOWN=1
+    runner_shell "printf '%s\\n' ready > $(shell_quote "${SHARED_MOUNT}/warm-ready")" 2>> "${LOCAL_LOG}" || true
+    log "Warm runner is ready for a job"
 
     while true; do
         reset_job_artifacts
@@ -460,7 +606,9 @@ run_warm_loop() {
 
 main() {
     log "Tarmac guest bootstrap starting"
-    ensure_runner_user
+    if ! ensure_runner_user; then
+        finish 15
+    fi
 
     if ! mount_required_virtiofs "${SHARED_TAG}" "${SHARED_MOUNT}"; then
         finish 10
@@ -469,9 +617,18 @@ main() {
     if ! prepare_shared_logging; then
         finish 11
     fi
+    if ! configure_seeded_interactive_session; then
+        finish 25
+    fi
+    if ! configure_interactive_session_defaults; then
+        finish 26
+    fi
 
     mount_optional_virtiofs "${CACHE_TAG}" "${CACHE_MOUNT}"
     configure_cache_paths
+    if ! wait_for_interactive_session 90; then
+        finish 24
+    fi
     if ! ensure_xcode_first_launch; then
         finish 23
     fi

@@ -10,7 +10,22 @@ struct StorageSettingsView: View {
     var body: some View {
         let report = viewModel.storageReport
 
-        Form {
+        VStack(alignment: .leading, spacing: 0) {
+            DashboardPageHeader(
+                title: "Storage",
+                subtitle: "VM images, runner data, cache capacity, and cleanup on this Mac."
+            ) {
+                DashboardStatusBadge(
+                    title: viewModel.storageHealth.status.displayName,
+                    systemImage: storageStatusImage,
+                    tint: storageStatusColor
+                )
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 22)
+            .padding(.bottom, 8)
+
+            Form {
             Toggle("Launch at login", isOn: $viewModel.launchAtLogin)
 
             LabeledContent("Storage folder") {
@@ -128,8 +143,9 @@ struct StorageSettingsView: View {
                     pathText(viewModel.resolvedCachePath)
                 }
             }
+            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
         .onAppear {
             viewModel.refreshStorageHealth()
         }

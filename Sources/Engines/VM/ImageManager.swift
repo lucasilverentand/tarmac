@@ -15,6 +15,7 @@ final class ImageManager: Sendable {
     private(set) var installProgress: Double = 0
     private(set) var installStatus: String = "Ready to install"
     private(set) var installElapsedSeconds: Int = 0
+    private(set) var installedOperatingSystemVersion: OperatingSystemVersion?
     private var progressObservation: NSKeyValueObservation?
 
     private var activeDownloader: IPSWDownloader?
@@ -42,15 +43,25 @@ final class ImageManager: Sendable {
     func downloadLatestIPSW() async throws -> URL {
         Log.image.info("Fetching latest supported restore image...")
 
-        let downloadURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+        let restoreImage = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<(URL, OperatingSystemVersion), Error>) in
             VZMacOSRestoreImage.fetchLatestSupported { result in
                 switch result {
                 case .success(let image):
-                    continuation.resume(returning: image.url)
+                    continuation.resume(returning: (image.url, image.operatingSystemVersion))
                 case .failure(let error):
                     continuation.resume(throwing: error)
                 }
             }
+        }
+        let downloadURL = MacOSRestoreCatalog.preferredRestoreURL(
+            latestSupportedURL: restoreImage.0,
+            latestSupportedVersion: restoreImage.1
+        )
+        if downloadURL != restoreImage.0 {
+            Log.image.info(
+                "Latest stable guest is macOS \(restoreImage.1.majorVersion); using macOS 27 beta build \(MacOSRestoreCatalog.betaBuild) for unattended provisioning."
+            )
         }
         Log.image.info("Downloading IPSW from \(downloadURL.absoluteString)...")
 
@@ -197,7 +208,7 @@ final class ImageManager: Sendable {
         diskPath: URL,
         config: VMConfiguration,
         platformStore: PlatformDataStore
-    ) async throws {
+    ) async throws -> OperatingSystemVersion {
         Log.image.info("Starting macOS install from \(ipsw.lastPathComponent)")
         resetInstallState(status: "Preparing restore image...")
 
@@ -207,8 +218,8 @@ final class ImageManager: Sendable {
             VMDisplaySource.shared.clear()
         }
 
-        let hardwareModelData = try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Data, Error>) in
+        let restoreMetadata = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<(Data, OperatingSystemVersion), Error>) in
             VZMacOSRestoreImage.load(from: ipsw) { result in
                 switch result {
                 case .success(let image):
@@ -225,12 +236,16 @@ final class ImageManager: Sendable {
                         continuation.resume(throwing: ImageManagerError.unsupportedHardware)
                         return
                     }
-                    continuation.resume(returning: requirements.hardwareModel.dataRepresentation)
+                    continuation.resume(
+                        returning: (requirements.hardwareModel.dataRepresentation, image.operatingSystemVersion)
+                    )
                 case .failure(let error):
                     continuation.resume(throwing: error)
                 }
             }
         }
+        let hardwareModelData = restoreMetadata.0
+        installedOperatingSystemVersion = restoreMetadata.1
 
         guard let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData) else {
             throw ImageManagerError.unsupportedHardware
@@ -273,6 +288,8 @@ final class ImageManager: Sendable {
         ]
         vmConfig.graphicsDevices = [graphics]
 
+        VMInputDeviceConfigurator.attachInteractiveDevices(to: vmConfig)
+
         try vmConfig.validate()
 
         let vm = VZVirtualMachine(configuration: vmConfig)
@@ -301,7 +318,10 @@ final class ImageManager: Sendable {
 
         installStatus = "Finalizing base image..."
         installProgress = 1.0
-        Log.image.info("macOS installation completed")
+        Log.image.info(
+            "macOS \(restoreMetadata.1.majorVersion).\(restoreMetadata.1.minorVersion) installation completed"
+        )
+        return restoreMetadata.1
     }
 
     private func resetInstallState(status: String) {

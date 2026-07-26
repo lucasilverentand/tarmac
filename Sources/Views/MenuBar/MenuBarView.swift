@@ -41,6 +41,30 @@ struct MenuBarView: View {
                     .foregroundStyle(.green)
                     .font(.caption2)
             }
+        } else if appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Warm runner idle")
+                        .font(.subheadline.weight(.medium))
+                    if let operation = appState.vmStatusViewModel.idleVMControlOperation {
+                        Text(operation.statusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if appState.vmStatusViewModel.isWarmRunnerPinned {
+                        Text("Kept alive until resumed")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let shutdownAt = appState.vmStatusViewModel.warmRunnerIdleShutdownAt {
+                        Text(shutdownAt, style: .relative)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            } icon: {
+                Image(systemName: "desktopcomputer")
+                    .foregroundStyle(.green)
+            }
         } else if appState.vmStatusViewModel.readyForJobs {
             Label {
                 Text("Idle — waiting for jobs")
@@ -109,6 +133,29 @@ struct MenuBarView: View {
                 .buttonStyle(.plain)
             }
 
+            if appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle {
+                Divider()
+
+                IdleVMMenuControls(
+                    isPinned: appState.vmStatusViewModel.isWarmRunnerPinned,
+                    operation: appState.vmStatusViewModel.idleVMControlOperation,
+                    errorMessage: appState.vmStatusViewModel.idleVMControlErrorMessage,
+                    canControl: appState.vmStatusViewModel.canControlIdleVM,
+                    onKeepAlive: {
+                        appState.keepIdleWarmRunnerAlive()
+                    },
+                    onResumeAutomaticShutdown: {
+                        appState.resumeIdleWarmRunnerAutomaticShutdown()
+                    },
+                    onRestart: {
+                        Task { await appState.restartIdleWarmRunner() }
+                    },
+                    onShutDown: {
+                        Task { await appState.shutDownIdleWarmRunner() }
+                    }
+                )
+            }
+
             Button {
                 appState.selectedSection = .storage
                 openWindow(id: "dashboard")
@@ -130,6 +177,76 @@ struct MenuBarView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("q", modifiers: .command)
+        }
+    }
+}
+
+private struct IdleVMMenuControls: View {
+    let isPinned: Bool
+    let operation: IdleVMControlOperation?
+    let errorMessage: String?
+    let canControl: Bool
+    let onKeepAlive: () -> Void
+    let onResumeAutomaticShutdown: () -> Void
+    let onRestart: () -> Void
+    let onShutDown: () -> Void
+
+    @State private var isConfirmingShutdown = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let operation {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(operation.statusText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.caption)
+            }
+
+            Button(action: isPinned ? onResumeAutomaticShutdown : onKeepAlive) {
+                Label(
+                    isPinned ? "Resume Auto Shutdown" : "Keep Idle VM Alive",
+                    systemImage: isPinned ? "timer" : "pin"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canControl)
+
+            Button(action: onRestart) {
+                Label("Restart Idle VM", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canControl)
+
+            Button(role: .destructive) {
+                isConfirmingShutdown = true
+            } label: {
+                Label("Shut Down Idle VM…", systemImage: "power")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canControl)
+
+            if let errorMessage {
+                Text("Control failed: \(errorMessage)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .confirmationDialog(
+            "Shut down the idle machine?",
+            isPresented: $isConfirmingShutdown,
+            titleVisibility: .visible
+        ) {
+            Button("Shut Down", role: .destructive, action: onShutDown)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The next job will start a fresh machine.")
         }
     }
 }

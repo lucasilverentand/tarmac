@@ -4,14 +4,21 @@ import Foundation
 @MainActor
 final class SettingsViewModel {
     let configStore: ConfigStore
+    var onWarmRunnerConfigurationChanged: (@MainActor (WarmRunnerConfiguration) -> Void)?
     private(set) var storageHealth: StorageHealth
     private(set) var githubSetupChecks: [UUID: GitHubSetupCheckResult] = [:]
+    private(set) var providerSetupChecks: [UUID: ProviderSetupResult] = [:]
+    private(set) var pollingStates: [UUID: QueuePollingState] = [:]
     private(set) var githubSetupChecksInFlight: Set<UUID> = []
     private(set) var lastBaseImageResetError: String?
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
-        self.storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth()
+        // Avoid requesting removable-volume access while SwiftUI is still constructing
+        // the scene graph. The full probe runs from AppState.start() after launch.
+        self.storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth(
+            performCloneProbe: false
+        )
     }
 
     // MARK: - Organizations
@@ -34,6 +41,14 @@ final class SettingsViewModel {
 
     func moveOrganization(fromOffsets source: IndexSet, toOffset destination: Int) {
         configStore.moveOrganization(fromOffsets: source, toOffset: destination)
+    }
+
+    func updatePollingState(_ state: QueuePollingState?, for account: RunnerAccount) {
+        pollingStates[account.id] = state
+    }
+
+    func pollingState(for account: RunnerAccount) -> QueuePollingState? {
+        pollingStates[account.id]
     }
 
     // MARK: - Per-Org Credentials
@@ -287,6 +302,7 @@ final class SettingsViewModel {
         set {
             configStore.warmRunnerConfig = newValue
             configStore.save()
+            onWarmRunnerConfigurationChanged?(newValue)
         }
     }
 
@@ -485,8 +501,10 @@ final class SettingsViewModel {
         }
     }
 
-    func refreshStorageHealth() {
-        storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth()
+    func refreshStorageHealth(performCloneProbe: Bool = true) {
+        storageHealth = StorageManager(rootPath: configStore.storageRootPath).evaluateHealth(
+            performCloneProbe: performCloneProbe
+        )
     }
 
     func scanRunnerImage(
@@ -520,6 +538,42 @@ final class SettingsViewModel {
         githubSetupChecksInFlight.contains(org.id)
     }
 
+    func providerSetupCheckResult(for account: RunnerAccount) -> ProviderSetupResult? {
+        providerSetupChecks[account.id]
+    }
+
+    func runAccountSetupCheck(for account: RunnerAccount) async {
+        if account.provider == .github {
+            await runGitHubSetupCheck(for: account)
+            return
+        }
+        _ = await runGiteaSetupCheck(for: account)
+    }
+
+    func runGiteaSetupCheck(for account: RunnerAccount) async -> ProviderSetupResult {
+        githubSetupChecksInFlight.insert(account.id)
+        defer { githubSetupChecksInFlight.remove(account.id) }
+        do {
+            let engine = try GiteaEngine(
+                account: account,
+                keychainService: configStore.keychainService,
+                storage: StorageManager(rootPath: configStore.storageRootPath)
+            )
+            let result = await engine.validate(account: account)
+            providerSetupChecks[account.id] = result
+            return result
+        } catch {
+            let result = ProviderSetupResult(
+                provider: .gitea,
+                accountID: account.id,
+                serverVersion: nil,
+                issues: [.invalidConfiguration(error.localizedDescription)]
+            )
+            providerSetupChecks[account.id] = result
+            return result
+        }
+    }
+
     func runGitHubSetupCheck(for org: Organization) async {
         let engine = GitHubEngine(
             keychainService: configStore.keychainService,
@@ -539,7 +593,7 @@ final class SettingsViewModel {
 
     func runGitHubSetupChecks(using engine: GitHubEngine) async -> [GitHubSetupCheckResult] {
         var results: [GitHubSetupCheckResult] = []
-        for org in configStore.organizations where org.isEnabled {
+        for org in configStore.organizations where org.isEnabled && org.provider == .github {
             results.append(await runGitHubSetupCheck(for: org, using: engine))
         }
         return results

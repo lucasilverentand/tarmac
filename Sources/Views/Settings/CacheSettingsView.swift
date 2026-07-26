@@ -5,7 +5,16 @@ struct CacheSettingsView: View {
     var onVMControlConfigurationChanged: (() -> Void)?
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 0) {
+            DashboardPageHeader(
+                title: "Cache & Diagnostics",
+                subtitle: "Performance, warm-worker, local API, and diagnostic retention policies."
+            )
+            .padding(.horizontal, 22)
+            .padding(.top, 22)
+            .padding(.bottom, 8)
+
+            Form {
             Section("Actions Cache") {
                 Toggle("Enable persistent cache", isOn: $viewModel.cacheConfig.isEnabled)
 
@@ -80,7 +89,7 @@ struct CacheSettingsView: View {
             }
 
             Section("Warm Runner") {
-                Toggle("Keep VM running between jobs", isOn: $viewModel.warmRunnerConfig.isEnabled)
+                Toggle("Prewarm and keep one VM ready", isOn: $viewModel.warmRunnerConfig.isEnabled)
 
                 if viewModel.warmRunnerConfig.isEnabled {
                     Stepper(
@@ -97,7 +106,7 @@ struct CacheSettingsView: View {
                     )
 
                     Text(
-                        "When enabled, Tarmac reuses the same booted VM for back-to-back jobs instead of cloning and booting a fresh VM each time. The guest runner waits in the warm directory at \(GuestBootstrapContract.sharedMountPoint) for the next job."
+                        "Tarmac boots a VM when polling starts, then injects the GitHub runner and job-specific credentials when work arrives. Completed jobs reuse the same VM until its idle timeout or recycle limit is reached."
                     )
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -168,8 +177,9 @@ struct CacheSettingsView: View {
                     step: 64
                 )
             }
+            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
         .onChange(of: viewModel.vmControlConfiguration.isEnabled) { _, _ in
             onVMControlConfigurationChanged?()
         }

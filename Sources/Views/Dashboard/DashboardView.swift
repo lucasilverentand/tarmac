@@ -11,7 +11,7 @@ struct DashboardView: View {
                     AppSidebar(selection: $appState.selectedSection)
                         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
                 } detail: {
-                    detailView
+                    DashboardDetailView(appState: appState)
                         .navigationTitle(appState.selectedSection.displayName)
                 }
                 .navigationSplitViewStyle(.balanced)
@@ -23,23 +23,22 @@ struct DashboardView: View {
         }
     }
 
-    @ViewBuilder
-    private var detailView: some View {
+}
+
+private struct DashboardDetailView: View {
+    let appState: AppState
+
+    var body: some View {
         switch appState.selectedSection {
         case .queue:
-            JobQueueView(queueViewModel: appState.queueViewModel)
-        case .virtualMachine:
-            ScrollView {
-                VMStatusCard(
-                    vmStatusViewModel: appState.vmStatusViewModel,
-                    configStore: appState.configStore,
-                    settingsViewModel: appState.settingsViewModel,
-                    onWizardDismiss: {
-                        appState.refreshReadiness()
-                        Task { await appState.start() }
-                    }
-                )
-            }
+            JobQueueView(
+                queueViewModel: appState.queueViewModel,
+                onOpenAccounts: {
+                    appState.selectedSection = .organizations
+                }
+            )
+        case .workers:
+            WorkersView(appState: appState)
         case .organizations:
             OrganizationListView(viewModel: appState.settingsViewModel)
         case .cache:
@@ -51,27 +50,6 @@ struct DashboardView: View {
             )
         case .storage:
             StorageSettingsView(viewModel: appState.settingsViewModel)
-        }
-    }
-}
-
-extension View {
-    @ViewBuilder
-    func dashboardGlassSurface(tint: Color? = nil, interactive: Bool = false) -> some View {
-        if #available(macOS 26.0, *) {
-            self.glassEffect(
-                Glass.regular
-                    .tint(tint)
-                    .interactive(interactive),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
-        } else {
-            self
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(.quaternary)
-                }
         }
     }
 }

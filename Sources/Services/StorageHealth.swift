@@ -136,7 +136,8 @@ extension StorageManager {
 
     func evaluateHealth(
         minimumFreeBytes: Int64? = minimumSetupFreeBytes,
-        lowCapacitySeverity: StorageHealthIssueSeverity = .warning
+        lowCapacitySeverity: StorageHealthIssueSeverity = .warning,
+        performCloneProbe: Bool = true
     ) -> StorageHealth {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
@@ -189,13 +190,17 @@ extension StorageManager {
         }
 
         let cloneBehavior: StorageCloneBehavior
-        if reachable && isDirectory.boolValue {
+        if reachable && isDirectory.boolValue && performCloneProbe {
             cloneBehavior = probeCloneBehavior()
         } else {
-            cloneBehavior = .fullCopyFallback(reason: "Storage root is not reachable.")
+            cloneBehavior = .fullCopyFallback(
+                reason: reachable && isDirectory.boolValue
+                    ? "APFS clone behavior has not been checked yet."
+                    : "Storage root is not reachable."
+            )
         }
 
-        if case .fullCopyFallback(let reason) = cloneBehavior {
+        if performCloneProbe, case .fullCopyFallback(let reason) = cloneBehavior {
             issues.append(.warning("APFS clone probe failed; VM disks would use full-copy fallback. \(reason)"))
         }
 

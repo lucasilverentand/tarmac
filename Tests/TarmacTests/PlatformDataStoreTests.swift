@@ -88,4 +88,19 @@ struct PlatformDataStoreTests {
             )
         )
     }
+
+    @Test("Auxiliary storage can be overridden for an ephemeral VM clone")
+    func auxiliaryStorageCanBeOverridden() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let baseStore = PlatformDataStore(directory: tempDir)
+        let cloneURL = tempDir.appendingPathComponent("runner.auxiliaryStorage")
+        let cloneStore = baseStore.usingAuxiliaryStorage(at: cloneURL)
+
+        #expect(baseStore.auxiliaryStoragePath != cloneStore.auxiliaryStoragePath)
+        #expect(cloneStore.auxiliaryStoragePath == cloneURL)
+        #expect(cloneStore.hardwareModelPath == baseStore.hardwareModelPath)
+        #expect(cloneStore.machineIdentifierPath == baseStore.machineIdentifierPath)
+    }
 }

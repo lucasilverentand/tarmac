@@ -79,6 +79,26 @@ final class ConfigStore {
         saveOrganizations()
     }
 
+    /// Migrates a single legacy Apple runner image into the approved stable/beta pool matrix.
+    /// The existing image and scale-set assignment remain enabled; the missing counterpart
+    /// is persisted as disabled until its image and GitHub scale set are configured.
+    @discardableResult
+    func configureApprovedAppleReleasePoolsIfNeeded() -> Bool {
+        var changed = false
+        for index in organizations.indices where organizations[index].isEnabled {
+            guard organizations[index].runnerPools.isEmpty else { continue }
+            organizations[index].runnerPools = RunnerPoolConfiguration.approvedAppleReleaseMatrix(
+                account: organizations[index],
+                storageRootPath: storageRootPath,
+                defaultBaseImagePath: resolvedBaseImagePath,
+                defaultVMConfiguration: vmConfiguration
+            )
+            changed = true
+        }
+        if changed { saveOrganizations() }
+        return changed
+    }
+
     // MARK: - Per-Org Private Keys
 
     func savePrivateKey(_ pemData: Data, for org: Organization) -> Bool {
@@ -332,10 +352,17 @@ final class ConfigStore {
     }
 
     private func load() {
-        if let data = defaults.data(forKey: "organizations"),
+        if let data = defaults.data(forKey: "runnerAccounts"),
             let orgs = try? JSONDecoder().decode([Organization].self, from: data)
         {
             organizations = orgs
+        } else if let data = defaults.data(forKey: "organizations"),
+            let legacyOrganizations = try? JSONDecoder().decode([Organization].self, from: data)
+        {
+            // Organization's decoder supplies GitHub provider defaults while
+            // preserving the UUID used by existing Keychain records.
+            organizations = legacyOrganizations
+            saveOrganizations()
         }
         if let data = defaults.data(forKey: "appleSigningAssets"),
             let assets = try? JSONDecoder().decode([AppleSigningAsset].self, from: data)
@@ -397,7 +424,7 @@ final class ConfigStore {
 
     private func saveOrganizations() {
         if let data = try? JSONEncoder().encode(organizations) {
-            defaults.set(data, forKey: "organizations")
+            defaults.set(data, forKey: "runnerAccounts")
         }
     }
 

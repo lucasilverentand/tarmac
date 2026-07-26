@@ -130,6 +130,22 @@ struct StorageManagerTests {
         #expect(!FileManager.default.fileExists(atPath: storage.guestBootstrapVerifiedMarkerURL.path))
     }
 
+    @Test("legacy guest bootstrap marker does not satisfy current session contract")
+    func legacyGuestBootstrapMarkerIsNotVerified() throws {
+        let root = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(root) }
+
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+        try #"{"verifiedAt":"2026-01-01T00:00:00Z"}"#.write(
+            to: storage.guestBootstrapVerifiedMarkerURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        #expect(!storage.isGuestBootstrapVerified())
+    }
+
     @Test("resetBaseImage removes image and platform data but preserves retained installer")
     func resetBaseImagePreservesRetainedInstaller() throws {
         let root = try TestFactories.makeTempDir()
@@ -204,10 +220,12 @@ struct StorageManagerTests {
         try storage.prepareBaseDirectories()
 
         let activeDisk = storage.disksDirectory.appendingPathComponent("active.img")
+        let activeAuxiliaryStorage = StorageManager.auxiliaryStorageURL(forDisk: activeDisk)
         let orphanedDisk = storage.disksDirectory.appendingPathComponent("orphaned.img")
         let activeJobDir = storage.jobsDirectory.appendingPathComponent("100", isDirectory: true)
         let orphanedJobDir = storage.jobsDirectory.appendingPathComponent("101", isDirectory: true)
         try Data([0x01]).write(to: activeDisk)
+        try Data([0x03]).write(to: activeAuxiliaryStorage)
         try Data([0x02]).write(to: orphanedDisk)
         try FileManager.default.createDirectory(at: activeJobDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: orphanedJobDir, withIntermediateDirectories: true)
@@ -230,8 +248,37 @@ struct StorageManagerTests {
         #expect(result.removedDisks == 1)
         #expect(result.removedJobDirectories == 1)
         #expect(FileManager.default.fileExists(atPath: activeDisk.path))
+        #expect(FileManager.default.fileExists(atPath: activeAuxiliaryStorage.path))
         #expect(!FileManager.default.fileExists(atPath: orphanedDisk.path))
         #expect(FileManager.default.fileExists(atPath: activeJobDir.path))
+        #expect(!FileManager.default.fileExists(atPath: orphanedJobDir.path))
+    }
+
+    @Test("cleanupOrphanedJobArtifacts removes guest metadata without owner read access")
+    func cleanupOrphanedJobArtifactsRemovesProtectedGuestMetadata() throws {
+        let root = try TestFactories.makeTempDir()
+        let storage = StorageManager(rootDirectory: root)
+        try storage.prepareBaseDirectories()
+
+        let orphanedJobDir = storage.jobsDirectory.appendingPathComponent("_warm", isDirectory: true)
+        let guestMetadata = orphanedJobDir.appendingPathComponent(".Trashes", isDirectory: true)
+        try FileManager.default.createDirectory(at: guestMetadata, withIntermediateDirectories: true)
+        try Data([0x01]).write(to: guestMetadata.appendingPathComponent("guest-item"))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o311],
+            ofItemAtPath: guestMetadata.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: guestMetadata.path
+            )
+            TestFactories.cleanup(root)
+        }
+
+        let result = try storage.cleanupOrphanedJobArtifacts(activeLeases: [])
+
+        #expect(result.removedJobDirectories == 1)
         #expect(!FileManager.default.fileExists(atPath: orphanedJobDir.path))
     }
 

@@ -156,7 +156,7 @@ struct RunnerHostReadiness: Equatable, Sendable {
                     .init(
                         category: .vm,
                         message:
-                            "Install the guest bootstrap in the base image, then rerun verification before starting jobs."
+                            "Install the current guest bootstrap with automatic login in the base image, then rerun verification before starting jobs."
                     )
                 )
             }
@@ -197,13 +197,13 @@ struct RunnerHostReadiness: Equatable, Sendable {
         configStore: ConfigStore
     ) {
         if configStore.organizations.isEmpty {
-            issues.append(.init(category: .github, message: "Add a GitHub runner account."))
+            issues.append(.init(category: .github, message: "Add an Actions provider account."))
             return
         }
 
         let enabled = configStore.organizations.filter(\.isEnabled)
         if enabled.isEmpty {
-            issues.append(.init(category: .github, message: "Enable at least one GitHub runner account."))
+            issues.append(.init(category: .github, message: "Enable at least one Actions provider account."))
             return
         }
 
@@ -216,7 +216,7 @@ struct RunnerHostReadiness: Equatable, Sendable {
             if org.requiresGitHubAppCredentials && org.appId.isEmpty {
                 issues.append(.init(category: .github, message: "\(org.name): GitHub App ID is not configured."))
             }
-            if org.scaleSetId == nil && !org.usesRepositoryWorkflowPolling {
+            if org.provider == .github && org.scaleSetId == nil && !org.usesRepositoryWorkflowPolling {
                 issues.append(
                     .init(
                         category: .github,
@@ -235,7 +235,7 @@ struct RunnerHostReadiness: Equatable, Sendable {
                 issues.append(
                     .init(
                         category: .github,
-                        message: "\(org.name): Runner access token is not configured."
+                        message: "\(org.name): \(org.provider.displayName) API or runner access token is not configured."
                     )
                 )
             }

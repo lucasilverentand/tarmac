@@ -15,6 +15,8 @@ final class VMEngine: VMManagerProtocol {
     private var diagnosticsStore: DiagnosticsBundleStore
 
     private(set) var currentInstance: VMInstance?
+    private(set) var currentVMConfiguration: VMConfiguration?
+    private(set) var currentSharedDirectory: URL?
     private(set) var warmRunnerState: WarmRunnerState?
     private(set) var verificationState: BaseImageVerificationState = .notStarted
     private var cacheConfig: CacheConfiguration
@@ -93,7 +95,7 @@ final class VMEngine: VMManagerProtocol {
         try? storage.clearBaseImageVerified()
         verificationState = .notStarted
 
-        try await imageManager.installMacOS(
+        _ = try await imageManager.installMacOS(
             ipsw: ipsw,
             diskPath: baseImageURL,
             config: config,
@@ -108,7 +110,7 @@ final class VMEngine: VMManagerProtocol {
     func verifyBaseImage(
         config: VMConfiguration,
         holdSeconds: TimeInterval = 10,
-        bootstrapProbeTimeoutSeconds: Int = 30
+        bootstrapProbeTimeoutSeconds: Int = 120
     ) async throws {
         guard baseImageExists else {
             throw VMEngineError.baseImageMissing
@@ -124,18 +126,25 @@ final class VMEngine: VMManagerProtocol {
             .appendingPathComponent("verify-\(verificationId.uuidString).img")
         let sharedDirectory = storage.jobsDirectory
             .appendingPathComponent("verify-\(verificationId.uuidString)", isDirectory: true)
+        let clonedAuxiliaryStoragePath = StorageManager.auxiliaryStorageURL(forDisk: clonePath)
+        let verificationPlatformStore: PlatformDataStore
+
+        defer {
+            try? diskManager.deleteDisk(at: clonePath)
+            try? diskManager.deleteDisk(at: clonedAuxiliaryStoragePath)
+            try? ManagedArtifactRemover.removeItem(at: sharedDirectory)
+        }
 
         do {
             let cloneMetrics = try diskManager.cloneDisk(from: baseImageURL, to: clonePath)
             logCloneFallbackIfNeeded(cloneMetrics, context: "base image verification")
+            verificationPlatformStore = try clonePlatformStore(
+                forDisk: clonePath,
+                context: "base image verification"
+            )
         } catch {
             verificationState = .failed(message: "Could not clone base image: \(error.localizedDescription)")
             throw VMEngineError.verificationFailed(reason: error.localizedDescription)
-        }
-
-        defer {
-            try? diskManager.deleteDisk(at: clonePath)
-            try? FileManager.default.removeItem(at: sharedDirectory)
         }
 
         do {
@@ -143,7 +152,7 @@ final class VMEngine: VMManagerProtocol {
             try await lifecycle.bootVM(
                 vmConfig: config,
                 diskPath: clonePath,
-                platformStore: platformStore,
+                platformStore: verificationPlatformStore,
                 sharedDirectoryURL: sharedDirectory,
                 cacheDirectoryURL: nil
             )
@@ -161,6 +170,14 @@ final class VMEngine: VMManagerProtocol {
             )
             if case .failure(let reason) = result {
                 throw VMEngineError.verificationFailed(reason: "Guest bootstrap probe failed: \(reason)")
+            }
+            let interactiveSessionMarker = sharedDirectory.appendingPathComponent(
+                GuestBootstrapContract.interactiveSessionReadyFileName
+            )
+            guard FileManager.default.fileExists(atPath: interactiveSessionMarker.path) else {
+                throw VMEngineError.verificationFailed(
+                    reason: "Guest bootstrap did not confirm an active tarmac desktop session"
+                )
             }
         } catch {
             try? await lifecycle.stopVM()
@@ -213,15 +230,20 @@ final class VMEngine: VMManagerProtocol {
             .appendingPathComponent("inventory-\(scanId.uuidString).img")
         let sharedDirectory = storage.jobsDirectory
             .appendingPathComponent("inventory-\(scanId.uuidString)", isDirectory: true)
+        let clonedAuxiliaryStoragePath = StorageManager.auxiliaryStorageURL(forDisk: clonePath)
 
         do {
             let cloneMetrics = try diskManager.cloneDisk(from: sourceImageURL, to: clonePath)
             logCloneFallbackIfNeeded(cloneMetrics, context: "runner image inventory scan")
+            let inventoryPlatformStore = try clonePlatformStore(
+                forDisk: clonePath,
+                context: "runner image inventory scan"
+            )
             try prepareInventorySharedDirectory(sharedDirectory)
             try await lifecycle.bootVM(
                 vmConfig: config,
                 diskPath: clonePath,
-                platformStore: platformStore,
+                platformStore: inventoryPlatformStore,
                 sharedDirectoryURL: sharedDirectory,
                 cacheDirectoryURL: nil
             )
@@ -242,12 +264,14 @@ final class VMEngine: VMManagerProtocol {
             let contents = try String(contentsOf: inventoryURL, encoding: .utf8)
             try? await stopVM()
             try? diskManager.deleteDisk(at: clonePath)
-            try? FileManager.default.removeItem(at: sharedDirectory)
+            try? diskManager.deleteDisk(at: clonedAuxiliaryStoragePath)
+            try? ManagedArtifactRemover.removeItem(at: sharedDirectory)
             return RunnerImageInventoryReport.parse(contents)
         } catch {
             try? await stopVM()
             try? diskManager.deleteDisk(at: clonePath)
-            try? FileManager.default.removeItem(at: sharedDirectory)
+            try? diskManager.deleteDisk(at: clonedAuxiliaryStoragePath)
+            try? ManagedArtifactRemover.removeItem(at: sharedDirectory)
             throw error
         }
     }
@@ -273,6 +297,22 @@ final class VMEngine: VMManagerProtocol {
         sharedDirectory: URL,
         baseImagePath overrideBaseImagePath: String?
     ) async throws -> VMInstance {
+        try await bootVM(
+            jobId: jobId,
+            config: config,
+            sharedDirectory: sharedDirectory,
+            baseImagePath: overrideBaseImagePath,
+            context: "job \(jobId) boot"
+        )
+    }
+
+    private func bootVM(
+        jobId: Int64?,
+        config: VMConfiguration,
+        sharedDirectory: URL,
+        baseImagePath overrideBaseImagePath: String?,
+        context: String
+    ) async throws -> VMInstance {
         let sourceImageURL = baseImageURL(for: overrideBaseImagePath)
         guard FileManager.default.fileExists(atPath: sourceImageURL.path) else {
             throw VMEngineError.baseImageMissing
@@ -285,11 +325,13 @@ final class VMEngine: VMManagerProtocol {
         let clonedDiskPath = storage.disksDirectory
             .appendingPathComponent("\(instanceId.uuidString).img")
 
-        updateDiagnosticsContext(jobId: jobId) { context in
-            context.vmInstanceId = instanceId
-            context.diskImagePath = clonedDiskPath
-            if context.startedAt == nil {
-                context.startedAt = Date()
+        if let jobId {
+            updateDiagnosticsContext(jobId: jobId) { context in
+                context.vmInstanceId = instanceId
+                context.diskImagePath = clonedDiskPath
+                if context.startedAt == nil {
+                    context.startedAt = Date()
+                }
             }
         }
         appendHostLifecycle(
@@ -305,14 +347,17 @@ final class VMEngine: VMManagerProtocol {
             startedAt: Date(),
             state: .booting
         )
+        currentVMConfiguration = config
+        currentSharedDirectory = sharedDirectory
 
         do {
-            _ = try ensureStorageReadyForBoot(config: config, context: "job \(jobId) boot")
+            _ = try ensureStorageReadyForBoot(config: config, context: context)
 
             let cloneMetrics = try diskManager.cloneDisk(from: sourceImageURL, to: clonedDiskPath)
-            logCloneFallbackIfNeeded(cloneMetrics, context: "job \(jobId) boot")
+            logCloneFallbackIfNeeded(cloneMetrics, context: context)
+            let clonedPlatformStore = try clonePlatformStore(forDisk: clonedDiskPath, context: context)
             appendHostLifecycle(
-                "Cloned base disk \(sourceImageURL.lastPathComponent) to \(clonedDiskPath.lastPathComponent)",
+                "Cloned base disk and auxiliary storage for \(clonedDiskPath.lastPathComponent)",
                 jobId: jobId,
                 sharedDirectory: sharedDirectory
             )
@@ -335,7 +380,7 @@ final class VMEngine: VMManagerProtocol {
             try await lifecycle.bootVM(
                 vmConfig: config,
                 diskPath: clonedDiskPath,
-                platformStore: platformStore,
+                platformStore: clonedPlatformStore,
                 sharedDirectoryURL: sharedDirectory,
                 cacheDirectoryURL: cacheDirectoryURL
             )
@@ -347,25 +392,35 @@ final class VMEngine: VMManagerProtocol {
                 jobId: jobId,
                 sharedDirectory: sharedDirectory
             )
-            preserveDiagnosticsIfNeeded(
-                jobId: jobId,
-                sharedDirectory: sharedDirectory,
-                outcome: .failed(reason: "VM boot failed: \(error.localizedDescription)")
-            )
+            if let jobId {
+                preserveDiagnosticsIfNeeded(
+                    jobId: jobId,
+                    sharedDirectory: sharedDirectory,
+                    outcome: .failed(reason: "VM boot failed: \(error.localizedDescription)")
+                )
+            }
             try? diskManager.deleteDisk(at: clonedDiskPath)
-            Log.vm.error("VM boot failed for job \(jobId): \(error.localizedDescription)")
+            try? diskManager.deleteDisk(at: StorageManager.auxiliaryStorageURL(forDisk: clonedDiskPath))
+            Log.vm.error("VM boot failed during \(context, privacy: .public): \(error.localizedDescription)")
             throw error
         }
 
         instance.state = .running
         currentInstance = instance
-        VMDisplaySource.shared.updateMetadata(
-            label: "Job \(jobId) runner",
-            detail: "Running job \(jobId)"
-        )
+        if let jobId {
+            VMDisplaySource.shared.updateMetadata(
+                label: "Job \(jobId) runner",
+                detail: "Running job \(jobId)"
+            )
+        } else {
+            VMDisplaySource.shared.updateMetadata(
+                label: "Warm runner starting",
+                detail: "Waiting for the guest to become ready"
+            )
+        }
 
         appendHostLifecycle("VM booted and is running", jobId: jobId, sharedDirectory: sharedDirectory)
-        Log.vm.info("VM running for job \(jobId)")
+        Log.vm.info("VM running after \(context, privacy: .public)")
         return instance
     }
 
@@ -377,6 +432,65 @@ final class VMEngine: VMManagerProtocol {
         currentInstance?.state = .stopped
 
         Log.vm.info("VM stopped")
+    }
+
+    // MARK: - Warm Runner Lifecycle
+
+    @discardableResult
+    func prewarm(
+        config: VMConfiguration,
+        baseImagePath overrideBaseImagePath: String? = nil,
+        readinessTimeoutSeconds: Int = 180
+    ) async throws -> VMInstance {
+        guard warmRunnerConfig.isEnabled else {
+            throw VMEngineError.warmRunnerDisabled
+        }
+        guard currentInstance == nil else {
+            if let currentInstance, hasWarmRunner {
+                return currentInstance
+            }
+            throw VMEngineError.vmAlreadyRunning
+        }
+
+        let sharedDirectory = try sharedDirManager.prepareWarmRunner()
+        let sourceImagePath = baseImageURL(for: overrideBaseImagePath).path
+
+        do {
+            let instance = try await bootVM(
+                jobId: nil,
+                config: config,
+                sharedDirectory: sharedDirectory,
+                baseImagePath: overrideBaseImagePath,
+                context: "warm runner prewarm"
+            )
+            warmRunnerState = WarmRunnerState(
+                instanceId: instance.id,
+                sharedDirectory: sharedDirectory,
+                vmConfiguration: config,
+                baseImagePath: sourceImagePath,
+                jobsServed: 0,
+                lastJobId: nil,
+                lastActivityAt: Date()
+            )
+
+            try await waitForWarmRunnerReadiness(
+                in: sharedDirectory,
+                timeoutSeconds: readinessTimeoutSeconds
+            )
+
+            VMDisplaySource.shared.updateMetadata(
+                label: "Warm runner idle",
+                detail: "Prewarmed and waiting for a job"
+            )
+            Log.vm.info("Warm runner prewarmed and ready")
+            return instance
+        } catch {
+            if currentInstance != nil || lifecycle.isBooted {
+                try? await teardown(policy: .full)
+            }
+            try? ManagedArtifactRemover.removeItem(at: sharedDirectory)
+            throw error
+        }
     }
 
     // MARK: - Full Job Flow
@@ -493,6 +607,7 @@ final class VMEngine: VMManagerProtocol {
         let diskPath = currentInstance?.diskImagePath
         let jobId = currentInstance?.jobId
         let jobSharedDirectory = jobId.map { self.sharedDirectory(forJobId: $0) }
+        let warmDirectory = warmRunnerState?.sharedDirectory
 
         if policy == .keepWarmRunner, warmRunnerConfig.isEnabled, warmRunnerState != nil {
             if let jobId, let jobSharedDirectory {
@@ -518,7 +633,7 @@ final class VMEngine: VMManagerProtocol {
             return
         }
 
-        if let warmDirectory = warmRunnerState?.sharedDirectory {
+        if let warmDirectory {
             try? sharedDirManager.requestWarmShutdown(in: warmDirectory)
         }
 
@@ -559,19 +674,102 @@ final class VMEngine: VMManagerProtocol {
 
         if let diskPath {
             try diskManager.deleteDisk(at: diskPath)
+            try diskManager.deleteDisk(at: StorageManager.auxiliaryStorageURL(forDisk: diskPath))
         }
 
         if let jobId, warmRunnerState == nil {
             try sharedDirManager.cleanupJob(jobId: jobId)
         }
+        if let warmDirectory, FileManager.default.fileExists(atPath: warmDirectory.path) {
+            try ManagedArtifactRemover.removeItem(at: warmDirectory)
+        }
 
         currentInstance = nil
+        currentVMConfiguration = nil
+        currentSharedDirectory = nil
         warmRunnerState = nil
         Log.vm.info("VM teardown complete")
     }
 
     func releaseWarmRunner() async throws {
         try await teardown(policy: .full)
+    }
+
+    func restartWarmRunner() async throws {
+        guard let warmState = warmRunnerState,
+            let existingInstance = currentInstance,
+            existingInstance.id == warmState.instanceId
+        else {
+            throw VMEngineError.warmRunnerUnavailable
+        }
+
+        let jobId = existingInstance.jobId
+        appendHostLifecycle(
+            "Idle warm runner restart requested",
+            jobId: jobId,
+            sharedDirectory: warmState.sharedDirectory
+        )
+
+        if lifecycle.isBooted {
+            do {
+                try await stopVM()
+            } catch {
+                currentInstance?.state = lifecycle.isBooted ? .running : .failed
+                throw error
+            }
+        }
+
+        var restartedInstance = VMInstance(
+            id: existingInstance.id,
+            jobId: jobId,
+            diskImagePath: existingInstance.diskImagePath,
+            startedAt: Date(),
+            state: .booting
+        )
+        currentInstance = restartedInstance
+
+        do {
+            var cacheDirectoryURL: URL?
+            if cacheConfig.isEnabled {
+                try cacheManager.prepare()
+                try cacheManager.evict(retentionDays: cacheConfig.retentionDays)
+                try cacheManager.enforceMaxSize(maxSizeGB: cacheConfig.maxSizeGB)
+                cacheDirectoryURL = cacheManager.baseDirectory
+            }
+
+            try await lifecycle.bootVM(
+                vmConfig: warmState.vmConfiguration,
+                diskPath: existingInstance.diskImagePath,
+                platformStore: platformStore.usingAuxiliaryStorage(
+                    at: StorageManager.auxiliaryStorageURL(forDisk: existingInstance.diskImagePath)
+                ),
+                sharedDirectoryURL: warmState.sharedDirectory,
+                cacheDirectoryURL: cacheDirectoryURL
+            )
+        } catch {
+            restartedInstance.state = .failed
+            currentInstance = restartedInstance
+            appendHostLifecycle(
+                "Idle warm runner restart failed: \(error.localizedDescription)",
+                jobId: jobId,
+                sharedDirectory: warmState.sharedDirectory
+            )
+            throw error
+        }
+
+        restartedInstance.state = .running
+        currentInstance = restartedInstance
+        warmRunnerState?.lastActivityAt = Date()
+        VMDisplaySource.shared.updateMetadata(
+            label: "Warm runner idle",
+            detail: "Restarted, waiting for reuse"
+        )
+        appendHostLifecycle(
+            "Idle warm runner restarted and is waiting for reuse",
+            jobId: jobId,
+            sharedDirectory: warmState.sharedDirectory
+        )
+        Log.vm.info("Idle warm runner restarted")
     }
 
     // MARK: - Cache
@@ -598,6 +796,29 @@ final class VMEngine: VMManagerProtocol {
 
     func cacheSizeBytes() throws -> Int64 {
         try cacheManager.currentSizeBytes()
+    }
+
+    func currentResourceUsage() -> WorkerResourceUsage? {
+        guard let currentSharedDirectory else { return nil }
+        let resourceURL = currentSharedDirectory.appendingPathComponent(
+            GuestBootstrapContract.workerResourceUsageFileName
+        )
+        guard let data = try? Data(contentsOf: resourceURL) else { return nil }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(WorkerResourceUsage.self, from: data)
+    }
+
+    func currentDiskImageAllocatedSizeBytes() -> Int64? {
+        guard let diskImagePath = currentInstance?.diskImagePath else { return nil }
+        let values = try? diskImagePath.resourceValues(
+            forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+        )
+        guard let allocatedSize = values?.totalFileAllocatedSize ?? values?.fileAllocatedSize else {
+            return nil
+        }
+        return Int64(allocatedSize)
     }
 
     // MARK: - Storage Readiness
@@ -642,6 +863,16 @@ final class VMEngine: VMManagerProtocol {
         return Int64(config.diskSizeGB) * gib
     }
 
+    private func clonePlatformStore(forDisk diskPath: URL, context: String) throws -> PlatformDataStore {
+        let destination = StorageManager.auxiliaryStorageURL(forDisk: diskPath)
+        let cloneMetrics = try diskManager.cloneDisk(
+            from: platformStore.auxiliaryStoragePath,
+            to: destination
+        )
+        logCloneFallbackIfNeeded(cloneMetrics, context: "\(context) auxiliary storage")
+        return platformStore.usingAuxiliaryStorage(at: destination)
+    }
+
     private func logCloneFallbackIfNeeded(_ metrics: DiskCloneResult, context: String) {
         if case .fullCopyFallback(let errno) = metrics.method {
             Log.vm.warning(
@@ -659,9 +890,13 @@ final class VMEngine: VMManagerProtocol {
         diagnosticsContexts[jobId] = context
     }
 
-    private func appendHostLifecycle(_ message: String, jobId: Int64, sharedDirectory: URL) {
+    private func appendHostLifecycle(_ message: String, jobId: Int64?, sharedDirectory: URL) {
         diagnosticsStore.appendHostLifecycleEvent(message, to: sharedDirectory)
-        Log.vm.debug("Job \(jobId) diagnostic: \(message, privacy: .public)")
+        if let jobId {
+            Log.vm.debug("Job \(jobId) diagnostic: \(message, privacy: .public)")
+        } else {
+            Log.vm.debug("Warm runner diagnostic: \(message, privacy: .public)")
+        }
     }
 
     private func preserveDiagnosticsIfNeeded(
@@ -736,6 +971,47 @@ final class VMEngine: VMManagerProtocol {
         return true
     }
 
+    private func waitForWarmRunnerReadiness(
+        in sharedDirectory: URL,
+        timeoutSeconds: Int
+    ) async throws {
+        let readyURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.warmReadyFileName)
+        let completionURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.completionMarkerFileName)
+        let bootstrapLogURL = sharedDirectory.appendingPathComponent(GuestBootstrapContract.bootstrapLogFileName)
+        let deadline = Date().addingTimeInterval(TimeInterval(max(1, timeoutSeconds)))
+
+        while Date() < deadline {
+            try Task.checkCancellation()
+
+            if FileManager.default.fileExists(atPath: readyURL.path) {
+                return
+            }
+
+            let bootstrapLog = (try? String(contentsOf: bootstrapLogURL, encoding: .utf8)) ?? ""
+            if bootstrapLog.contains("Warm runner mode enabled") {
+                return
+            }
+
+            if FileManager.default.fileExists(atPath: completionURL.path) {
+                throw VMEngineError.warmRunnerExitedBeforeReady(reason: bootstrapLogTail(bootstrapLog))
+            }
+
+            if !lifecycle.isBooted {
+                throw VMEngineError.warmRunnerExitedBeforeReady(reason: bootstrapLogTail(bootstrapLog))
+            }
+
+            try await Task.sleep(for: .milliseconds(500))
+        }
+
+        throw VMEngineError.warmRunnerReadinessTimedOut(seconds: max(1, timeoutSeconds))
+    }
+
+    private func bootstrapLogTail(_ contents: String) -> String {
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: true)
+        let tail = lines.suffix(4).joined(separator: " | ")
+        return tail.isEmpty ? "The guest stopped without reporting warm-runner readiness." : tail
+    }
+
     private func provisionWarmRunner(
         job: RunnerJob,
         config: VMConfiguration,
@@ -770,7 +1046,8 @@ final class VMEngine: VMManagerProtocol {
                 sharedDirectory: sharedDir,
                 vmConfiguration: config,
                 baseImagePath: baseImageURL(for: overrideBaseImagePath).path,
-                jobsServed: 0,
+                jobsServed: 1,
+                lastJobId: job.id,
                 lastActivityAt: Date()
             )
             VMDisplaySource.shared.updateMetadata(
@@ -781,7 +1058,7 @@ final class VMEngine: VMManagerProtocol {
             appendHostLifecycle("Signaled warm runner job ready", jobId: job.id, sharedDirectory: sharedDir)
             return instance
         } catch {
-            try? FileManager.default.removeItem(at: sharedDir)
+            try? ManagedArtifactRemover.removeItem(at: sharedDir)
             warmRunnerState = nil
             throw error
         }
@@ -814,7 +1091,9 @@ final class VMEngine: VMManagerProtocol {
         instance.jobId = job.id
         instance.state = .running
         currentInstance = instance
+        currentSharedDirectory = sharedDir
         warmRunnerState?.jobsServed += 1
+        warmRunnerState?.lastJobId = job.id
         warmRunnerState?.lastActivityAt = Date()
         warmRunnerState?.sharedDirectory = sharedDir
         VMDisplaySource.shared.updateMetadata(
@@ -830,7 +1109,7 @@ final class VMEngine: VMManagerProtocol {
     private func prepareInventorySharedDirectory(_ sharedDirectory: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: sharedDirectory.path) {
-            try fm.removeItem(at: sharedDirectory)
+            try ManagedArtifactRemover.removeItem(at: sharedDirectory, fileManager: fm)
         }
         try fm.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
         try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: sharedDirectory.path)
@@ -851,7 +1130,7 @@ final class VMEngine: VMManagerProtocol {
     private func prepareBootstrapProbeSharedDirectory(_ sharedDirectory: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: sharedDirectory.path) {
-            try fm.removeItem(at: sharedDirectory)
+            try ManagedArtifactRemover.removeItem(at: sharedDirectory, fileManager: fm)
         }
         try fm.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
         try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: sharedDirectory.path)
@@ -925,6 +1204,10 @@ enum VMEngineError: LocalizedError {
     case unsuitableStorage(reason: String)
     case imageInventoryScanFailed(reason: String)
     case warmRunnerUnavailable
+    case warmRunnerDisabled
+    case vmAlreadyRunning
+    case warmRunnerReadinessTimedOut(seconds: Int)
+    case warmRunnerExitedBeforeReady(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -940,6 +1223,14 @@ enum VMEngineError: LocalizedError {
             "Runner image inventory scan failed: \(reason)"
         case .warmRunnerUnavailable:
             "Warm runner VM is not available for reuse"
+        case .warmRunnerDisabled:
+            "Warm runner prewarming is disabled"
+        case .vmAlreadyRunning:
+            "A VM is already running"
+        case .warmRunnerReadinessTimedOut(let seconds):
+            "Warm runner did not become ready within \(seconds) seconds"
+        case .warmRunnerExitedBeforeReady(let reason):
+            "Warm runner stopped before it became ready: \(reason)"
         }
     }
 }
@@ -955,6 +1246,7 @@ struct WarmRunnerState: Equatable, Sendable {
     let vmConfiguration: VMConfiguration
     let baseImagePath: String
     var jobsServed: Int
+    var lastJobId: Int64?
     var lastActivityAt: Date
 }
 
