@@ -34,6 +34,68 @@ struct ConfigStoreTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    @Test("Legacy organizations migrate to provider accounts without changing Keychain identity")
+    func legacyOrganizationsMigrate() throws {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let id = UUID()
+        let legacyJSON = """
+            [{
+              "id": "\(id.uuidString)",
+              "name": "legacy-org",
+              "accountType": "organization",
+              "credentialMode": "githubApp",
+              "appId": "123",
+              "installationId": 456,
+              "labels": ["self-hosted", "macOS", "ARM64"]
+            }]
+            """
+        defaults.set(Data(legacyJSON.utf8), forKey: "organizations")
+
+        let store = ConfigStore(defaults: defaults, keychainService: keychain)
+        let account = try #require(store.organizations.first)
+
+        #expect(account.id == id)
+        #expect(account.provider == .github)
+        #expect(account.serverURL == "https://github.com")
+        #expect(account.scope == .organization)
+        #expect(account.privateKeyKeychainKey == "github-app-private-key-\(id.uuidString)")
+        #expect(defaults.data(forKey: "runnerAccounts") != nil)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("GitHub and Gitea accounts round-trip in the new account format")
+    func providerAccountsRoundTrip() throws {
+        let suiteName = "test-config-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = PreviewKeychainService()
+        let store = ConfigStore(defaults: defaults, keychainService: keychain)
+        store.addOrganization(Organization(name: "github-org", appId: "1", installationId: 2))
+        store.addOrganization(
+            Organization(
+                provider: .gitea,
+                serverURL: "https://git.example.test",
+                scope: .repository,
+                name: "owner",
+                accountType: .repository,
+                repositoryName: "repo",
+                credentialMode: .accessToken,
+                appId: "",
+                installationId: 0,
+                labels: ["macos-arm64:host"]
+            )
+        )
+
+        let loaded = ConfigStore(defaults: defaults, keychainService: keychain).organizations
+        #expect(loaded.map(\.provider) == [.github, .gitea])
+        #expect(loaded.last?.normalizedServerURL?.host == "git.example.test")
+        #expect(loaded.last?.giteaRunnerLabels == ["macos-arm64:host"])
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("Save and load runner image preparation inventory")
     func runnerImagePreparationInventoryRoundTrip() {
         let suiteName = "test-config-\(UUID().uuidString)"
@@ -135,7 +197,7 @@ struct ConfigStoreTests {
         let (store, defaults) = makeStore()
 
         #expect(store.organizations.isEmpty)
-        #expect(!store.warmRunnerConfig.isEnabled)
+        #expect(store.warmRunnerConfig.isEnabled)
         #expect(store.vmConfiguration.cpuCount == 4)
         #expect(store.vmConfiguration.memorySizeGB == 8)
         #expect(store.vmConfiguration.diskSizeGB == 80)

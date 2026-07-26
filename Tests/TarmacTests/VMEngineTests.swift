@@ -24,6 +24,15 @@ struct VMEngineTests {
             baseImagePath: baseImagePath.path,
             lifecycle: mock
         )
+        try Data([0x01]).write(
+            to:
+                tempDir
+                .appendingPathComponent("Platform", isDirectory: true)
+                .appendingPathComponent("auxiliaryStorage.bin")
+        )
+        // Most VMEngine tests exercise the one-shot lifecycle. Tests that cover
+        // the product's default-on warm runner opt in explicitly below.
+        engine.updateWarmRunnerConfig(WarmRunnerConfiguration(isEnabled: false))
 
         return (engine, mock, tempDir)
     }
@@ -49,9 +58,10 @@ struct VMEngineTests {
         let sharedDir = tempDir.appendingPathComponent("shared")
         try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
 
+        let configuration = VMConfiguration(cpuCount: 6, memorySizeGB: 12, diskSizeGB: 90)
         let instance = try await engine.bootVM(
             for: 42,
-            config: VMConfiguration(),
+            config: configuration,
             sharedDirectory: sharedDir
         )
 
@@ -59,7 +69,41 @@ struct VMEngineTests {
         #expect(instance.jobId == 42)
         #expect(instance.diskImagePath.deletingLastPathComponent().lastPathComponent == "disks")
         #expect(engine.currentInstance?.state == .running)
+        #expect(engine.currentVMConfiguration == configuration)
+        #expect(engine.currentSharedDirectory == sharedDir)
         #expect(engine.isRunning)
+    }
+
+    @Test("worker resource usage is read from the current guest share")
+    @MainActor
+    func readsCurrentWorkerResourceUsage() async throws {
+        let (engine, _, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let sharedDir = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        _ = try await engine.bootVM(for: 42, config: VMConfiguration(), sharedDirectory: sharedDir)
+
+        let usage = WorkerResourceUsage(
+            sampledAt: Date(timeIntervalSince1970: 1_700_000_000),
+            cpuPercent: 37.5,
+            memoryUsedBytes: 4_000,
+            memoryTotalBytes: 8_000,
+            diskUsedBytes: 30_000,
+            diskTotalBytes: 80_000
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(usage).write(
+            to: sharedDir.appendingPathComponent(GuestBootstrapContract.workerResourceUsageFileName)
+        )
+
+        #expect(engine.currentResourceUsage() == usage)
+        #expect(engine.currentDiskImageAllocatedSizeBytes() != nil)
+
+        try await engine.teardown()
+        #expect(engine.currentVMConfiguration == nil)
+        #expect(engine.currentSharedDirectory == nil)
     }
 
     @Test("stopVM sets state to stopped")
@@ -81,6 +125,76 @@ struct VMEngineTests {
 
         #expect(mock.stopCallCount == 1)
         #expect(engine.currentInstance?.state == .stopped)
+    }
+
+    @Test("prewarm boots a jobless VM and reuses it for the first job")
+    @MainActor
+    func prewarmAndReuseForFirstJob() async throws {
+        let (engine, mock, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        engine.updateWarmRunnerConfig(WarmRunnerConfiguration(isEnabled: true))
+        let configuration = VMConfiguration(cpuCount: 6, memorySizeGB: 12, diskSizeGB: 90)
+        let prewarmedInstance = try await engine.prewarm(
+            config: configuration,
+            readinessTimeoutSeconds: 1
+        )
+
+        #expect(mock.bootCallCount == 1)
+        #expect(prewarmedInstance.jobId == nil)
+        #expect(engine.hasWarmRunner)
+        #expect(engine.warmRunnerState?.jobsServed == 0)
+        #expect(engine.warmRunnerState?.lastJobId == nil)
+
+        let runnerDirectory = tempDir.appendingPathComponent("runner-bin")
+        try writeExecutableRunScript(in: runnerDirectory)
+        var job = TestFactories.makeJob(id: 90)
+        job.jitConfig = "jit"
+
+        let runningInstance = try await engine.provisionAndRun(
+            job: job,
+            config: configuration,
+            runnerPath: runnerDirectory
+        )
+
+        #expect(mock.bootCallCount == 1)
+        #expect(runningInstance.id == prewarmedInstance.id)
+        #expect(runningInstance.jobId == 90)
+        #expect(engine.warmRunnerState?.jobsServed == 1)
+        #expect(engine.warmRunnerState?.lastJobId == 90)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: tempDir.appendingPathComponent("jobs/_warm/job-ready").path
+            )
+        )
+
+        try await engine.releaseWarmRunner()
+    }
+
+    @Test("prewarm readiness timeout tears down its VM and clone")
+    @MainActor
+    func prewarmReadinessTimeoutCleansUp() async throws {
+        let mock = MockVMLifecycle()
+        mock.completeWarmReadinessOnBoot = false
+        let (engine, _, tempDir) = try makeEngine(lifecycle: mock)
+        defer { TestFactories.cleanup(tempDir) }
+
+        engine.updateWarmRunnerConfig(WarmRunnerConfiguration(isEnabled: true))
+
+        await #expect(throws: VMEngineError.self) {
+            try await engine.prewarm(config: VMConfiguration(), readinessTimeoutSeconds: 1)
+        }
+
+        #expect(mock.bootCallCount == 1)
+        #expect(mock.stopCallCount == 1)
+        #expect(engine.currentInstance == nil)
+        #expect(engine.warmRunnerState == nil)
+        let disks = try FileManager.default.contentsOfDirectory(
+            at: tempDir.appendingPathComponent("disks"),
+            includingPropertiesForKeys: nil
+        )
+        #expect(disks.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("jobs/_warm").path))
     }
 
     @Test("stopVM when no VM running is a no-op")
@@ -670,6 +784,38 @@ struct VMEngineTests {
         try await engine.releaseWarmRunner()
         #expect(mock.stopCallCount == 1)
         #expect(!engine.hasWarmRunner)
+    }
+
+    @Test("idle warm runner can restart without replacing its clone")
+    @MainActor
+    func restartWarmRunnerRebootsExistingClone() async throws {
+        let (engine, mock, tempDir) = try makeEngine()
+        defer { TestFactories.cleanup(tempDir) }
+
+        engine.updateWarmRunnerConfig(WarmRunnerConfiguration(isEnabled: true))
+
+        let runnerDir = tempDir.appendingPathComponent("runner-bin")
+        try writeExecutableRunScript(in: runnerDir)
+
+        var job = TestFactories.makeJob(id: 89)
+        job.jitConfig = "jit"
+        let originalInstance = try await engine.provisionAndRun(
+            job: job,
+            config: VMConfiguration(),
+            runnerPath: runnerDir
+        )
+        try await engine.teardown(outcome: .succeeded, policy: .keepWarmRunner)
+
+        try await engine.restartWarmRunner()
+
+        #expect(mock.stopCallCount == 1)
+        #expect(mock.bootCallCount == 2)
+        #expect(engine.currentInstance?.id == originalInstance.id)
+        #expect(engine.currentInstance?.diskImagePath == originalInstance.diskImagePath)
+        #expect(engine.currentInstance?.state == .running)
+        #expect(engine.hasWarmRunner)
+
+        try await engine.releaseWarmRunner()
     }
 
     @Test("baseImageReady requires both file presence and verified marker")

@@ -26,7 +26,7 @@ struct VMControlVMResponse: Codable, Sendable, Equatable {
 
 struct VMControlInstanceDTO: Codable, Sendable, Equatable {
     let id: String
-    let jobId: Int64
+    let jobId: Int64?
     let diskImagePath: String
     let startedAt: Date
     let state: String

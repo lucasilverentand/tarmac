@@ -4,10 +4,23 @@ Tarmac treats the macOS base image and the runner image profile as one contract:
 the base image contains the tools, and the profile records what the image can
 advertise to GitHub.
 
-## Required Apple Steps
+## Unattended macOS 27 Setup
 
-After a fresh macOS install, prepare the guest image before enabling Apple build
-capabilities:
+Tarmac requires a macOS 27 restore image so the base image can be provisioned
+without Setup Assistant:
+
+1. Install the macOS 27 restore image from the base-image wizard.
+2. Tarmac starts the image once with `VZMacGuestProvisioningOptions`, creates
+   the `tarmac` volume owner, stores its generated password in Keychain, enables
+   automatic login, and enables Remote Login on the VM's private NAT network
+   for bootstrap installation and maintenance.
+3. Tarmac resolves the guest's private NAT lease and installs the bundled guest
+   bootstrap over that provisioning channel. No password or Setup Assistant
+   interaction is required.
+4. The wizard stops the real base image, boots a clone, and verifies the
+   LaunchDaemon, automatic desktop login, and shared-directory handshake.
+
+After provisioning, prepare the build capabilities included in the image:
 
 1. Install Xcode into `/Applications`.
 2. Accept the Xcode license.
@@ -16,6 +29,18 @@ capabilities:
 5. Install simulator runtimes for every advertised platform.
 6. Install optional toolchains such as Flutter, Node, Ruby, CocoaPods, Expo CLI,
    and EAS CLI when a profile needs them.
+7. Scan and record the finished image profile before advertising its labels.
+
+Use the VM display's **Take Over** mode when inspecting or maintaining the
+image. Tarmac attaches a virtual USB keyboard and absolute-coordinate pointing
+device to both the installer and every normal VM boot, so login windows and the
+guest desktop accept host keyboard and pointer input. Switch back to **Observe**
+to release system-key capture.
+
+The host-side `script/install_guest_bootstrap_offline.sh` remains a repair tool
+for already-owned images. It refuses ownerless images and never writes
+`.AppleSetupDone`; owner creation belongs to Apple's macOS 27 provisioning
+protocol.
 
 Use **Scan Image** in the account's runner image profile to automate this
 inventory. Tarmac boots a temporary clone of the selected runner image, runs the

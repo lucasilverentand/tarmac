@@ -78,6 +78,16 @@ actor JobStore {
         persistIfTerminal(jobs[index])
     }
 
+    func bindProviderJob(jobId: Int64, claimedJob: ProviderQueuedJob) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobId }) else { return }
+        jobs[index].accountID = claimedJob.key.accountID
+        jobs[index].remoteJobID = claimedJob.key.remoteJobID
+        jobs[index].runnerRequestId = claimedJob.runID
+        jobs[index].workflowName = claimedJob.name
+        jobs[index].repositoryName = claimedJob.repositoryName
+        persistIfTerminal(jobs[index])
+    }
+
     func updateVMInstance(jobId: Int64, vmInstanceId: UUID) {
         guard let index = jobs.firstIndex(where: { $0.id == jobId }) else {
             Log.queue.warning("Job \(jobId) not found for VM instance update")

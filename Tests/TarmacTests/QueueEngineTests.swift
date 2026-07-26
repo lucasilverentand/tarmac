@@ -463,6 +463,81 @@ struct QueueEngineTests {
         #expect(jobs.first?.repositoryName == "allowed-repo")
     }
 
+    @Test("queued workflow labels route to the matching runner pool")
+    func queuedWorkflowLabelsRouteToPool() async throws {
+        let (engine, store, _) = try makeEngine()
+        let stable = RunnerPoolConfiguration(
+            name: "Stable production",
+            releaseChannel: .appStore,
+            routingLabels: ["tarmac-app-store", "macos-26", "xcode-26"],
+            imageProfile: RunnerImageProfile(name: "Xcode 26.6")
+        )
+        let beta = RunnerPoolConfiguration(
+            name: "Beta / TestFlight",
+            releaseChannel: .beta,
+            routingLabels: ["tarmac-beta", "macos-27", "xcode-27-beta"],
+            imageProfile: RunnerImageProfile(name: "Xcode 27 beta 3")
+        )
+        var org = TestFactories.makeOrg(
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["allowed-repo"]
+        )
+        org.runnerPools = [stable, beta]
+        let queuedJob = GitHubQueuedWorkflowJob(
+            id: 79288038720,
+            runId: 26883117169,
+            name: "testflight",
+            repositoryName: "allowed-repo",
+            labels: ["self-hosted", "ARM64", "tarmac-beta"],
+            queuedAt: Date(timeIntervalSince1970: 1_780_492_564),
+            htmlURL: nil
+        )
+
+        await engine.handleQueuedWorkflowJobs([queuedJob], org: org)
+
+        let job = await store.jobs.first
+        #expect(job?.runnerPoolID == beta.id)
+        #expect(job?.requestedLabels == queuedJob.labels)
+        #expect(job?.accountID == org.id)
+    }
+
+    @Test("ambiguous generic labels do not select an arbitrary enabled pool")
+    func genericLabelsDoNotSelectArbitraryPool() async throws {
+        let (engine, store, _) = try makeEngine()
+        var org = TestFactories.makeOrg(
+            scaleSetId: nil,
+            filterMode: .include,
+            filteredRepositories: ["allowed-repo"]
+        )
+        org.runnerPools = [
+            RunnerPoolConfiguration(
+                name: "Stable",
+                routingLabels: ["tarmac-app-store"],
+                imageProfile: RunnerImageProfile()
+            ),
+            RunnerPoolConfiguration(
+                name: "Beta",
+                routingLabels: ["tarmac-beta"],
+                imageProfile: RunnerImageProfile()
+            ),
+        ]
+        let queuedJob = GitHubQueuedWorkflowJob(
+            id: 79288038721,
+            runId: 26883117170,
+            name: "ambiguous",
+            repositoryName: "allowed-repo",
+            labels: ["self-hosted", "macOS", "ARM64"],
+            queuedAt: Date(),
+            htmlURL: nil
+        )
+
+        await engine.handleQueuedWorkflowJobs([queuedJob], org: org)
+
+        let jobs = await store.jobs
+        #expect(jobs.isEmpty)
+    }
+
     @Test("queued workflow jobs are sorted and enqueued before dispatch")
     func queuedWorkflowJobsAreSortedBeforeDispatch() async throws {
         let (engine, store, _) = try makeEngine()

@@ -4,6 +4,7 @@ import Foundation
 enum RunnerGuestConfig: Equatable, Sendable {
     case jit(config: String)
     case registrationToken(url: String, token: String, runnerName: String, labels: [String])
+    case giteaEphemeral(instanceURL: String, registrationToken: String, runnerName: String, labels: [String])
 }
 
 extension RunnerJob {
@@ -21,6 +22,14 @@ extension RunnerJob {
             !runnerRegistrationURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             !runnerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
+            if provider == .gitea {
+                return .giteaEphemeral(
+                    instanceURL: runnerRegistrationURL,
+                    registrationToken: registrationToken,
+                    runnerName: runnerName,
+                    labels: runnerRegistrationLabels ?? []
+                )
+            }
             return .registrationToken(
                 url: runnerRegistrationURL,
                 token: registrationToken,
@@ -45,11 +54,17 @@ extension RunnerJob {
             runnerRegistrationURL = url
             self.runnerName = runnerName
             runnerRegistrationLabels = labels
+        case .giteaEphemeral(let instanceURL, let token, let runnerName, let labels):
+            jitConfig = nil
+            registrationToken = token
+            runnerRegistrationURL = instanceURL
+            self.runnerName = runnerName
+            runnerRegistrationLabels = labels
         }
     }
 }
 
-extension Organization {
+extension RunnerAccount {
     /// GitHub URL passed to `config.sh --url` for registration-token runners.
     var runnerRegistrationURL: String {
         switch accountType {

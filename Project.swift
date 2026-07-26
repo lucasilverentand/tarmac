@@ -1,5 +1,23 @@
 import ProjectDescription
 
+let developmentTeam = "96452FLT2P"
+let developmentSigningIdentity = "Apple Development: Luca Silverentand (R377UCHFT2)"
+
+let debugSigningSettings: SettingsDictionary = [
+    "CODE_SIGN_STYLE": "Manual",
+    "CODE_SIGN_IDENTITY": .string(developmentSigningIdentity),
+    "CODE_SIGNING_ALLOWED": "YES",
+    "CODE_SIGNING_REQUIRED": "YES",
+    "CODE_SIGN_INJECT_BASE_ENTITLEMENTS": "NO",
+    "DEVELOPMENT_TEAM": .string(developmentTeam),
+]
+
+let releaseSigningSettings: SettingsDictionary = [
+    "CODE_SIGN_STYLE": "Automatic",
+    "CODE_SIGN_IDENTITY": "Developer ID Application",
+    "DEVELOPMENT_TEAM": .string(developmentTeam),
+]
+
 let project = Project(
     name: "Tarmac",
     settings: .settings(
@@ -13,19 +31,11 @@ let project = Project(
         configurations: [
             .debug(
                 name: "Debug",
-                settings: [
-                    "CODE_SIGN_STYLE": "Manual",
-                    "CODE_SIGN_IDENTITY": "-",
-                    "CODE_SIGNING_REQUIRED": "NO",
-                    "DEVELOPMENT_TEAM": "",
-                ]
+                settings: debugSigningSettings
             ),
             .release(
                 name: "Release",
-                settings: [
-                    "CODE_SIGN_STYLE": "Automatic",
-                    "CODE_SIGN_IDENTITY": "Developer ID Application",
-                ]
+                settings: releaseSigningSettings
             ),
         ]
     ),
@@ -35,7 +45,7 @@ let project = Project(
             destinations: .macOS,
             product: .app,
             bundleId: "studio.seventwo.tarmac",
-            deploymentTargets: .macOS("26.0"),
+            deploymentTargets: .macOS("27.0"),
             infoPlist: .extendingDefault(with: [:]),
             sources: ["Sources/**"],
             resources: ["Resources/**"],
@@ -44,19 +54,11 @@ let project = Project(
                 configurations: [
                     .debug(
                         name: "Debug",
-                        settings: [
-                            "CODE_SIGN_STYLE": "Manual",
-                            "CODE_SIGN_IDENTITY": "-",
-                            "CODE_SIGNING_REQUIRED": "NO",
-                            "DEVELOPMENT_TEAM": "",
-                        ]
+                        settings: debugSigningSettings
                     ),
                     .release(
                         name: "Release",
-                        settings: [
-                            "CODE_SIGN_IDENTITY": "Developer ID Application",
-                            "CODE_SIGN_STYLE": "Automatic",
-                        ]
+                        settings: releaseSigningSettings
                     ),
                 ]
             )
@@ -66,7 +68,7 @@ let project = Project(
             destinations: .macOS,
             product: .unitTests,
             bundleId: "studio.seventwo.tarmac.tests",
-            deploymentTargets: .macOS("26.0"),
+            deploymentTargets: .macOS("27.0"),
             sources: ["Tests/**"],
             dependencies: [
                 .target(name: "Tarmac")

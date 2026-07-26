@@ -7,6 +7,16 @@ enum VerifyDisplayState: Equatable {
     case failed(message: String)
 }
 
+enum BaseImagePreparationState: Equatable {
+    case idle
+    case booting
+    case installingBootstrap
+    case running
+    case stopping
+    case ready
+    case failed(message: String)
+}
+
 struct BaseImageWizardView: View {
     let configStore: ConfigStore
 
@@ -17,8 +27,12 @@ struct BaseImageWizardView: View {
     @State private var imageManager: ImageManager
     @State private var downloadStartTime: Date?
     @State private var verificationStatus: VerifyDisplayState = .idle
+    @State private var preparationStatus: BaseImagePreparationState = .idle
+    @State private var preparationLifecycle: VMLifecycle?
+    @State private var usesAutomatedProvisioning = false
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
@@ -27,8 +41,16 @@ struct BaseImageWizardView: View {
         let retainedIPSW =
             FileManager.default.fileExists(atPath: storage.restoreIPSWURL.path)
             ? storage.restoreIPSWURL : nil
-        _currentStep = State(initialValue: retainedIPSW == nil ? 0 : 1)
+        let platformStore = PlatformDataStore(storage: storage)
+        let canResumeUnverifiedBase =
+            FileManager.default.fileExists(atPath: storage.baseImageURL.path)
+            && FileManager.default.fileExists(atPath: platformStore.auxiliaryStoragePath.path)
+            && platformStore.loadHardwareModel() != nil
+            && platformStore.loadMachineIdentifier() != nil
+            && !storage.isBaseImageVerified()
+        _currentStep = State(initialValue: canResumeUnverifiedBase ? 2 : (retainedIPSW == nil ? 0 : 1))
         _ipswURL = State(initialValue: retainedIPSW)
+        _usesAutomatedProvisioning = State(initialValue: canResumeUnverifiedBase)
         _imageManager = State(
             initialValue: ImageManager(storage: storage)
         )
@@ -47,7 +69,7 @@ struct BaseImageWizardView: View {
             navigationBar
                 .padding(16)
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 680, height: 500)
     }
 
     // MARK: - Header
@@ -59,7 +81,7 @@ struct BaseImageWizardView: View {
                 .padding(.top, 20)
 
             HStack(spacing: 16) {
-                ForEach(0..<4) { step in
+                ForEach(0..<5) { step in
                     HStack(spacing: 6) {
                         ZStack {
                             Circle()
@@ -84,7 +106,7 @@ struct BaseImageWizardView: View {
                             .foregroundStyle(step == currentStep ? .primary : .secondary)
                     }
 
-                    if step < 3 {
+                    if step < 4 {
                         Rectangle()
                             .fill(step < currentStep ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
                             .frame(height: 1)
@@ -100,8 +122,9 @@ struct BaseImageWizardView: View {
         switch step {
         case 0: "Download"
         case 1: "Install"
-        case 2: "Verify"
-        case 3: "Done"
+        case 2: "Prepare"
+        case 3: "Verify"
+        case 4: "Done"
         default: ""
         }
     }
@@ -113,8 +136,9 @@ struct BaseImageWizardView: View {
         switch currentStep {
         case 0: downloadStep
         case 1: installStep
-        case 2: verifyStep
-        case 3: completeStep
+        case 2: prepareStep
+        case 3: verifyStep
+        case 4: completeStep
         default: EmptyView()
         }
     }
@@ -169,11 +193,11 @@ struct BaseImageWizardView: View {
                     .controlSize(.large)
                 }
             } else {
-                Text("Download macOS 26 Restore Image")
+                Text("Download macOS 27 Restore Image")
                     .font(.title3.weight(.medium))
 
                 Text(
-                    "A macOS 26 IPSW file (~16 GB) will be downloaded from Apple to create the base virtual machine image. Older macOS releases are not supported."
+                    "A macOS 27 IPSW file (~23 GB) will be downloaded from Apple to create a fully provisioned runner image. Older macOS releases cannot create the owner account automatically."
                 )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -196,7 +220,7 @@ struct BaseImageWizardView: View {
                 .foregroundStyle(.tint)
                 .symbolEffect(.pulse)
 
-            Text("Downloading macOS 26 restore image...")
+            Text("Downloading macOS 27 restore image...")
                 .font(.subheadline.weight(.medium))
 
             VStack(spacing: 8) {
@@ -283,11 +307,11 @@ struct BaseImageWizardView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.tint)
 
-            Text("Install macOS 26")
+            Text("Install macOS 27")
                 .font(.title3.weight(.medium))
 
             Text(
-                "macOS 26 will be installed into a virtual machine disk image. This creates the base image that ephemeral runners will clone for each job."
+                "macOS 27 will be installed and provisioned with a secure tarmac owner, automatic login, and the runner bootstrap. Each job receives a fresh clone of this image."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -337,6 +361,144 @@ struct BaseImageWizardView: View {
                 }
             }
             .frame(maxWidth: 360)
+        }
+    }
+
+    // MARK: - Prepare Step
+
+    private var prepareStep: some View {
+        VStack(spacing: 18) {
+            Image(
+                systemName: preparationStatus == .ready
+                    ? "person.crop.circle.badge.checkmark"
+                    : (usesAutomatedProvisioning ? "gearshape.2" : "hand.tap")
+            )
+            .font(.system(size: 42))
+            .foregroundStyle(preparationStatus == .ready ? Color.green : Color.accentColor)
+
+            Text(preparationTitle)
+                .font(.title3.weight(.medium))
+
+            Text(preparationMessage)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 500)
+
+            if preparationStatus == .running, !usesAutomatedProvisioning {
+                Text("cd '/Volumes/My Shared Files' && sudo ./install-tarmac-runner-bootstrap.sh")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            preparationActions
+        }
+    }
+
+    private var preparationTitle: String {
+        switch preparationStatus {
+        case .idle: usesAutomatedProvisioning ? "Ready for unattended setup" : "Create the VM owner"
+        case .booting: usesAutomatedProvisioning ? "Provisioning the VM owner" : "Booting setup VM"
+        case .installingBootstrap: "Installing the runner bootstrap"
+        case .running: "Finish setup inside the VM"
+        case .stopping: "Saving the prepared image"
+        case .ready: "Preparation saved"
+        case .failed: "Preparation failed"
+        }
+    }
+
+    private var preparationMessage: String {
+        switch preparationStatus {
+        case .idle:
+            if usesAutomatedProvisioning {
+                "Tarmac will create the tarmac administrator with a Keychain-protected password, enable automatic login, and skip Setup Assistant."
+            } else {
+                "Boot the installed image, switch the VM display to Take Over, and complete Setup Assistant with an administrator account named tarmac. A real first account is required to make the virtual Mac bootable."
+            }
+        case .booting:
+            usesAutomatedProvisioning
+                ? "Starting macOS 27 with Apple's first-boot guest provisioning protocol."
+                : "Starting the installed image with keyboard, pointer, and the guest bootstrap share attached."
+        case .installingBootstrap:
+            "The tarmac desktop is active. Installing the LaunchDaemon through the temporary private provisioning channel."
+        case .running:
+            "Complete Setup Assistant with the tarmac account. Then open Terminal in the guest and run the command below using that account's password. The installer enables automatic login and disables screen lock and sleep."
+        case .stopping:
+            "Stopping the setup VM cleanly so its owner account and automatic-login settings remain in the base image."
+        case .ready:
+            "The setup VM stopped cleanly. Verification will only pass if macOS logs in as tarmac and the interactive desktop session becomes active."
+        case .failed(let message):
+            message
+        }
+    }
+
+    @ViewBuilder
+    private var preparationActions: some View {
+        if usesAutomatedProvisioning {
+            switch preparationStatus {
+            case .idle, .failed:
+                HStack(spacing: 12) {
+                    Button("Verify Existing Image") {
+                        startVerify()
+                    }
+                    .controlSize(.large)
+
+                    Button("Run Unattended Setup") {
+                        startAutomatedPreparation()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+            case .booting, .installingBootstrap, .running, .stopping:
+                ProgressView()
+                    .controlSize(.large)
+            case .ready:
+                Button("Verify Automatic Login") {
+                    startVerify()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+        } else {
+            switch preparationStatus {
+            case .idle, .failed:
+                HStack(spacing: 12) {
+                    Button("Verify Existing Image") {
+                        startVerify()
+                    }
+                    .controlSize(.large)
+
+                    Button("Boot Setup VM") {
+                        startPreparation()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+            case .booting, .installingBootstrap, .stopping:
+                ProgressView()
+                    .controlSize(.large)
+            case .running:
+                HStack(spacing: 12) {
+                    Button("Open VM Display") {
+                        openWindow(id: "vm-display")
+                    }
+                    .controlSize(.large)
+
+                    Button("Stop & Continue") {
+                        stopPreparation()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+            case .ready:
+                Button("Verify Automatic Login") {
+                    startVerify()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
         }
     }
 
@@ -396,7 +558,7 @@ struct BaseImageWizardView: View {
 
             if message.localizedCaseInsensitiveContains("guest bootstrap") {
                 Text(
-                    "Install `Resources/GuestBootstrap/install-tarmac-runner-bootstrap.sh` inside the base image, then retry verification."
+                    "Install `Resources/GuestBootstrap/install-tarmac-runner-bootstrap.sh` inside the base image with automatic login enabled, then retry verification."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -438,17 +600,17 @@ struct BaseImageWizardView: View {
 
     private var navigationBar: some View {
         HStack {
-            if currentStep > 0 && currentStep < 2 {
+            if currentStep > 0 && currentStep < 3 {
                 Button("Back") {
                     currentStep -= 1
                     errorMessage = nil
                 }
-                .disabled(isWorking)
+                .disabled(isWorking || preparationIsActive)
             }
 
             Spacer()
 
-            if currentStep == 3 {
+            if currentStep == 4 {
                 Button("Done") {
                     dismiss()
                 }
@@ -464,8 +626,17 @@ struct BaseImageWizardView: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                .disabled(isWorking)
+                .disabled(isWorking || preparationIsActive)
             }
+        }
+    }
+
+    private var preparationIsActive: Bool {
+        switch preparationStatus {
+        case .booting, .installingBootstrap, .running, .stopping:
+            true
+        case .idle, .ready, .failed:
+            false
         }
     }
 
@@ -505,7 +676,6 @@ struct BaseImageWizardView: View {
 
         isWorking = true
         errorMessage = nil
-
         Task {
             do {
                 let vmConfig = configStore.vmConfiguration
@@ -519,7 +689,7 @@ struct BaseImageWizardView: View {
                 try diskManager.createSparseDisk(at: baseImageURL, sizeGB: vmConfig.diskSizeGB, overwrite: true)
 
                 let platformStore = PlatformDataStore(storage: storage)
-                try await imageManager.installMacOS(
+                let installedVersion = try await imageManager.installMacOS(
                     ipsw: ipsw,
                     diskPath: baseImageURL,
                     config: vmConfig,
@@ -533,8 +703,13 @@ struct BaseImageWizardView: View {
 
                 isWorking = false
                 currentStep = 2
-                Log.image.info("Base image installation completed; starting verification")
-                startVerify()
+                usesAutomatedProvisioning =
+                    installedVersion.majorVersion >= MacOSRestoreCatalog.unattendedProvisioningMajorVersion
+                preparationStatus = usesAutomatedProvisioning ? .booting : .idle
+                Log.image.info("Base image installation completed; starting owner provisioning")
+                if usesAutomatedProvisioning {
+                    startAutomatedPreparation()
+                }
             } catch {
                 isWorking = false
                 errorMessage = error.localizedDescription
@@ -546,6 +721,7 @@ struct BaseImageWizardView: View {
     private func startVerify() {
         errorMessage = nil
         verificationStatus = .running
+        currentStep = 3
 
         Task {
             do {
@@ -563,7 +739,7 @@ struct BaseImageWizardView: View {
                 )
 
                 verificationStatus = .success
-                currentStep = 3
+                currentStep = 4
                 if cleanupResult.removedItems > 0 {
                     Log.image.info(
                         "Cleaned \(cleanupResult.removedItems) installer artifact(s) after base image verification"
@@ -575,6 +751,148 @@ struct BaseImageWizardView: View {
                 Log.vm.error("Base image verification failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func startPreparation() {
+        preparationStatus = .booting
+        errorMessage = nil
+
+        Task {
+            do {
+                let storage = StorageManager(rootPath: configStore.storageRootPath)
+                try storage.prepareBaseDirectories()
+                try storage.clearBaseImageVerified()
+                let sharedDirectory = try prepareGuestBootstrapShare(storage: storage)
+                let lifecycle = VMLifecycle()
+                preparationLifecycle = lifecycle
+
+                try await lifecycle.bootVM(
+                    vmConfig: configStore.vmConfiguration,
+                    diskPath: URL(fileURLWithPath: resolvedBaseImagePath(storage: storage)),
+                    platformStore: PlatformDataStore(storage: storage),
+                    sharedDirectoryURL: sharedDirectory,
+                    cacheDirectoryURL: nil
+                )
+
+                preparationStatus = .running
+                openWindow(id: "vm-display")
+            } catch {
+                preparationLifecycle = nil
+                preparationStatus = .failed(message: error.localizedDescription)
+                Log.vm.error("Setup VM failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func startAutomatedPreparation() {
+        usesAutomatedProvisioning = true
+        preparationStatus = .booting
+        errorMessage = nil
+
+        Task {
+            let storage = StorageManager(rootPath: configStore.storageRootPath)
+            let lifecycle = VMLifecycle()
+            do {
+                try storage.prepareBaseDirectories()
+                try storage.clearBaseImageVerified()
+                let credentials = try MacGuestCredentialStore(
+                    keychainService: configStore.keychainService
+                ).loadOrCreate()
+                let sharedDirectory = try prepareGuestBootstrapShare(storage: storage)
+                preparationLifecycle = lifecycle
+
+                var lastBootError: Error?
+                for attempt in 1...10 {
+                    do {
+                        try await lifecycle.bootProvisionedVM(
+                            vmConfig: configStore.vmConfiguration,
+                            diskPath: URL(fileURLWithPath: resolvedBaseImagePath(storage: storage)),
+                            platformStore: PlatformDataStore(storage: storage),
+                            sharedDirectoryURL: sharedDirectory,
+                            provisioning: credentials
+                        )
+                        lastBootError = nil
+                        break
+                    } catch {
+                        lastBootError = error
+                        let installerStillReleasing = error.localizedDescription
+                            .localizedCaseInsensitiveContains("lock auxiliary storage")
+                        guard installerStillReleasing, attempt < 10 else { throw error }
+                        Log.vm.info("Waiting for the macOS installer to release auxiliary storage (attempt \(attempt))")
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                }
+                if let lastBootError {
+                    throw lastBootError
+                }
+
+                guard let macAddress = lifecycle.networkMACAddress else {
+                    throw MacGuestProvisioningError.missingNetworkAddress
+                }
+
+                preparationStatus = .installingBootstrap
+                let guestAddress = try await MacGuestBootstrapInstaller().install(
+                    credentials: credentials,
+                    macAddress: macAddress
+                )
+                Log.vm.info("Provisioned guest bootstrap at \(guestAddress)")
+
+                preparationStatus = .stopping
+                try await lifecycle.stopVM()
+                preparationLifecycle = nil
+                preparationStatus = .ready
+                startVerify()
+            } catch {
+                if lifecycle.isBooted {
+                    try? await lifecycle.stopVM()
+                }
+                preparationLifecycle = nil
+                preparationStatus = .failed(message: error.localizedDescription)
+                Log.vm.error("Automated guest provisioning failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func stopPreparation() {
+        guard let preparationLifecycle else {
+            preparationStatus = .ready
+            return
+        }
+
+        preparationStatus = .stopping
+        Task {
+            do {
+                try await preparationLifecycle.stopVM()
+                self.preparationLifecycle = nil
+                preparationStatus = .ready
+            } catch {
+                preparationStatus = .failed(message: "Could not stop the setup VM: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func prepareGuestBootstrapShare(storage: StorageManager) throws -> URL {
+        let directory = storage.tmpDirectory.appendingPathComponent("guest-bootstrap", isDirectory: true)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: directory.path) {
+            try fileManager.removeItem(at: directory)
+        }
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let resources = [
+            ("install-tarmac-runner-bootstrap", "sh", 0o755),
+            ("tarmac-runner-bootstrap", "sh", 0o755),
+            ("studio.seventwo.tarmac.runner-bootstrap", "plist", 0o644),
+        ]
+        for (name, extensionName, permissions) in resources {
+            guard let source = Bundle.main.url(forResource: name, withExtension: extensionName) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            let destination = directory.appendingPathComponent("\(name).\(extensionName)")
+            try fileManager.copyItem(at: source, to: destination)
+            try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: destination.path)
+        }
+        return directory
     }
 
     private func resolvedBaseImagePath(storage: StorageManager) -> String {

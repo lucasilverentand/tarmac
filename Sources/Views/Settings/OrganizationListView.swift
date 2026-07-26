@@ -7,14 +7,26 @@ struct OrganizationListView: View {
     @State private var editingOrg: Organization?
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if viewModel.organizations.isEmpty {
-                emptyState
+                AccountsEmptyState {
+                    showingAddSheet = true
+                }
             } else {
-                orgList
-
-                Divider()
-                footer
+                AccountsPage(
+                    viewModel: viewModel,
+                    editingOrg: $editingOrg
+                )
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Label("Add Account", systemImage: "plus")
+                }
+                .help("Add an Actions provider account")
             }
         }
         .sheet(isPresented: $showingAddSheet) {
@@ -24,88 +36,201 @@ struct OrganizationListView: View {
             OrganizationFormSheet(viewModel: viewModel, existing: org)
         }
     }
+}
 
-    private var emptyState: some View {
+private struct AccountsEmptyState: View {
+    let onAdd: () -> Void
+
+    var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                Image(systemName: "building.2")
-                    .font(.system(size: 40, weight: .regular))
-                    .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 18) {
+                DashboardPageHeader(
+                    title: "Accounts",
+                    subtitle: "GitHub and Gitea accounts that can dispatch work to this Mac."
+                ) {
+                    DashboardStatusBadge(
+                        title: "Setup required",
+                        systemImage: "exclamationmark.triangle.fill",
+                        tint: .orange
+                    )
+                }
 
-                VStack(spacing: 8) {
-                    Text("No Accounts")
-                        .font(.title2.weight(.semibold))
+                HStack(spacing: 18) {
+                    Image(systemName: "building.2.crop.circle")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 52, height: 52)
+                        .background(
+                            .quaternary.opacity(0.65),
+                            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        )
 
-                    Text("Add a GitHub runner account to start receiving jobs.")
-                        .font(.callout)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Connect your first Actions provider")
+                            .font(.headline)
+                        Text(
+                            "Tarmac needs an organization or repository account before it can listen for self-hosted runner jobs."
+                        )
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 420)
-                }
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                Button {
-                    showingAddSheet = true
-                } label: {
-                    Label("Add Account", systemImage: "plus")
-                }
+                    Spacer(minLength: 20)
 
+                    Button(action: onAdd) {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(20)
+                .dashboardSurface(tint: .accentColor)
+
+                Text("Before you connect")
+                    .font(.headline)
                 GitHubSetupGuidanceList(items: GitHubSetupGuidance.setupOverview)
-                    .frame(maxWidth: 640)
+                    .frame(maxWidth: 720)
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 48)
-            .frame(maxWidth: .infinity)
+            .padding(22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    private var footer: some View {
-        HStack {
-            Text("Drag to set priority — top account is dispatched first")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+private struct AccountsPage: View {
+    let viewModel: SettingsViewModel
+    @Binding var editingOrg: Organization?
 
-            Spacer()
-
-            Button("Add Account...") {
-                showingAddSheet = true
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            DashboardPageHeader(
+                title: "Accounts",
+                subtitle: "Provider accounts Tarmac monitors for self-hosted macOS jobs."
+            ) {
+                DashboardStatusBadge(
+                    title: "\(enabledCount) enabled",
+                    systemImage: enabledCount > 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                    tint: enabledCount > 0 ? .green : .orange
+                )
             }
-            .controlSize(.small)
+
+            AccountsSummary(
+                configuredCount: viewModel.organizations.count,
+                enabledCount: enabledCount,
+                readyCount: readyCount
+            )
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dispatch priority")
+                            .font(.headline)
+                        Text("Drag rows to change which account receives work first.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Text("\(viewModel.organizations.count) configured")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+
+                Divider()
+
+                List {
+                    ForEach(viewModel.organizations) { org in
+                        OrganizationRow(
+                            org: org,
+                            position: position(of: org),
+                            setupCheck: viewModel.setupCheckResult(for: org),
+                            providerSetupCheck: viewModel.providerSetupCheckResult(for: org),
+                            pollingState: viewModel.pollingState(for: org),
+                            isCheckingSetup: viewModel.isSetupCheckRunning(for: org),
+                            onToggle: { updated in
+                                viewModel.updateOrganization(updated)
+                            },
+                            onRunSetupCheck: { org in
+                                await viewModel.runAccountSetupCheck(for: org)
+                            }
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) { editingOrg = org }
+                        .contextMenu {
+                            Button("Edit…") { editingOrg = org }
+                            Divider()
+                            Button("Delete", role: .destructive) { viewModel.removeOrganization(org) }
+                        }
+                    }
+                    .onMove { source, destination in
+                        viewModel.moveOrganization(fromOffsets: source, toOffset: destination)
+                    }
+                }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+            }
+            .dashboardSurface()
         }
-        .padding(12)
+        .padding(22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var orgList: some View {
-        List {
-            ForEach(viewModel.organizations) { org in
-                OrganizationRow(
-                    org: org,
-                    position: position(of: org),
-                    setupCheck: viewModel.setupCheckResult(for: org),
-                    isCheckingSetup: viewModel.isSetupCheckRunning(for: org),
-                    onToggle: { updated in
-                        viewModel.updateOrganization(updated)
-                    },
-                    onRunSetupCheck: { org in
-                        await viewModel.runGitHubSetupCheck(for: org)
-                    }
-                )
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { editingOrg = org }
-                .contextMenu {
-                    Button("Edit...") { editingOrg = org }
-                    Divider()
-                    Button("Delete", role: .destructive) { viewModel.removeOrganization(org) }
-                }
+    private var enabledCount: Int {
+        viewModel.organizations.lazy.filter(\.isEnabled).count
+    }
+
+    private var readyCount: Int {
+        viewModel.organizations.lazy.filter { org in
+            if org.provider == .gitea {
+                return viewModel.providerSetupCheckResult(for: org)?.isReady == true
             }
-            .onMove { source, destination in
-                viewModel.moveOrganization(fromOffsets: source, toOffset: destination)
-            }
-        }
+            return viewModel.setupCheckResult(for: org)?.isReady == true
+        }.count
     }
 
     private func position(of org: Organization) -> Int {
         (viewModel.organizations.firstIndex(where: { $0.id == org.id }) ?? 0) + 1
+    }
+}
+
+private struct AccountsSummary: View {
+    let configuredCount: Int
+    let enabledCount: Int
+    let readyCount: Int
+
+    var body: some View {
+        DashboardMetricStrip {
+            DashboardMetricItem(
+                title: "Configured",
+                value: "\(configuredCount)",
+                systemImage: "building.2"
+            )
+            .frame(maxWidth: .infinity)
+
+            Divider()
+                .frame(height: 34)
+
+            DashboardMetricItem(
+                title: "Enabled",
+                value: "\(enabledCount)",
+                systemImage: "power",
+                tint: enabledCount > 0 ? .green : .secondary
+            )
+            .frame(maxWidth: .infinity)
+
+            Divider()
+                .frame(height: 34)
+
+            DashboardMetricItem(
+                title: "Setup checks passed",
+                value: "\(readyCount)",
+                systemImage: "checkmark.seal.fill",
+                tint: readyCount == configuredCount ? .green : .orange
+            )
+            .frame(maxWidth: .infinity)
+        }
     }
 }
 
@@ -115,33 +240,42 @@ private struct OrganizationRow: View {
     let org: Organization
     let position: Int
     let setupCheck: GitHubSetupCheckResult?
+    let providerSetupCheck: ProviderSetupResult?
+    let pollingState: QueuePollingState?
     let isCheckingSetup: Bool
     let onToggle: (Organization) -> Void
     let onRunSetupCheck: (Organization) async -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Priority badge
+        HStack(alignment: .top, spacing: 14) {
             Text("\(position)")
-                .font(.caption2.bold().monospacedDigit())
-                .foregroundStyle(org.isEnabled ? .white : .secondary)
-                .frame(width: 20, height: 20)
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
                 .background(
-                    Circle()
-                        .fill(org.isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(.quaternary)
                 )
+                .accessibilityLabel("Priority \(position)")
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Text(accountDisplayName)
-                        .font(.subheadline.weight(.medium))
+                        .font(.headline)
                         .foregroundStyle(org.isEnabled ? .primary : .secondary)
 
-                    Text(org.accountType.displayName.lowercased())
+                    Text(org.provider.displayName)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+
+                    Text(org.provider == .gitea ? org.scope.displayName : org.accountType.displayName)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
                         .background(.quaternary, in: Capsule())
 
                     if !org.isEnabled {
@@ -154,30 +288,35 @@ private struct OrganizationRow: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    if org.requiresGitHubAppCredentials {
-                        Label("App \(org.appId.isEmpty ? "—" : org.appId)", systemImage: "app.badge")
+                setupCheckStatus
+
+                if org.isEnabled {
+                    pollingStatus
+                }
+
+                HStack(spacing: 10) {
+                    if org.provider == .gitea {
+                        Label(org.normalizedServerURL?.host ?? "Gitea server", systemImage: "network")
+                    } else if org.requiresGitHubAppCredentials {
+                        Label("GitHub App \(org.appId.isEmpty ? "—" : org.appId)", systemImage: "app.badge")
                     } else {
                         Label("Access token", systemImage: "key")
                     }
 
-                    Text("·")
-
-                    if let scaleSetId = org.scaleSetId {
+                    if org.provider == .gitea {
+                        Label("Ephemeral act_runner", systemImage: "server.rack")
+                    } else if let scaleSetId = org.scaleSetId {
                         Label(scaleSetDisplayName(scaleSetId), systemImage: "server.rack")
                     } else {
                         Label("No scale set", systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                     }
 
-                    Text("·")
-
                     filterSummary
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                // Labels
                 if !org.runnerLabels.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(org.runnerLabels, id: \.self) { label in
@@ -191,14 +330,13 @@ private struct OrganizationRow: View {
                 }
 
                 imageProfileStatus
-                setupCheckStatus
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 8) {
+            VStack(alignment: .trailing, spacing: 10) {
                 Toggle(
-                    "",
+                    "Enabled",
                     isOn: Binding(
                         get: { org.isEnabled },
                         set: { enabled in
@@ -224,28 +362,18 @@ private struct OrganizationRow: View {
                 .disabled(isCheckingSetup || !org.isEnabled)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 9)
     }
 
     @ViewBuilder
     private var imageProfileStatus: some View {
-        if let profile = org.imageProfile {
-            VStack(alignment: .leading, spacing: 3) {
-                Label(
-                    profile.isReady
-                        ? "\(profile.name) profile ready"
-                        : profile.readinessIssues.first?.message ?? "Profile unavailable",
-                    systemImage: profile.isReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(profile.isReady ? .green : .orange)
-
-                if !profile.advertisedLabels.isEmpty {
-                    Text("Profile labels: \(profile.advertisedLabels.joined(separator: ", "))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+        if let profile = org.imageProfile, !profile.isReady {
+            Label(
+                profile.readinessIssues.first?.message ?? "Runner image profile unavailable",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
         }
     }
 
@@ -266,7 +394,7 @@ private struct OrganizationRow: View {
     }
 
     private var accountDisplayName: String {
-        if org.accountType == .repository,
+        if (org.provider == .gitea ? org.scope == .repository : org.accountType == .repository),
             let repositoryName = org.repositoryName,
             !repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
@@ -285,29 +413,58 @@ private struct OrganizationRow: View {
     }
 
     @ViewBuilder
-    private var setupCheckStatus: some View {
-        if let setupCheck {
-            VStack(alignment: .leading, spacing: 3) {
+    private var pollingStatus: some View {
+        if let pollingState {
+            HStack(spacing: 10) {
                 Label(
-                    setupCheck.statusText,
-                    systemImage: setupCheck.isReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+                    pollingState.isRunning ? "Polling" : "Polling stopped",
+                    systemImage: pollingState.isRunning ? "arrow.triangle.2.circlepath" : "pause.circle"
                 )
-                .font(.caption)
-                .foregroundStyle(setupCheck.isReady ? .green : .orange)
-
-                if !setupCheck.advertisedLabels.isEmpty || !setupCheck.runnerGroupNames.isEmpty {
-                    HStack(spacing: 8) {
-                        if !setupCheck.advertisedLabels.isEmpty {
-                            Text("Advertises \(setupCheck.advertisedLabels.joined(separator: ", "))")
-                        }
-                        if !setupCheck.runnerGroupNames.isEmpty {
-                            Text("Runner groups: \(setupCheck.runnerGroupNames.joined(separator: ", "))")
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if let lastSuccessfulPollAt = pollingState.lastSuccessfulPollAt {
+                    Text("Last success \(lastSuccessfulPollAt, style: .relative)")
+                }
+                if let nextRetryDelay = pollingState.nextRetryDelay {
+                    Text("Retry \(pollingState.retryAttempt) in \(Int(nextRetryDelay))s")
                 }
             }
+            .font(.caption)
+            .foregroundStyle(pollingState.lastFailure == nil ? Color.secondary : Color.orange)
+
+            if let message = pollingState.lastFailureMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+        } else {
+            Label("Polling has not started", systemImage: "clock")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var setupCheckStatus: some View {
+        if org.provider == .gitea, let providerSetupCheck {
+            Label(
+                providerSetupCheck.isReady
+                    ? "Gitea setup checks passed"
+                    : providerSetupCheck.issues.first?.message ?? "Gitea setup checks failed",
+                systemImage: providerSetupCheck.isReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+            )
+            .font(.caption.weight(.medium))
+            .foregroundStyle(providerSetupCheck.isReady ? .green : .orange)
+        } else if let setupCheck {
+            Label(
+                setupCheck.statusText,
+                systemImage: setupCheck.isReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+            )
+            .font(.caption.weight(.medium))
+            .foregroundStyle(setupCheck.isReady ? .green : .orange)
+        } else {
+            Label("Setup not checked", systemImage: "questionmark.circle")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -655,6 +812,9 @@ private struct OrganizationFormSheet: View {
     var existing: Organization?
 
     @State private var setupStep: AccountSetupStep = .account
+    @State private var provider: ProviderKind = .github
+    @State private var serverURL: String = "https://github.com"
+    @State private var accountScope: RunnerAccountScope = .organization
     @State private var name: String = ""
     @State private var accountType: GitHubAccountType = .organization
     @State private var repositoryName: String = ""
@@ -740,13 +900,13 @@ private struct OrganizationFormSheet: View {
     }
 
     private var selectedCredentialMode: GitHubCredentialMode {
-        accountType == .enterprise ? .accessToken : credentialMode
+        provider == .gitea || accountType == .enterprise ? .accessToken : credentialMode
     }
 
     private var accountDisplayName: String {
         let owner = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let repo = repositoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if accountType == .repository, !repo.isEmpty {
+        if (provider == .gitea ? accountScope == .repository : accountType == .repository), !repo.isEmpty {
             return "\(owner)/\(repo)"
         }
         return owner
@@ -755,7 +915,14 @@ private struct OrganizationFormSheet: View {
     private var canSave: Bool {
         let hasAccountName = !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasRepositoryName =
-            accountType != .repository || !repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            accountScope != .repository || !repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if provider == .gitea {
+            return hasAccountName
+                && hasRepositoryName
+                && URL(string: serverURL)?.host != nil
+                && (hasAccessToken || !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                && runnerSettingsAreReady
+        }
         switch accountType {
         case .repository, .organization:
             guard hasAccountName && hasRepositoryName else { return false }
@@ -784,7 +951,8 @@ private struct OrganizationFormSheet: View {
         switch setupStep {
         case .account:
             return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && (accountType != .repository
+                && ((provider == .gitea
+                    ? accountScope : RunnerAccountScope(rawValue: accountType.rawValue) ?? .instance) != .repository
                     || !repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         case .credentials:
             return credentialsAreReady
@@ -823,43 +991,107 @@ private struct OrganizationFormSheet: View {
 
                     if shouldShow(.account) {
                         Section("Runner Ownership") {
-                            if !locksAccountIdentity {
-                                Picker("Owned by", selection: $accountType) {
-                                    ForEach(availableAccountTypes) { type in
-                                        Text("\(type.displayName) owned").tag(type)
+                            Picker("Provider", selection: $provider) {
+                                ForEach(ProviderKind.allCases) { provider in
+                                    Text(provider.displayName).tag(provider)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(locksAccountIdentity)
+                            .onChange(of: provider) { _, newProvider in
+                                guard !isEditing else { return }
+                                switch newProvider {
+                                case .gitea:
+                                    serverURL = "https://git.example.com"
+                                    accountScope = .organization
+                                    if labels == "self-hosted, macOS, ARM64" {
+                                        labels = "macos-arm64:host"
+                                    }
+                                case .github:
+                                    serverURL = "https://github.com"
+                                    if labels == "macos-arm64:host" {
+                                        labels = "self-hosted, macOS, ARM64"
+                                    }
+                                }
+                            }
+
+                            if provider == .gitea {
+                                TextField("Gitea instance URL", text: $serverURL)
+                                    .help("The externally reachable ROOT_URL, for example https://git.example.com")
+
+                                Picker("Runner scope", selection: $accountScope) {
+                                    ForEach(RunnerAccountScope.allCases) { scope in
+                                        Text(scope.displayName).tag(scope)
                                     }
                                 }
                                 .pickerStyle(.segmented)
                                 .disabled(locksAccountIdentity)
 
-                                if accountType == .enterprise {
-                                    GuidanceCallout(item: .enterprise)
+                                switch accountScope {
+                                case .repository:
+                                    TextField("Owner", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                    TextField("Repository", text: $repositoryName)
+                                        .disabled(locksAccountIdentity)
+                                case .organization:
+                                    TextField("Organization name", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                case .instance:
+                                    TextField("Account display name", text: $name)
+                                        .help("A local name for this instance-wide runner account")
+                                        .disabled(locksAccountIdentity)
                                 }
-                            }
+                                FieldInlineHint(
+                                    text:
+                                        "Tarmac polls Gitea outbound and registers a fresh ephemeral act_runner for every job."
+                                )
+                            } else {
+                                if !locksAccountIdentity {
+                                    Picker("Owned by", selection: $accountType) {
+                                        ForEach(availableAccountTypes) { type in
+                                            Text("\(type.displayName) owned").tag(type)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .disabled(locksAccountIdentity)
 
-                            switch accountType {
-                            case .repository:
-                                TextField("Owner", text: $name)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The user or organization login from github.com/<owner>/<repo>")
-                                TextField("Repository", text: $repositoryName)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The repository name only, without the owner")
-                            case .organization:
-                                TextField("Organization name", text: $name)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The organization login as shown in github.com/<name>")
-                            case .enterprise:
-                                TextField("Enterprise slug", text: $name)
-                                    .disabled(locksAccountIdentity)
-                                    .help("The enterprise slug as shown in github.com/enterprises/<slug>")
-                            }
-                            FieldInlineHint(text: tarmacFieldDetail(.accountName))
+                                    if accountType == .enterprise {
+                                        GuidanceCallout(item: .enterprise)
+                                    }
+                                }
 
+                                switch accountType {
+                                case .repository:
+                                    TextField("Owner", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The user or organization login from github.com/<owner>/<repo>")
+                                    TextField("Repository", text: $repositoryName)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The repository name only, without the owner")
+                                case .organization:
+                                    TextField("Organization name", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The organization login as shown in github.com/<name>")
+                                case .enterprise:
+                                    TextField("Enterprise slug", text: $name)
+                                        .disabled(locksAccountIdentity)
+                                        .help("The enterprise slug as shown in github.com/enterprises/<slug>")
+                                }
+                                FieldInlineHint(text: tarmacFieldDetail(.accountName))
+                            }
                         }
                     }
 
-                    if accountType != .enterprise && shouldShow(.credentials) {
+                    if provider == .gitea && shouldShow(.credentials) {
+                        Section("Gitea Access") {
+                            FieldInlineHint(
+                                text: accountScope == .instance
+                                    ? "Instance runners require an administrator API token. The token is stored in Keychain."
+                                    : "Use an API token that can read Actions jobs and manage runners for this scope."
+                            )
+                            accessTokenFields(hint: nil)
+                        }
+                    } else if accountType != .enterprise && shouldShow(.credentials) {
                         Section("Credentials") {
                             Picker("Credential mode", selection: $credentialMode) {
                                 ForEach(GitHubCredentialMode.allCases) { mode in
@@ -975,47 +1207,49 @@ private struct OrganizationFormSheet: View {
                     }
 
                     if shouldShow(.runner) {
-                        Section("Runner Scale Set") {
-                            TextField("Scale set name", text: $scaleSetName)
-                                .help("Name used to create the scale set, and to find it again later.")
+                        if provider == .github {
+                            Section("Runner Scale Set") {
+                                TextField("Scale set name", text: $scaleSetName)
+                                    .help("Name used to create the scale set, and to find it again later.")
 
-                            HStack {
-                                Button {
-                                    createScaleSet()
-                                } label: {
-                                    if scaleSetCreationInFlight {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Label("Create / Find Scale Set", systemImage: "plus.rectangle.on.folder")
+                                HStack {
+                                    Button {
+                                        createScaleSet()
+                                    } label: {
+                                        if scaleSetCreationInFlight {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Label("Create / Find Scale Set", systemImage: "plus.rectangle.on.folder")
+                                        }
                                     }
+                                    .controlSize(.small)
+                                    .disabled(!canCreateScaleSet || scaleSetCreationInFlight)
+
+                                    Spacer()
                                 }
-                                .controlSize(.small)
-                                .disabled(!canCreateScaleSet || scaleSetCreationInFlight)
+                                FieldInlineHint(
+                                    text:
+                                        "GitHub has no web UI to create a runner scale set. This creates one, or reuses an existing set with the same name, then keeps the numeric ID internally for polling."
+                                )
+                                if let scaleSetCreationError {
+                                    Text(scaleSetCreationError)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
 
-                                Spacer()
-                            }
-                            FieldInlineHint(
-                                text:
-                                    "GitHub has no web UI to create a runner scale set. This creates one, or reuses an existing set with the same name, then keeps the numeric ID internally for polling."
-                            )
-                            if let scaleSetCreationError {
-                                Text(scaleSetCreationError)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            DisclosureGroup("Advanced") {
-                                TextField("Scale Set ID", text: $scaleSetId)
-                                    .help("Manual fallback for the numeric Actions Runner Scale Set ID")
-                                FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
+                                DisclosureGroup("Advanced") {
+                                    TextField("Scale Set ID", text: $scaleSetId)
+                                        .help("Manual fallback for the numeric Actions Runner Scale Set ID")
+                                    FieldInlineHint(text: tarmacFieldDetail(.scaleSetId))
+                                }
                             }
                         }
 
                         Section("Runner Labels") {
                             TextField("Labels (comma-separated)", text: $labels)
-                                .help("e.g. self-hosted, macOS, ARM64")
+                                .help(provider == .gitea ? "e.g. macos-arm64:host" : "e.g. self-hosted, macOS, ARM64")
                             FieldInlineHint(text: tarmacFieldDetail(.labels))
                         }
                     }
@@ -1143,7 +1377,9 @@ private struct OrganizationFormSheet: View {
 
                     if shouldShow(.repositories) {
                         Section("Repository Filter") {
-                            GuidanceCallout(item: .repository)
+                            if provider == .github {
+                                GuidanceCallout(item: .repository)
+                            }
 
                             Picker("Filter mode", selection: $filterMode) {
                                 ForEach(RepositoryFilterMode.allCases, id: \.self) { mode in
@@ -1179,13 +1415,13 @@ private struct OrganizationFormSheet: View {
                     if shouldShow(.review) {
                         Section("Ready to Save") {
                             setupReviewRow(
-                                title: "\(accountType.displayName) owned",
+                                title: "\(provider.displayName) \(accountScope.displayName)",
                                 detail: accountDisplayName,
                                 systemImage: accountReviewSystemImage,
                                 isReady: !accountDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             )
 
-                            if selectedCredentialMode == .githubApp {
+                            if provider == .github && selectedCredentialMode == .githubApp {
                                 setupReviewRow(
                                     title: "GitHub App",
                                     detail:
@@ -1262,6 +1498,9 @@ private struct OrganizationFormSheet: View {
         .frame(width: 720, height: 780)
         .onAppear {
             if let org = existing {
+                provider = org.provider
+                serverURL = org.serverURL
+                accountScope = org.scope
                 name = org.name
                 accountType = org.accountType
                 repositoryName = org.repositoryName ?? ""
@@ -1332,10 +1571,13 @@ private struct OrganizationFormSheet: View {
     }
 
     private var runnerSourceIsReady: Bool {
-        Int(scaleSetId) != nil || repositoryPollingIsConfigured
+        provider == .gitea || Int(scaleSetId) != nil || repositoryPollingIsConfigured
     }
 
     private var runnerSourceReviewDetail: String {
+        if provider == .gitea {
+            return "Ephemeral act_runner via 10-second outbound polling"
+        }
         if let scaleSetId = Int(scaleSetId) {
             let name = scaleSetName.trimmingCharacters(in: .whitespacesAndNewlines)
             return name.isEmpty ? "Scale set \(scaleSetId)" : "\(name) (\(scaleSetId))"
@@ -1347,13 +1589,14 @@ private struct OrganizationFormSheet: View {
     }
 
     private var accountReviewSystemImage: String {
+        if provider == .gitea { return "network" }
         switch accountType {
         case .repository:
-            "book.closed"
+            return "book.closed"
         case .organization:
-            "building.2"
+            return "building.2"
         case .enterprise:
-            "building.columns"
+            return "building.columns"
         }
     }
 
@@ -1883,25 +2126,37 @@ private struct OrganizationFormSheet: View {
         let trimmedScaleSetName = scaleSetName.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedScaleSetName =
             trimmedScaleSetName.isEmpty ? SettingsViewModel.defaultScaleSetName : trimmedScaleSetName
+        let resolvedAccountType: GitHubAccountType = {
+            guard provider == .gitea else { return accountType }
+            switch accountScope {
+            case .repository: return .repository
+            case .organization: return .organization
+            case .instance: return .enterprise
+            }
+        }()
         let parsedInstallationId: Int
-        if selectedCredentialMode == .githubApp {
+        if provider == .github && selectedCredentialMode == .githubApp {
             guard let id = Int(installationId) else { return }
             parsedInstallationId = id
         } else {
             parsedInstallationId = 0
         }
-        let parsedScaleSetId = Int(scaleSetId)
+        let parsedScaleSetId = provider == .github ? Int(scaleSetId) : nil
         let parsedImageProfile = imageProfileEnabled ? currentImageProfile : nil
         let parsedRepos = parsedRepositoryList
 
         if var org = existing {
             let previousAccountType = org.accountType
             let previousCredentialMode = org.credentialMode
+            org.provider = provider
+            org.serverURL =
+                provider == .gitea ? serverURL.trimmingCharacters(in: .whitespacesAndNewlines) : "https://github.com"
+            org.scope = provider == .gitea ? accountScope : resolvedScope(for: resolvedAccountType)
             org.name = trimmedName
-            org.accountType = accountType
-            org.repositoryName = accountType == .repository ? trimmedRepositoryName : nil
+            org.accountType = resolvedAccountType
+            org.repositoryName = resolvedAccountType == .repository ? trimmedRepositoryName : nil
             org.credentialMode = selectedCredentialMode
-            org.appId = selectedCredentialMode == .githubApp ? appId : ""
+            org.appId = provider == .github && selectedCredentialMode == .githubApp ? appId : ""
             org.installationId = parsedInstallationId
             org.scaleSetId = parsedScaleSetId
             org.scaleSetName = resolvedScaleSetName
@@ -1912,7 +2167,7 @@ private struct OrganizationFormSheet: View {
             viewModel.updateOrganization(org)
             viewModel.reconcileCredentials(
                 for: org,
-                newType: accountType,
+                newType: resolvedAccountType,
                 previousType: previousAccountType,
                 newCredentialMode: selectedCredentialMode,
                 previousCredentialMode: previousCredentialMode,
@@ -1926,11 +2181,15 @@ private struct OrganizationFormSheet: View {
             }
         } else {
             var org = Organization(
+                provider: provider,
+                serverURL: provider == .gitea
+                    ? serverURL.trimmingCharacters(in: .whitespacesAndNewlines) : "https://github.com",
+                scope: provider == .gitea ? accountScope : resolvedScope(for: resolvedAccountType),
                 name: trimmedName,
-                accountType: accountType,
-                repositoryName: accountType == .repository ? trimmedRepositoryName : nil,
+                accountType: resolvedAccountType,
+                repositoryName: resolvedAccountType == .repository ? trimmedRepositoryName : nil,
                 credentialMode: selectedCredentialMode,
-                appId: selectedCredentialMode == .githubApp ? appId : "",
+                appId: provider == .github && selectedCredentialMode == .githubApp ? appId : "",
                 installationId: parsedInstallationId,
                 scaleSetId: parsedScaleSetId,
                 scaleSetName: resolvedScaleSetName,
@@ -1942,7 +2201,7 @@ private struct OrganizationFormSheet: View {
             viewModel.addOrganization(org)
 
             // Save pending key data for new org
-            if selectedCredentialMode == .githubApp, let keyData = pendingKeyData {
+            if provider == .github && selectedCredentialMode == .githubApp, let keyData = pendingKeyData {
                 _ = viewModel.configStore.savePrivateKey(keyData, for: org)
             }
             if selectedCredentialMode == .accessToken {
@@ -1950,6 +2209,14 @@ private struct OrganizationFormSheet: View {
             }
         }
         dismiss()
+    }
+
+    private func resolvedScope(for type: GitHubAccountType) -> RunnerAccountScope {
+        switch type {
+        case .repository: .repository
+        case .organization: .organization
+        case .enterprise: .instance
+        }
     }
 
     private var currentImageProfile: RunnerImageProfile {

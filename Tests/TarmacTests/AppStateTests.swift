@@ -18,9 +18,7 @@ struct AppStateTests {
         let tempDir = try TestFactories.makeTempDir()
 
         try configStore.configureStorage(at: tempDir)
-        if let warmRunnerConfig {
-            configStore.warmRunnerConfig = warmRunnerConfig
-        }
+        configStore.warmRunnerConfig = warmRunnerConfig ?? WarmRunnerConfiguration(isEnabled: false)
         if hasReadyVM {
             try TestFactories.prepareReadyRunnerHostStorage(for: configStore)
         }
@@ -201,6 +199,25 @@ struct AppStateTests {
         return try #require(appState.queueViewModel.allJobs.first(where: { $0.id == jobId }))
     }
 
+    @MainActor
+    private func waitForWarmRunner(
+        appState: AppState,
+        isAvailable: Bool,
+        timeout: Duration = .seconds(5)
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if (appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle) == isAvailable {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let controlError = appState.vmStatusViewModel.idleVMControlErrorMessage ?? "none"
+        Issue.record(
+            "Timed out waiting for warm runner availability to become \(isAvailable); role=\(String(describing: appState.vmStatusViewModel.activeVMRole)), operation=\(String(describing: appState.vmStatusViewModel.idleVMControlOperation)), error=\(controlError)"
+        )
+    }
+
     @Test("start with no orgs logs warning and returns early")
     @MainActor
     func startNoOrgs() async throws {
@@ -223,6 +240,52 @@ struct AppStateTests {
 
         await appState.stop()
         #expect(!appState.queueViewModel.isPolling)
+    }
+
+    @Test("start prewarms a jobless VM before polling")
+    @MainActor
+    func startPrewarmsVM() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _, mock) = try await makeAppState(
+            orgs: [org],
+            withPrivateKeys: true,
+            warmRunnerConfig: WarmRunnerConfiguration(isEnabled: true)
+        )
+
+        await appState.start()
+
+        #expect(appState.queueViewModel.isPolling)
+        #expect(mock.bootCallCount == 1)
+        #expect(appState.vmStatusViewModel.activeVM?.jobId == nil)
+        #expect(appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle)
+        #expect(appState.vmStatusViewModel.warmRunnerJobsServed == 0)
+        #expect(appState.isWarmRunnerIdleReleaseScheduled)
+
+        await appState.stop()
+    }
+
+    @Test("warm runner setting applies immediately without restart")
+    @MainActor
+    func warmRunnerSettingAppliesLive() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let (appState, _, mock) = try await makeAppState(
+            orgs: [org],
+            withPrivateKeys: true,
+            warmRunnerConfig: WarmRunnerConfiguration(isEnabled: false)
+        )
+
+        await appState.start()
+        #expect(mock.bootCallCount == 0)
+
+        appState.settingsViewModel.warmRunnerConfig = WarmRunnerConfiguration(isEnabled: true)
+        try await waitForWarmRunner(appState: appState, isAvailable: true)
+        #expect(mock.bootCallCount == 1)
+
+        appState.settingsViewModel.warmRunnerConfig = WarmRunnerConfiguration(isEnabled: false)
+        try await waitForWarmRunner(appState: appState, isAvailable: false)
+        #expect(mock.stopCallCount == 1)
+
+        await appState.stop()
     }
 
     @Test("stop cancels sync and stops polling")
@@ -523,7 +586,10 @@ struct AppStateTests {
         #expect(appState.isWarmRunnerIdleReleaseScheduled)
         #expect(appState.vmStatusViewModel.activeVM != nil)
         #expect(appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle)
-        #expect(appState.vmStatusViewModel.warmRunnerJobsServed == 0)
+        #expect(appState.vmStatusViewModel.warmRunnerJobsServed == 1)
+        #expect(appState.vmStatusViewModel.workers.count == 1)
+        #expect(appState.vmStatusViewModel.workers.first?.lifecycleState == .warmIdle)
+        #expect(appState.vmStatusViewModel.workers.first?.task?.id == 501)
         #expect(mock.stopCallCount == 0)
 
         await appState.stop()
@@ -553,7 +619,84 @@ struct AppStateTests {
 
         #expect(!appState.isWarmRunnerIdleReleaseScheduled)
         #expect(appState.vmStatusViewModel.activeVM == nil)
+        #expect(appState.vmStatusViewModel.workers.isEmpty)
         #expect(mock.stopCallCount == 1)
+
+        await appState.stop()
+    }
+
+    @Test("idle warm runner can stay alive and resume automatic shutdown")
+    @MainActor
+    func idleWarmRunnerKeepAliveAndResumeAutoShutdown() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let warmConfig = WarmRunnerConfiguration(isEnabled: true, idleShutdownSeconds: 60)
+        let (appState, _, mock) = try await makeAppState(
+            orgs: [org],
+            withPrivateKeys: true,
+            warmRunnerConfig: warmConfig,
+            warmRunnerIdleShutdownSecondsOverride: 1
+        )
+
+        await appState.start()
+        await appState.testing_handleScaleSetMessages([jobAvailableMessage(jobId: 504, org: org.name)], org: org)
+        try await waitForRunningJob(appState: appState, jobId: 504)
+        await appState.testing_handleScaleSetMessages([jobCompletedMessage(jobId: 504)], org: org)
+
+        appState.keepIdleWarmRunnerAlive()
+
+        #expect(appState.vmStatusViewModel.isWarmRunnerPinned)
+        #expect(appState.vmStatusViewModel.warmRunnerIdleShutdownAt == nil)
+        #expect(!appState.isWarmRunnerIdleReleaseScheduled)
+
+        try await Task.sleep(for: .milliseconds(1_500))
+        #expect(mock.stopCallCount == 0)
+        #expect(appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle)
+
+        appState.resumeIdleWarmRunnerAutomaticShutdown()
+        #expect(!appState.vmStatusViewModel.isWarmRunnerPinned)
+        #expect(appState.vmStatusViewModel.warmRunnerIdleShutdownAt != nil)
+        #expect(appState.isWarmRunnerIdleReleaseScheduled)
+
+        try await Task.sleep(for: .milliseconds(1_500))
+        #expect(mock.stopCallCount == 1)
+        #expect(appState.vmStatusViewModel.activeVM == nil)
+
+        await appState.stop()
+    }
+
+    @Test("idle warm runner supports restart and immediate shutdown")
+    @MainActor
+    func idleWarmRunnerRestartAndShutdown() async throws {
+        let org = TestFactories.makeOrg(scaleSetId: 42)
+        let warmConfig = WarmRunnerConfiguration(isEnabled: true, idleShutdownSeconds: 60)
+        let (appState, _, mock) = try await makeAppState(
+            orgs: [org],
+            withPrivateKeys: true,
+            warmRunnerConfig: warmConfig,
+            warmRunnerIdleShutdownSecondsOverride: 30
+        )
+
+        await appState.start()
+        await appState.testing_handleScaleSetMessages([jobAvailableMessage(jobId: 505, org: org.name)], org: org)
+        try await waitForRunningJob(appState: appState, jobId: 505)
+        await appState.testing_handleScaleSetMessages([jobCompletedMessage(jobId: 505)], org: org)
+        let originalInstance = try #require(appState.vmStatusViewModel.activeVM)
+
+        await appState.restartIdleWarmRunner()
+
+        #expect(mock.stopCallCount == 1)
+        #expect(mock.bootCallCount == 2)
+        #expect(appState.vmStatusViewModel.activeVM?.id == originalInstance.id)
+        #expect(appState.vmStatusViewModel.activeVM?.diskImagePath == originalInstance.diskImagePath)
+        #expect(appState.vmStatusViewModel.activeVMRole == .warmRunnerIdle)
+        #expect(appState.vmStatusViewModel.idleVMControlOperation == nil)
+        #expect(appState.isWarmRunnerIdleReleaseScheduled)
+
+        await appState.shutDownIdleWarmRunner()
+
+        #expect(mock.stopCallCount == 2)
+        #expect(appState.vmStatusViewModel.activeVM == nil)
+        #expect(!appState.isWarmRunnerIdleReleaseScheduled)
 
         await appState.stop()
     }

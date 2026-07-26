@@ -1,9 +1,9 @@
 # End-to-End Runbook
 
 How to take Tarmac from a clean checkout to a real GitHub Actions job running
-inside a fresh macOS 26 VM and torn down afterwards. This is the manual setup
-behind issue OSS-176. Each step links to the deeper reference doc where one
-exists.
+inside a fresh macOS 27 VM and torn down afterwards. Base-image owner creation,
+automatic login, and bootstrap installation are unattended.
+Each step links to the deeper reference doc where one exists.
 
 The host code path is complete — there are no stubs in auth, polling, dispatch,
 VM boot, teardown, or cache. What stands between a clean checkout and a green
@@ -13,7 +13,7 @@ the first VM boots and the host waits out the runner-completion timeout (default
 
 ## 1. Host machine
 
-- Apple Silicon Mac running macOS 26.
+- Apple Silicon Mac running macOS 27.
 - Tarmac built and signed with the Virtualization entitlements
   (`com.apple.security.virtualization`, `com.apple.security.network.client`).
   Building and running the signed app from Xcode is enough; no extra user step.
@@ -31,30 +31,31 @@ See [base-image-preparation.md](base-image-preparation.md) for the full steps.
      (`Platform/hardwareModel.bin`, `machineIdentifier.bin`,
      `auxiliaryStorage.bin`) must exist alongside it. They are generated during
      `createBaseImage`; a VM boot fails immediately without them.
-2. Boot the base image manually and install the build toolchain: Xcode,
+2. The wizard starts macOS 27 with Apple's guest-provisioning protocol, creates
+   the `tarmac` volume owner with a Keychain-protected generated password,
+   enables automatic login, and installs the guest bootstrap over its private
+   SSH provisioning channel. Setup Assistant is not shown. Then install the build toolchain:
+   Xcode,
    `xcodebuild -license accept`, `xcode-select --switch`, plus any profile tools
    (Flutter, Node, Ruby/CocoaPods, Expo/EAS) per the runner image profile.
-3. Install the guest bootstrap daemon from inside the base image — see step 3.
-4. Verify the image (`VMEngine.verifyBaseImage`) so it gets a verified marker.
+3. Verify the image (`VMEngine.verifyBaseImage`) so it gets a verified marker.
 
 ## 3. Guest bootstrap (once per base image)
 
-See [guest-bootstrap.md](guest-bootstrap.md). Inside the prepared base image,
-copy the three files from `Resources/GuestBootstrap/` and run, as root:
-
-```sh
-sudo ./install-tarmac-runner-bootstrap.sh
-```
-
-This installs `/usr/local/libexec/tarmac-runner-bootstrap` and the
+See [guest-bootstrap.md](guest-bootstrap.md). The base-image wizard installs
+the three bundled resources automatically after macOS 27 provisions the
+`tarmac` owner. The LaunchDaemon disables screen lock and guest sleep. This
+installs
+`/usr/local/libexec/tarmac-runner-bootstrap` and the
 `studio.seventwo.tarmac.runner-bootstrap` LaunchDaemon. On every job boot the
 daemon mounts the VirtioFS `shared` tag, optionally mounts `actions-cache`,
-runs `./run.sh --jitconfig`, writes `bootstrap.log` / `runner.log` /
+runs `./run.sh --jitconfig` only after `tarmac` is the console user, writes
+`bootstrap.log` / `runner.log` /
 `exit-code` / `completion.json` back to the shared job directory, and shuts the
 guest down.
 
-If this is not installed, the guest boots but never mounts the shared directory
-or starts the runner, and the host waits out the full completion timeout.
+Verification fails closed if this is not installed, preventing a guest that
+cannot mount its shared directory or start the runner from entering the queue.
 
 ## 4. GitHub account (per org or enterprise)
 

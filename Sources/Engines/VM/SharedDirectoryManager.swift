@@ -26,13 +26,14 @@ struct SharedDirectoryManager: Sendable {
         try validateGuestConfig(guestConfig)
 
         if fm.fileExists(atPath: jobDir.path) {
-            try fm.removeItem(at: jobDir)
+            try ManagedArtifactRemover.removeItem(at: jobDir, fileManager: fm)
         }
         try fm.createDirectory(at: jobDir, withIntermediateDirectories: true)
         try allowGuestWrites(to: jobDir, fileManager: fm)
 
         let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         try fm.copyItem(at: runnerPath, to: runnerDestination)
+        try installResourceTelemetryWrapper(in: runnerDestination, fileManager: fm)
         try writeGuestConfig(guestConfig, in: jobDir, fileManager: fm)
         try precreateGuestWritableResultFiles(in: jobDir, fileManager: fm)
 
@@ -50,12 +51,31 @@ struct SharedDirectoryManager: Sendable {
     func cleanupJob(jobId: Int64) throws {
         let jobDir = jobDirectory(for: jobId)
         guard FileManager.default.fileExists(atPath: jobDir.path) else { return }
-        try FileManager.default.removeItem(at: jobDir)
+        try ManagedArtifactRemover.removeItem(at: jobDir)
         Log.vm.info("Cleaned up shared directory for job \(jobId)")
     }
 
     var warmRunnerDirectory: URL {
         jobsDirectory.appendingPathComponent(GuestBootstrapContract.warmRunnerJobDirectoryName, isDirectory: true)
+    }
+
+    func prepareWarmRunner() throws -> URL {
+        let directory = warmRunnerDirectory
+        let fm = FileManager.default
+
+        if fm.fileExists(atPath: directory.path) {
+            try ManagedArtifactRemover.removeItem(at: directory, fileManager: fm)
+        }
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        try allowGuestWrites(to: directory, fileManager: fm)
+        try precreateGuestWritableResultFiles(in: directory, fileManager: fm)
+        try enableWarmMode(in: directory)
+
+        try fm.createDirectory(at: storage.actionsCacheDirectory, withIntermediateDirectories: true)
+        try allowGuestWrites(to: storage.actionsCacheDirectory, fileManager: fm)
+
+        Log.vm.info("Prepared warm runner shared directory at \(directory.path)")
+        return directory
     }
 
     func prepareWarmRunnerJob(
@@ -76,9 +96,10 @@ struct SharedDirectoryManager: Sendable {
 
         let runnerDestination = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         if fm.fileExists(atPath: runnerDestination.path) {
-            try fm.removeItem(at: runnerDestination)
+            try ManagedArtifactRemover.removeItem(at: runnerDestination, fileManager: fm)
         }
         try fm.copyItem(at: runnerPath, to: runnerDestination)
+        try installResourceTelemetryWrapper(in: runnerDestination, fileManager: fm)
         try writeGuestConfig(guestConfig, in: jobDir, fileManager: fm)
         try precreateGuestWritableResultFiles(in: jobDir, fileManager: fm)
 
@@ -90,7 +111,7 @@ struct SharedDirectoryManager: Sendable {
                 isDirectory: true
             )
             if fm.fileExists(atPath: signingDir.path) {
-                try fm.removeItem(at: signingDir)
+                try ManagedArtifactRemover.removeItem(at: signingDir, fileManager: fm)
             }
         }
 
@@ -171,6 +192,14 @@ struct SharedDirectoryManager: Sendable {
             guard !labels.isEmpty else {
                 throw SharedDirectoryError.incompleteRegistrationConfig
             }
+        case .giteaEphemeral(let instanceURL, let registrationToken, let runnerName, let labels):
+            guard !instanceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                !registrationToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                !runnerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                !labels.isEmpty
+            else {
+                throw SharedDirectoryError.incompleteRegistrationConfig
+            }
         }
     }
 
@@ -184,8 +213,11 @@ struct SharedDirectoryManager: Sendable {
         let runnerURLPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerURLFileName)
         let runnerNamePath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerNameFileName)
         let runnerLabelsPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerLabelsFileName)
+        let runnerProviderPath = jobDir.appendingPathComponent(GuestBootstrapContract.runnerProviderFileName)
 
-        for path in [jitConfigPath, registrationTokenPath, runnerURLPath, runnerNamePath, runnerLabelsPath] {
+        for path in [
+            jitConfigPath, registrationTokenPath, runnerURLPath, runnerNamePath, runnerLabelsPath, runnerProviderPath,
+        ] {
             if fm.fileExists(atPath: path.path) {
                 try fm.removeItem(at: path)
             }
@@ -199,6 +231,13 @@ struct SharedDirectoryManager: Sendable {
             try url.write(to: runnerURLPath, atomically: true, encoding: .utf8)
             try runnerName.write(to: runnerNamePath, atomically: true, encoding: .utf8)
             try labels.joined(separator: ",").write(to: runnerLabelsPath, atomically: true, encoding: .utf8)
+            try "github\n".write(to: runnerProviderPath, atomically: true, encoding: .utf8)
+        case .giteaEphemeral(let instanceURL, let token, let runnerName, let labels):
+            try token.write(to: registrationTokenPath, atomically: true, encoding: .utf8)
+            try instanceURL.write(to: runnerURLPath, atomically: true, encoding: .utf8)
+            try runnerName.write(to: runnerNamePath, atomically: true, encoding: .utf8)
+            try labels.joined(separator: ",").write(to: runnerLabelsPath, atomically: true, encoding: .utf8)
+            try "gitea\n".write(to: runnerProviderPath, atomically: true, encoding: .utf8)
         }
     }
 
@@ -233,6 +272,18 @@ struct SharedDirectoryManager: Sendable {
             fm.createFile(atPath: url.path, contents: Data())
             try fm.setAttributes([.posixPermissions: 0o666], ofItemAtPath: url.path)
         }
+    }
+
+    private func installResourceTelemetryWrapper(in runnerDirectory: URL, fileManager fm: FileManager) throws {
+        let entrypoint = runnerDirectory.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
+        let originalEntrypoint = runnerDirectory.appendingPathComponent(
+            GuestBootstrapContract.originalRunnerEntrypointName
+        )
+
+        try fm.moveItem(at: entrypoint, to: originalEntrypoint)
+        try Self.resourceTelemetryRunnerWrapper.write(to: entrypoint, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: entrypoint.path)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: originalEntrypoint.path)
     }
 
     private func writeSigningInjection(
@@ -356,6 +407,107 @@ struct SharedDirectoryManager: Sendable {
         export TARMAC_APPLE_SIGNING_CONFIGURED=1
         """
     }
+
+    private static let resourceTelemetryRunnerWrapper = #"""
+        #!/bin/bash
+        set -u -o pipefail
+
+        SCRIPT_DIR="$(cd "$(/usr/bin/dirname "$0")" && /bin/pwd)"
+        SHARED_MOUNT="\#(GuestBootstrapContract.sharedMountPoint)"
+        RESOURCE_FILE="${SHARED_MOUNT}/\#(GuestBootstrapContract.workerResourceUsageFileName)"
+        RESOURCE_PID_FILE="${SHARED_MOUNT}/\#(GuestBootstrapContract.workerResourceUsagePIDFileName)"
+        ORIGINAL_RUNNER="${SCRIPT_DIR}/\#(GuestBootstrapContract.originalRunnerEntrypointName)"
+
+        sample_resources() {
+            local cpu_idle
+            local cpu_percent
+            local memory_total_bytes
+            local memory_used_bytes
+            local disk_values
+            local disk_used_bytes
+            local disk_total_bytes
+            local sampled_at
+            local temporary_file
+
+            cpu_idle="$(/usr/bin/top -l 1 -n 0 -F -stats cpu 2>/dev/null | /usr/bin/awk '
+                /CPU usage/ {
+                    for (index = 1; index <= NF; index += 1) {
+                        if ($index == "idle") {
+                            value = $(index - 1)
+                            gsub("%", "", value)
+                            print value
+                            exit
+                        }
+                    }
+                }
+            ')"
+            cpu_percent="$(/usr/bin/awk -v idle="${cpu_idle:-100}" 'BEGIN {
+                value = 100 - idle
+                if (value < 0) value = 0
+                if (value > 100) value = 100
+                printf "%.2f", value
+            }')"
+
+            memory_total_bytes="$(/usr/sbin/sysctl -n hw.memsize 2>/dev/null || /bin/echo 0)"
+            memory_used_bytes="$(/usr/bin/vm_stat 2>/dev/null | /usr/bin/awk -v total="${memory_total_bytes:-0}" '
+                /page size of/ { page_size = $8 }
+                /Pages free:/ { gsub(/[.]/, "", $3); available_pages += $3 }
+                /Pages inactive:/ { gsub(/[.]/, "", $3); available_pages += $3 }
+                /Pages speculative:/ { gsub(/[.]/, "", $3); available_pages += $3 }
+                END {
+                    used = total - (available_pages * page_size)
+                    if (used < 0) used = 0
+                    if (used > total) used = total
+                    printf "%.0f", used
+                }
+            ')"
+
+            disk_values="$(/bin/df -k / 2>/dev/null | /usr/bin/awk 'NR == 2 {
+                printf "%.0f %.0f", $3 * 1024, $2 * 1024
+            }')"
+            read -r disk_used_bytes disk_total_bytes <<< "${disk_values:-0 0}"
+
+            sampled_at="$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            temporary_file="${RESOURCE_FILE}.$$"
+            /usr/bin/printf '{"sampledAt":"%s","cpuPercent":%s,"memoryUsedBytes":%s,"memoryTotalBytes":%s,"diskUsedBytes":%s,"diskTotalBytes":%s}\n' \
+                "${sampled_at}" \
+                "${cpu_percent:-0}" \
+                "${memory_used_bytes:-0}" \
+                "${memory_total_bytes:-0}" \
+                "${disk_used_bytes:-0}" \
+                "${disk_total_bytes:-0}" > "${temporary_file}"
+            /bin/mv -f "${temporary_file}" "${RESOURCE_FILE}"
+        }
+
+        resource_loop() {
+            while true; do
+                sample_resources || true
+                /bin/sleep 2
+            done
+        }
+
+        start_resource_sampler() {
+            if [[ -r "${RESOURCE_PID_FILE}" && -r "${RESOURCE_FILE}" ]]; then
+                local existing_pid
+                local modified_at
+                local now
+                existing_pid="$(/bin/cat "${RESOURCE_PID_FILE}" 2>/dev/null || true)"
+                modified_at="$(/usr/bin/stat -f %m "${RESOURCE_FILE}" 2>/dev/null || /bin/echo 0)"
+                now="$(/bin/date +%s)"
+                if [[ -n "${existing_pid}" ]] \
+                    && /bin/kill -0 "${existing_pid}" 2>/dev/null \
+                    && (( now - modified_at < 10 )); then
+                    return 0
+                fi
+            fi
+
+            resource_loop >/dev/null 2>&1 &
+            /usr/bin/printf '%s\n' "$!" > "${RESOURCE_PID_FILE}"
+        }
+
+        start_resource_sampler
+        exec "${ORIGINAL_RUNNER}" "$@"
+        """#
 
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"

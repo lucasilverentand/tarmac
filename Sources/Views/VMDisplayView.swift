@@ -6,28 +6,50 @@ struct VMDisplayView: NSViewRepresentable {
     let virtualMachine: VZVirtualMachine?
     let isInteractive: Bool
 
+    final class Coordinator {
+        var wasInteractive = false
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> VZVirtualMachineView {
         let view = VZVirtualMachineView()
         view.capturesSystemKeys = isInteractive
         view.automaticallyReconfiguresDisplay = true
         view.virtualMachine = virtualMachine
+        view.setAccessibilityLabel("Virtual machine display")
+        context.coordinator.wasInteractive = isInteractive
+        if isInteractive {
+            focus(view)
+        }
         return view
     }
 
     func updateNSView(_ nsView: VZVirtualMachineView, context: Context) {
-        if nsView.virtualMachine !== virtualMachine {
+        let virtualMachineChanged = nsView.virtualMachine !== virtualMachine
+        if virtualMachineChanged {
             nsView.virtualMachine = virtualMachine
         }
         nsView.capturesSystemKeys = isInteractive
 
-        if isInteractive {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
-                nsView.window?.makeKeyAndOrderFront(nil)
-                NSApp.activate()
-            }
-        } else if nsView.window?.firstResponder === nsView {
+        let becameInteractive = isInteractive && !context.coordinator.wasInteractive
+        context.coordinator.wasInteractive = isInteractive
+
+        if becameInteractive || (isInteractive && virtualMachineChanged) {
+            focus(nsView)
+        } else if !isInteractive, nsView.window?.firstResponder === nsView {
             nsView.window?.makeFirstResponder(nil)
+        }
+    }
+
+    private func focus(_ view: VZVirtualMachineView) {
+        DispatchQueue.main.async { [weak view] in
+            guard let view, let window = view.window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(view)
         }
     }
 }
@@ -65,6 +87,9 @@ struct VMDisplayWindow: View {
             }
         }
         .frame(minWidth: 640, minHeight: 400)
+        .onDisappear {
+            source.observe()
+        }
     }
 
     private var header: some View {

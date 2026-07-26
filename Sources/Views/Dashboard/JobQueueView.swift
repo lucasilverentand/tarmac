@@ -2,170 +2,238 @@ import SwiftUI
 
 struct JobQueueView: View {
     let queueViewModel: QueueViewModel
+    let onOpenAccounts: () -> Void
 
     var body: some View {
         ScrollView {
-            if #available(macOS 26.0, *) {
-                GlassEffectContainer(spacing: 16) {
-                    content
+            VStack(alignment: .leading, spacing: 18) {
+                QueueHeader(isPolling: queueViewModel.isPolling)
+                QueueMetrics(
+                    runningCount: queueViewModel.activeJob == nil ? 0 : 1,
+                    pendingCount: queueViewModel.pendingJobs.count,
+                    completedTodayCount: queueViewModel.completedTodayCount
+                )
+
+                if queueViewModel.allJobs.isEmpty {
+                    QueueEmptyState(
+                        isPolling: queueViewModel.isPolling,
+                        onOpenAccounts: onOpenAccounts
+                    )
+                } else {
+                    QueueSections(
+                        activeJob: queueViewModel.activeJob,
+                        pendingJobs: queueViewModel.pendingJobs,
+                        completedJobs: queueViewModel.completedJobs
+                    )
                 }
-            } else {
-                content
             }
+            .padding(22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+}
 
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            header
-            metrics
+private struct QueueHeader: View {
+    let isPolling: Bool
 
-            if queueViewModel.allJobs.isEmpty {
-                emptyState
-                    .frame(maxWidth: .infinity, minHeight: 300)
-            } else {
-                queueSections
-            }
-        }
-        .padding(24)
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Runner Queue")
-                    .font(.system(.title2, design: .rounded, weight: .semibold))
-
-                Text("GitHub Actions jobs waiting for a local macOS VM runner.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Label(
-                queueViewModel.isPolling ? "Listening" : "Paused",
-                systemImage: queueViewModel.isPolling ? "dot.radiowaves.left.and.right" : "pause.circle"
+    var body: some View {
+        DashboardPageHeader(
+            title: "Runner Queue",
+            subtitle: "GitHub Actions jobs waiting for a local macOS worker."
+        ) {
+            DashboardStatusBadge(
+                title: isPolling ? "Listening" : "Paused",
+                systemImage: isPolling ? "dot.radiowaves.left.and.right" : "pause.circle.fill",
+                tint: isPolling ? .green : .secondary
             )
-            .font(.callout.weight(.medium))
-            .foregroundStyle(queueViewModel.isPolling ? .green : .secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .dashboardGlassSurface(tint: queueViewModel.isPolling ? .green.opacity(0.12) : nil)
         }
     }
+}
 
-    private var metrics: some View {
-        HStack(spacing: 12) {
-            QueueMetricTile(
+private struct QueueMetrics: View {
+    let runningCount: Int
+    let pendingCount: Int
+    let completedTodayCount: Int
+
+    var body: some View {
+        DashboardMetricStrip {
+            DashboardMetricItem(
                 title: "Running",
-                value: queueViewModel.activeJob == nil ? "0" : "1",
-                systemImage: "play.circle.fill",
+                value: "\(runningCount)",
+                systemImage: "play.fill",
                 tint: .green
             )
-            QueueMetricTile(
+            .frame(maxWidth: .infinity)
+
+            Divider()
+                .frame(height: 34)
+
+            DashboardMetricItem(
                 title: "Pending",
-                value: "\(queueViewModel.pendingJobs.count)",
+                value: "\(pendingCount)",
                 systemImage: "clock.fill",
                 tint: .orange
             )
-            QueueMetricTile(
-                title: "Completed Today",
-                value: "\(queueViewModel.completedTodayCount)",
-                systemImage: "checkmark.circle.fill",
-                tint: .blue
+            .frame(maxWidth: .infinity)
+
+            Divider()
+                .frame(height: 34)
+
+            DashboardMetricItem(
+                title: "Completed today",
+                value: "\(completedTodayCount)",
+                systemImage: "checkmark.circle.fill"
             )
+            .frame(maxWidth: .infinity)
         }
     }
+}
 
-    private var queueSections: some View {
+private struct QueueEmptyState: View {
+    let isPolling: Bool
+    let onOpenAccounts: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 18) {
+                Image(systemName: isPolling ? "dot.radiowaves.left.and.right" : "pause.circle")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(isPolling ? Color.green : Color.secondary)
+                    .frame(width: 48, height: 48)
+                    .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isPolling ? "Waiting for the next workflow" : "Queue polling is paused")
+                        .font(.headline)
+
+                    Text(
+                        isPolling
+                            ? "Tarmac is listening. Jobs appear here as soon as GitHub requests the configured self-hosted runner labels."
+                            : "Review your GitHub account setup to resume receiving jobs."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 20)
+
+                QueueAccountsButton(
+                    isProminent: !isPolling,
+                    action: onOpenAccounts
+                )
+            }
+            .padding(20)
+
+            Divider()
+
+            HStack(alignment: .top, spacing: 16) {
+                QueueFlowStep(
+                    title: "GitHub queues",
+                    detail: "A workflow requests your runner labels.",
+                    systemImage: "arrow.down.to.line"
+                )
+                QueueFlowStep(
+                    title: "Tarmac provisions",
+                    detail: "A clean virtual Mac starts or a warm worker is claimed.",
+                    systemImage: "server.rack"
+                )
+                QueueFlowStep(
+                    title: "The job runs",
+                    detail: "Live progress and diagnostics stay visible here.",
+                    systemImage: "play.rectangle.on.rectangle"
+                )
+            }
+            .padding(20)
+        }
+        .dashboardSurface()
+    }
+}
+
+private struct QueueFlowStep: View {
+    let title: LocalizedStringResource
+    let detail: LocalizedStringResource
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct QueueAccountsButton: View {
+    let isProminent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        if isProminent {
+            Button(action: action) {
+                Label("Review Accounts", systemImage: "building.2")
+            }
+            .buttonStyle(.borderedProminent)
+        } else {
+            Button(action: action) {
+                Label("Review Accounts", systemImage: "building.2")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+}
+
+private struct QueueSections: View {
+    let activeJob: RunnerJob?
+    let pendingJobs: [RunnerJob]
+    let completedJobs: [RunnerJob]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let activeJob = queueViewModel.activeJob {
+            if let activeJob {
                 JobSectionView(title: "Running", count: 1) {
                     JobRowView(job: activeJob, isProminent: true)
                 }
             }
 
-            JobSectionView(title: "Pending", count: queueViewModel.pendingJobs.count) {
-                if queueViewModel.pendingJobs.isEmpty {
+            JobSectionView(title: "Pending", count: pendingJobs.count) {
+                if pendingJobs.isEmpty {
                     EmptySectionText("No pending jobs")
                 } else {
-                    ForEach(queueViewModel.pendingJobs) { job in
+                    ForEach(pendingJobs) { job in
                         JobRowView(job: job)
                     }
                 }
             }
 
-            JobSectionView(title: "Completed", count: queueViewModel.completedJobs.count) {
-                if queueViewModel.completedJobs.isEmpty {
+            JobSectionView(title: "Completed", count: completedJobs.count) {
+                if completedJobs.isEmpty {
                     EmptySectionText("No completed jobs")
                 } else {
-                    ForEach(queueViewModel.completedJobs) { job in
+                    ForEach(completedJobs) { job in
                         JobRowView(job: job)
                     }
                 }
             }
         }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "tray")
-                .font(.system(size: 42, weight: .light))
-                .foregroundStyle(.tertiary)
-                .symbolRenderingMode(.hierarchical)
-
-            VStack(spacing: 6) {
-                Text("No jobs in queue")
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-
-                Text("Jobs will appear here when workflows request self-hosted runners.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-            }
-        }
-        .padding(32)
-        .dashboardGlassSurface()
-    }
-}
-
-private struct QueueMetricTile: View {
-    let title: String
-    let value: String
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value)
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-                    .monospacedDigit()
-
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-        .dashboardGlassSurface(tint: tint.opacity(0.10))
     }
 }
 
 private struct JobSectionView<Content: View>: View {
-    let title: String
+    let title: LocalizedStringResource
     let count: Int
     @ViewBuilder let content: Content
 
@@ -189,15 +257,15 @@ private struct JobSectionView<Content: View>: View {
             VStack(spacing: 0) {
                 content
             }
-            .dashboardGlassSurface()
+            .dashboardSurface()
         }
     }
 }
 
 private struct EmptySectionText: View {
-    let text: String
+    let text: LocalizedStringResource
 
-    init(_ text: String) {
+    init(_ text: LocalizedStringResource) {
         self.text = text
     }
 

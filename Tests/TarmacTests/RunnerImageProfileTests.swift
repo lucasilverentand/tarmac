@@ -349,4 +349,33 @@ struct RunnerImageProfileTests {
         #expect(!profile.isReady)
         #expect(profile.readinessIssues.contains { $0.message.contains("iOS simulator runtime") })
     }
+
+    @Test("approved Apple release matrix preserves the existing macOS 27 image")
+    func approvedAppleReleaseMatrixPreservesBetaImage() {
+        let account = Organization(
+            name: "example",
+            appId: "1",
+            installationId: 1,
+            scaleSetId: 42,
+            scaleSetName: "existing"
+        )
+
+        let pools = RunnerPoolConfiguration.approvedAppleReleaseMatrix(
+            account: account,
+            storageRootPath: "/Tarmac",
+            defaultBaseImagePath: "/Tarmac/BaseImage.img",
+            defaultVMConfiguration: VMConfiguration()
+        )
+
+        let stable = pools.first { $0.releaseChannel == .appStore }
+        let beta = pools.first { $0.releaseChannel == .beta }
+        #expect(stable?.isEnabled == false)
+        #expect(stable?.imageProfile.xcodeVersion == "26.6")
+        #expect(stable?.routingLabels.contains("tarmac-app-store") == true)
+        #expect(beta?.isEnabled == true)
+        #expect(beta?.scaleSetId == 42)
+        #expect(beta?.resolvedBaseImagePath(defaultPath: "") == "/Tarmac/BaseImage.img")
+        #expect(beta?.matches(requestedLabels: ["self-hosted", "tarmac-beta"]) == true)
+        #expect(beta?.matches(requestedLabels: ["self-hosted", "macOS"]) == false)
+    }
 }

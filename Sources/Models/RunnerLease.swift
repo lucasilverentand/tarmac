@@ -2,6 +2,7 @@ import Foundation
 
 struct RunnerJobRequest: Codable, Equatable, Sendable {
     let jobId: Int64
+    let accountID: UUID?
     let organizationName: String
     let runnerRequestId: Int64?
     let workflowName: String?
@@ -10,6 +11,7 @@ struct RunnerJobRequest: Codable, Equatable, Sendable {
 
     init(job: RunnerJob) {
         self.jobId = job.id
+        self.accountID = job.accountID
         self.organizationName = job.organizationName
         self.runnerRequestId = job.runnerRequestId
         self.workflowName = job.workflowName
@@ -20,6 +22,7 @@ struct RunnerJobRequest: Codable, Equatable, Sendable {
 
 enum RunnerLeaseProvider: String, Codable, Sendable {
     case github
+    case gitea
 }
 
 struct ProviderRunnerReference: Codable, Equatable, Sendable {

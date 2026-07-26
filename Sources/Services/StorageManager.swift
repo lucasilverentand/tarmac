@@ -46,6 +46,10 @@ struct StorageManager: Sendable {
     var tmpDirectory: URL { rootDirectory.appendingPathComponent("tmp", isDirectory: true) }
     var partialIPSWURL: URL { tmpDirectory.appendingPathComponent("restore.ipsw.download") }
 
+    static func auxiliaryStorageURL(forDisk diskURL: URL) -> URL {
+        diskURL.deletingPathExtension().appendingPathExtension("auxiliaryStorage")
+    }
+
     func storageReport() -> StorageReport {
         let health = evaluateHealth()
         return StorageReport(
@@ -106,7 +110,15 @@ struct StorageManager: Sendable {
     }
 
     func isGuestBootstrapVerified() -> Bool {
-        FileManager.default.fileExists(atPath: guestBootstrapVerifiedMarkerURL.path)
+        guard let data = try? Data(contentsOf: guestBootstrapVerifiedMarkerURL) else {
+            return false
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let marker = try? decoder.decode(GuestBootstrapVerificationMarker.self, from: data) else {
+            return false
+        }
+        return marker.contractVersion == GuestBootstrapContract.verificationVersion
     }
 
     func markBaseImageVerified(at date: Date = Date()) throws {
@@ -118,7 +130,10 @@ struct StorageManager: Sendable {
 
     func markGuestBootstrapVerified(at date: Date = Date()) throws {
         try FileManager.default.createDirectory(at: platformDirectory, withIntermediateDirectories: true)
-        let marker = GuestBootstrapVerificationMarker(verifiedAt: date)
+        let marker = GuestBootstrapVerificationMarker(
+            verifiedAt: date,
+            contractVersion: GuestBootstrapContract.verificationVersion
+        )
         let data = try JSONEncoder.iso8601.encode(marker)
         try data.write(to: guestBootstrapVerifiedMarkerURL, options: .atomic)
     }
@@ -150,8 +165,12 @@ struct StorageManager: Sendable {
         try prepareBaseDirectories()
 
         let activeDiskPaths = Set(
-            activeLeases.compactMap(\.executionAttempt?.diskImagePath).map {
-                URL(fileURLWithPath: $0).standardizedFileURL.path
+            activeLeases.compactMap(\.executionAttempt?.diskImagePath).flatMap { path in
+                let diskURL = URL(fileURLWithPath: path).standardizedFileURL
+                return [
+                    diskURL.path,
+                    Self.auxiliaryStorageURL(forDisk: diskURL).path,
+                ]
             }
         )
         let activeSharedDirectoryPaths = Set(
@@ -335,7 +354,7 @@ struct StorageManager: Sendable {
         for item in contents {
             let modified = try item.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
             if modified ?? .distantPast < cutoff {
-                try fm.removeItem(at: item)
+                try ManagedArtifactRemover.removeItem(at: item, fileManager: fm)
             }
         }
     }
@@ -420,7 +439,7 @@ struct StorageManager: Sendable {
             let path = url.standardizedFileURL.path
             guard !preservedPaths.contains(path) else { continue }
             result.removedBytes += (try? itemSize(at: url)) ?? 0
-            try fm.removeItem(at: url)
+            try ManagedArtifactRemover.removeItem(at: url, fileManager: fm)
             result.recordRemoval(kind: removedKind)
         }
     }
@@ -485,6 +504,7 @@ struct BaseImageVerificationMarker: Codable, Sendable {
 
 struct GuestBootstrapVerificationMarker: Codable, Sendable {
     let verifiedAt: Date
+    let contractVersion: Int
 }
 
 extension JSONEncoder {

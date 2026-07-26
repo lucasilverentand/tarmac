@@ -8,7 +8,7 @@ import Testing
 struct SettingsViewModelTests {
     private static let supportedHost = HostCapability(
         isVirtualizationSupported: true,
-        operatingSystemVersion: OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+        operatingSystemVersion: OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0)
     )
 
     private func makeVM() -> (SettingsViewModel, ConfigStore, PreviewKeychainService) {
@@ -194,7 +194,7 @@ struct SettingsViewModelTests {
         let (vm, _, _) = makeVM()
 
         let issues = vm.validateConfiguration(hostCapability: Self.supportedHost)
-        #expect(issues.contains { $0.contains("GitHub runner account") })
+        #expect(issues.contains { $0.contains("Actions provider account") })
         #expect(issues.contains { $0.contains("storage location") })
         #expect(issues.contains { $0.contains("base image") })
     }
@@ -266,7 +266,7 @@ struct SettingsViewModelTests {
         )
         let issues = vm.validateConfiguration(hostCapability: unsupported)
         #expect(issues.contains { $0.contains("Virtualization") })
-        #expect(issues.contains { $0.contains("macOS 26") })
+        #expect(issues.contains { $0.contains("macOS 27") })
     }
 
     @Test("vmConfiguration setter persists")

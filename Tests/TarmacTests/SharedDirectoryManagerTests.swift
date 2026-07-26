@@ -22,8 +22,27 @@ struct SharedDirectoryManagerTests {
 
         let runnerCopy = jobDir.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName)
         let runScript = runnerCopy.appendingPathComponent(GuestBootstrapContract.runnerEntrypointName)
+        let originalRunScript = runnerCopy.appendingPathComponent(
+            GuestBootstrapContract.originalRunnerEntrypointName
+        )
         #expect(FileManager.default.fileExists(atPath: runnerCopy.path))
         #expect(FileManager.default.fileExists(atPath: runScript.path))
+        #expect(FileManager.default.isExecutableFile(atPath: runScript.path))
+        #expect(FileManager.default.isExecutableFile(atPath: originalRunScript.path))
+
+        let wrapper = try String(contentsOf: runScript, encoding: .utf8)
+        #expect(wrapper.contains(GuestBootstrapContract.workerResourceUsageFileName))
+        #expect(wrapper.contains(GuestBootstrapContract.workerResourceUsagePIDFileName))
+        #expect(wrapper.contains("exec \"${ORIGINAL_RUNNER}\" \"$@\""))
+        #expect(wrapper.contains("/usr/bin/top -l 1"))
+        #expect(wrapper.contains("/usr/bin/vm_stat"))
+
+        let syntaxCheck = Process()
+        syntaxCheck.executableURL = URL(fileURLWithPath: "/bin/bash")
+        syntaxCheck.arguments = ["-n", runScript.path]
+        try syntaxCheck.run()
+        syntaxCheck.waitUntilExit()
+        #expect(syntaxCheck.terminationStatus == 0)
     }
 
     @Test("prepareForJob writes correct jitconfig content")
@@ -282,6 +301,63 @@ struct SharedDirectoryManagerTests {
         let jobReadyURL = warmDir.appendingPathComponent(GuestBootstrapContract.jobReadyFileName)
         #expect(FileManager.default.fileExists(atPath: warmModeURL.path))
         #expect(FileManager.default.fileExists(atPath: jobReadyURL.path))
+    }
+
+    @Test("prepareWarmRunner creates a jobless guest handshake directory")
+    func prepareWarmRunnerCreatesJoblessDirectory() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        defer { TestFactories.cleanup(tempDir) }
+
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+        let warmDirectory = try manager.prepareWarmRunner()
+
+        #expect(warmDirectory.lastPathComponent == GuestBootstrapContract.warmRunnerJobDirectoryName)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: warmDirectory.appendingPathComponent(GuestBootstrapContract.warmModeFileName).path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: warmDirectory.appendingPathComponent(GuestBootstrapContract.jobReadyFileName).path
+            )
+        )
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: warmDirectory.appendingPathComponent(GuestBootstrapContract.runnerDirectoryName).path
+            )
+        )
+    }
+
+    @Test("prepareWarmRunner replaces guest metadata without owner read access")
+    func prepareWarmRunnerReplacesProtectedGuestMetadata() throws {
+        let tempDir = try TestFactories.makeTempDir()
+        let manager = SharedDirectoryManager(cacheDirectoryPath: tempDir.path)
+        let warmDirectory = manager.warmRunnerDirectory
+        let guestMetadata = warmDirectory.appendingPathComponent(".Trashes", isDirectory: true)
+        try FileManager.default.createDirectory(at: guestMetadata, withIntermediateDirectories: true)
+        try Data([0x01]).write(to: guestMetadata.appendingPathComponent("guest-item"))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o311],
+            ofItemAtPath: guestMetadata.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: guestMetadata.path
+            )
+            TestFactories.cleanup(tempDir)
+        }
+
+        let preparedDirectory = try manager.prepareWarmRunner()
+
+        #expect(preparedDirectory == warmDirectory)
+        #expect(!FileManager.default.fileExists(atPath: guestMetadata.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: preparedDirectory.appendingPathComponent(GuestBootstrapContract.warmModeFileName).path
+            )
+        )
     }
 
     private func makeRunnerPackage(at runnerDir: URL) throws {

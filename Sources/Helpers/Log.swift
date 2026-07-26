@@ -5,6 +5,7 @@ enum Log {
 
     static let app = Logger(subsystem: subsystem, category: "app")
     static let github = Logger(subsystem: subsystem, category: "github")
+    static let gitea = Logger(subsystem: subsystem, category: "gitea")
     static let jwt = Logger(subsystem: subsystem, category: "jwt")
     static let token = Logger(subsystem: subsystem, category: "token")
     static let queue = Logger(subsystem: subsystem, category: "queue")
